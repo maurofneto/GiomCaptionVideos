@@ -27,7 +27,7 @@ public class ResumoVideoRepository
     public async Task UpdateVideoAsync(Core.Models.Video video, SqlConnection connection)
     {
         using (SqlCommand command = new SqlCommand(
-            "UPDATE Video SET PlaylistId = @PlaylistId, ChannelId = @ChannelId, ChannelTitle = @ChannelTitle, Title = @Title, Description = @Description, Length = @Length, PrivacyStatus = @PrivacyStatus, UploadedAt = @UploadedAt " +
+            "UPDATE Video SET PlaylistId = @PlaylistId, ChannelId = @ChannelId, ChannelTitle = @ChannelTitle, Title = @Title, Description = @Description, Length = @Length, PrivacyStatus = @PrivacyStatus, UploadedAt = @UploadedAt, ProcessedAt = GETDATE() " +
             "WHERE Id = @Id", connection))
         {
             command.Parameters.Clear();
