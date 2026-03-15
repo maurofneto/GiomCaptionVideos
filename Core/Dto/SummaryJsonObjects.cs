@@ -5,12 +5,21 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ConsoleApp1.Dto
+namespace Core.Dto
 {
     public class Rollup
     {
         public Children children { get; set; }
-        public string summary { get; set; }
+        public Summary summary { get; set; }
+    }
+
+    public class Summary
+    {
+        public string type { get; set; }
+        public string content { get; set; }
+        public string before { get; set; }
+        public string keyword { get; set; }
+        public string after { get; set; }
     }
 
     public class Children : Dictionary<string, string>
@@ -20,7 +29,7 @@ namespace ConsoleApp1.Dto
 
     public class PageProps
     {
-        public Summary summary { get; set; }
+        public SummaryParts summary { get; set; }
         public string youtubeUrl { get; set; }
     }
 
@@ -46,7 +55,7 @@ namespace ConsoleApp1.Dto
         public Query query { get; set; }
     }
 
-    public class Summary
+    public class SummaryParts
     {
         public Rollups rollups { get; set; }
         public string title { get; set; }

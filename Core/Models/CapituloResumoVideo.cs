@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ConsoleApp1.Models
+namespace Core.Models
 {
-    internal class CapituloResumoVideo
+    public class CapituloResumoVideo
     {
         public int Id { get; set; }
         public int ResumoVideoId { get; set; }
