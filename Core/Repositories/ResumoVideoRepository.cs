@@ -26,42 +26,109 @@ public class ResumoVideoRepository
 
     public async Task UpdateVideoAsync(Core.Models.Video video, SqlConnection connection)
     {
+        // Update Video
         using (SqlCommand command = new SqlCommand(
             "UPDATE Video SET PlaylistId = @PlaylistId, ChannelId = @ChannelId, ChannelTitle = @ChannelTitle, Title = @Title, Description = @Description, Length = @Length, PrivacyStatus = @PrivacyStatus, UploadedAt = @UploadedAt, ProcessedAt = GETDATE() " +
             "WHERE Id = @Id", connection))
         {
             command.Parameters.Clear();
             command.Parameters.AddWithValue("@Id", video.Id);
-            command.Parameters.AddWithValue("@PlaylistId", video.PlaylistId);
-            command.Parameters.AddWithValue("@ChannelId", video.ChannelId);
-            command.Parameters.AddWithValue("@ChannelTitle", video.ChannelTitle);
-            command.Parameters.AddWithValue("@Title", video.Title);
-            command.Parameters.AddWithValue("@Description", video.Description);
-            command.Parameters.AddWithValue("@Length", video.Length);
-            command.Parameters.AddWithValue("@PrivacyStatus", video.PrivacyStatus);
+            command.Parameters.AddWithValue("@PlaylistId", (object?)video.PlaylistId ?? DBNull.Value);
+            command.Parameters.AddWithValue("@ChannelId", (object?)video.ChannelId ?? DBNull.Value);
+            command.Parameters.AddWithValue("@ChannelTitle", (object?)video.ChannelTitle ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Title", (object?)video.Title ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Description", (object?)video.Description ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Length", (object?)video.Length ?? DBNull.Value);
+            command.Parameters.AddWithValue("@PrivacyStatus", (object?)video.PrivacyStatus ?? DBNull.Value);
             command.Parameters.AddWithValue("@UploadedAt", video.UploadedAt);
-            command.ExecuteNonQuery();
+            await command.ExecuteNonQueryAsync();
         }
 
-        using (SqlCommand command = new SqlCommand(
-            "UPDATE LegendaVideo SET Descricao = @Descricao, Formato = @Formato " +
-            "WHERE VideoId = @VideoId", connection))
+        // Upsert LegendaVideo using MERGE
+        if (video.Legenda != null)
         {
-            command.Parameters.Clear();
-            command.Parameters.AddWithValue("@Descricao", video.Legenda?.Descricao ?? "");
-            command.Parameters.AddWithValue("@Formato", video.Legenda?.Formato ?? "");
-            command.Parameters.AddWithValue("@VideoId", video.Id);
-            command.ExecuteNonQuery();
+            using (SqlCommand cmd = new SqlCommand(
+                @"MERGE LegendaVideo AS target
+                  USING (VALUES (@VideoId, @Descricao, @Formato)) AS source (VideoId, Descricao, Formato)
+                  ON target.VideoId = source.VideoId
+                  WHEN MATCHED THEN
+                      UPDATE SET Descricao = source.Descricao, Formato = source.Formato
+                  WHEN NOT MATCHED THEN
+                      INSERT (Descricao, Formato, VideoId)
+                      VALUES (source.Descricao, source.Formato, source.VideoId)
+                  OUTPUT INSERTED.Id;", connection))
+            {
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("@VideoId", video.Id);
+                cmd.Parameters.AddWithValue("@Descricao", (object?)video.Legenda.Descricao ?? "");
+                cmd.Parameters.AddWithValue("@Formato", (object?)video.Legenda.Formato ?? "");
+                var legendaIdObj = await cmd.ExecuteScalarAsync();
+                if (legendaIdObj != null && legendaIdObj != DBNull.Value)
+                {
+                    video.Legenda.Id = Convert.ToInt32(legendaIdObj);
+                    video.Legenda.VideoId = video.Id;
+                }
+            }
         }
 
-        using (SqlCommand command = new SqlCommand(
-            "UPDATE ResumoVideo SET Descricao = @Descricao " +
-            "WHERE VideoId = @VideoId", connection))
+        // Upsert ResumoVideo using MERGE
+        if (video.Resumo != null)
         {
-            command.Parameters.Clear();
-            command.Parameters.AddWithValue("@Descricao", video.Resumo?.Descricao ?? "");
-            command.Parameters.AddWithValue("@VideoId", video.Id);
-            command.ExecuteNonQuery();
+            int resumoId = 0;
+            using (SqlCommand cmd = new SqlCommand(
+                @"MERGE ResumoVideo AS target
+                  USING (VALUES (@VideoId, @Descricao)) AS source (VideoId, Descricao)
+                  ON target.VideoId = source.VideoId
+                  WHEN MATCHED THEN
+                      UPDATE SET Descricao = source.Descricao
+                  WHEN NOT MATCHED THEN
+                      INSERT (Descricao, VideoId)
+                      VALUES (source.Descricao, source.VideoId)
+                  OUTPUT INSERTED.Id;", connection))
+            {
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("@VideoId", video.Id);
+                cmd.Parameters.AddWithValue("@Descricao", (object?)video.Resumo.Descricao ?? "");
+                var resumoIdObj = await cmd.ExecuteScalarAsync();
+                if (resumoIdObj != null && resumoIdObj != DBNull.Value)
+                {
+                    resumoId = Convert.ToInt32(resumoIdObj);
+                    video.Resumo.Id = resumoId;
+                    video.Resumo.VideoId = video.Id;
+                }
+            }
+
+            // Replace chapters: delete existing then insert provided ones
+            if (resumoId > 0)
+            {
+                using (SqlCommand delCap = new SqlCommand("DELETE FROM CapituloResumoVideo WHERE ResumoVideoId = @ResumoVideoId", connection))
+                {
+                    delCap.Parameters.Clear();
+                    delCap.Parameters.AddWithValue("@ResumoVideoId", resumoId);
+                    await delCap.ExecuteNonQueryAsync();
+                }
+
+                if (video.Resumo.Capitulos != null)
+                {
+                    using (SqlCommand insertCap = new SqlCommand(
+                        "INSERT INTO CapituloResumoVideo (Inicio, Resumo, ResumoVideoId) OUTPUT INSERTED.Id VALUES (@Inicio, @Resumo, @ResumoVideoId)", connection))
+                    {
+                        foreach (var capitulo in video.Resumo.Capitulos)
+                        {
+                            capitulo.ResumoVideoId = resumoId;
+                            insertCap.Parameters.Clear();
+                            insertCap.Parameters.AddWithValue("@Inicio", capitulo.Inicio);
+                            insertCap.Parameters.AddWithValue("@Resumo", (object?)capitulo.Resumo ?? "");
+                            insertCap.Parameters.AddWithValue("@ResumoVideoId", capitulo.ResumoVideoId);
+                            var capIdObj = await insertCap.ExecuteScalarAsync();
+                            if (capIdObj != null && capIdObj != DBNull.Value)
+                            {
+                                capitulo.Id = Convert.ToInt32(capIdObj);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

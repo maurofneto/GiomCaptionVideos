@@ -18,7 +18,7 @@ public class ProgressoRepository
                 ?? throw new InvalidOperationException("ConnectionStrings:Default não configurado"); ;
     }
 
-    public async Task<string> GetLastPageTokenAsync(string channelKey, string playlistId)
+    public async Task<string?> GetLastPageTokenAsync(string channelKey, string playlistId)
     {
         using var conn = new SqlConnection(ConnectionString);
         await conn.OpenAsync();
@@ -33,7 +33,7 @@ public class ProgressoRepository
         cmd.Parameters.AddWithValue("@PlaylistId", playlistId);
 
         var result = await cmd.ExecuteScalarAsync();
-        return result != DBNull.Value ? result.ToString() : null;
+        return result != DBNull.Value && result != null ? result.ToString() : null;
     }
 
     public async Task<DateTime?> GetLastProcessedDateAsync(string channelKey, string playlistId)
@@ -51,7 +51,7 @@ public class ProgressoRepository
         cmd.Parameters.AddWithValue("@PlaylistId", playlistId);
 
         var result = await cmd.ExecuteScalarAsync();
-        return result != DBNull.Value ? (DateTime?)result : null;
+        return result != DBNull.Value && result != null ? (DateTime?)result : null;
     }
 
     public async Task SaveProgressoAsync(string channelKey, string playlistId, string token, DateTime? maxProcessedDate)
