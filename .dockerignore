@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.git/
+**/logs/
+**/*.user
+Core/
+ConsoleApp1/
+ConsoleApp2/
+supabase/

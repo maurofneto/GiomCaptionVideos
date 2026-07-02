@@ -215,13 +215,38 @@ public static class ServiceCollectionExtensions
             "https://www.googleapis.com/auth/cloud-translation"
         ];
 
-        var credential = await Google.Apis.Auth.OAuth2.GoogleWebAuthorizationBroker.AuthorizeAsync(
-            new Google.Apis.Auth.OAuth2.ClientSecrets { ClientId = clientId, ClientSecret = clientSecret },
-            scopes,
-            config["Google:User"] ?? "user",
-            CancellationToken.None);
+        var clientSecrets = new Google.Apis.Auth.OAuth2.ClientSecrets { ClientId = clientId, ClientSecret = clientSecret };
+        var user = config["Google:User"] ?? "user";
 
-        //await GoogleWebAuthorizationBroker.ReauthorizeAsync(credential, CancellationToken.None);
+        // Modo não-interativo (produção/cloud) — reusa um refresh token já emitido, sem abrir
+        // navegador. Necessário porque os workers rodam headless (ex: ECS Fargate).
+        var refreshToken = config["Google:RefreshToken"];
+        if (!string.IsNullOrWhiteSpace(refreshToken))
+        {
+            var flow = new Google.Apis.Auth.OAuth2.Flows.GoogleAuthorizationCodeFlow(
+                new Google.Apis.Auth.OAuth2.Flows.GoogleAuthorizationCodeFlow.Initializer
+                {
+                    ClientSecrets = clientSecrets,
+                    Scopes = scopes
+                });
+
+            var token = new Google.Apis.Auth.OAuth2.Responses.TokenResponse { RefreshToken = refreshToken };
+            return new Google.Apis.Auth.OAuth2.UserCredential(flow, user, token);
+        }
+
+        // Modo interativo (dev local) — abre navegador na primeira vez, cacheia o refresh token
+        // num arquivo isolado por aplicação (Google:ApplicationName). Isolado porque Instituto e
+        // Ministério usam Client Id/Secret diferentes — compartilhar o cache faz um sobrescrever
+        // o token do outro.
+        var appName   = config["Google:ApplicationName"] ?? "GiomWorker";
+        var dataStore = new Google.Apis.Util.Store.FileDataStore($"Google.Apis.Auth.{appName}", true);
+
+        var credential = await Google.Apis.Auth.OAuth2.GoogleWebAuthorizationBroker.AuthorizeAsync(
+            clientSecrets,
+            scopes,
+            user,
+            CancellationToken.None,
+            dataStore);
 
         return credential;
     }

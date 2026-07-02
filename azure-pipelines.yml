@@ -1,0 +1,43 @@
+trigger:
+  branches:
+    include:
+      - master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 798229612288.dkr.ecr.us-east-1.amazonaws.com
+  # AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY são variáveis secretas do pipeline
+  # (Pipelines > Edit > Variables), NÃO ficam neste arquivo. User: giom-ci-deploy,
+  # permissão só de push nos repositórios giom-instituto/giom-ministerio.
+
+steps:
+  - script: |
+      command -v aws >/dev/null 2>&1 || pip install --user awscli
+      echo "##vso[task.prependpath]$HOME/.local/bin"
+    displayName: 'Garantir AWS CLI disponível'
+
+  - script: |
+      aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+    displayName: 'Login no ECR'
+    env:
+      AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+      AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+
+  - script: |
+      docker build -f src/GiomInstituto/Dockerfile \
+        -t $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId) \
+        -t $(ECR_REGISTRY)/giom-instituto:latest .
+      docker push $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId)
+      docker push $(ECR_REGISTRY)/giom-instituto:latest
+    displayName: 'Build e push — GiomInstituto'
+
+  - script: |
+      docker build -f src/GiomMinisterio/Dockerfile \
+        -t $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId) \
+        -t $(ECR_REGISTRY)/giom-ministerio:latest .
+      docker push $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId)
+      docker push $(ECR_REGISTRY)/giom-ministerio:latest
+    displayName: 'Build e push — GiomMinisterio'
