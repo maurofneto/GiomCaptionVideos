@@ -1,5 +1,6 @@
 using Domain.Entities;
 using Domain.Interfaces;
+using Infrastructure.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -41,11 +42,12 @@ public class SupabaseVideoRepository : IVideoRepository
         NullValueHandling = NullValueHandling.Ignore
     };
 
-    public SupabaseVideoRepository(IOptions<SupabaseOptions> options, ILogger<SupabaseVideoRepository> logger)
+    public SupabaseVideoRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory, ILogger<SupabaseVideoRepository> logger)
     {
         _options = options.Value;
         _logger = logger;
-        _http = new HttpClient { BaseAddress = new Uri(_options.Url) };
+        _http = httpClientFactory.CreateClient("supabase");
+        _http.BaseAddress = new Uri(_options.Url);
         // Worker usa SecretKey para contornar RLS e escrever
         // Ambos os headers devem usar SecretKey — o PostgREST determina o role pelo apikey
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.SecretKey);
@@ -62,17 +64,12 @@ public class SupabaseVideoRepository : IVideoRepository
         return list?.FirstOrDefault()?.ToDomain();
     }
 
-    public async Task SaveAsync(Video video, CancellationToken ct = default)
+    public async Task UpsertAsync(Video video, CancellationToken ct = default)
     {
-        await UpsertAsync("/rest/v1/video?on_conflict=id", VideoDto.From(video), ct);
-        if (video.Transcricao != null) await UpsertAsync("/rest/v1/transcricao?on_conflict=video_id", TranscricaoDto.From(video.Transcricao), ct);
-        if (video.Resumo != null) await UpsertAsync("/rest/v1/resumo?on_conflict=video_id", ResumoDto.From(video.Resumo), ct);
+        await PostgRestUpsertAsync("/rest/v1/video?on_conflict=id", VideoDto.From(video), ct);
+        if (video.Transcricao != null) await PostgRestUpsertAsync("/rest/v1/transcricao?on_conflict=video_id", TranscricaoDto.From(video.Transcricao), ct);
+        if (video.Resumo != null) await PostgRestUpsertAsync("/rest/v1/resumo?on_conflict=video_id", ResumoDto.From(video.Resumo), ct);
         if (video.Categorias.Count > 0) await UpsertCategoriasAsync(video.Categorias, ct);
-    }
-
-    public async Task UpdateAsync(Video video, CancellationToken ct = default)
-    {
-        await SaveAsync(video, ct); // Supabase upsert handles both
     }
 
     private async Task UpsertCategoriasAsync(IList<CategoriaTeologica> categorias, CancellationToken ct)
@@ -101,7 +98,7 @@ public class SupabaseVideoRepository : IVideoRepository
         }
     }
 
-    private async Task UpsertAsync(string path, object dto, CancellationToken ct)
+    private async Task PostgRestUpsertAsync(string path, object dto, CancellationToken ct)
     {
         var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
         var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
@@ -156,7 +153,15 @@ public class SupabaseVideoRepository : IVideoRepository
     private record TranscricaoDto(string video_id, string conteudo, string formato, string origem, DateTime gerado_em)
     {
         public static TranscricaoDto From(Transcricao t) => new(t.VideoId, t.Conteudo, t.Formato, t.Origem, t.GeradoEm);
-        public Transcricao ToDomain() => new() { VideoId = video_id, Conteudo = conteudo, Formato = formato, Origem = origem, GeradoEm = gerado_em };
+        public Transcricao ToDomain() => new()
+        {
+            VideoId       = video_id,
+            Conteudo      = conteudo,
+            ConteudoLimpo = TranscricaoHelper.StripTimestamps(conteudo, formato),
+            Formato       = formato,
+            Origem        = origem,
+            GeradoEm      = gerado_em
+        };
     }
 
     private record ResumoDto(string video_id, string descricao, string origem, DateTime gerado_em)

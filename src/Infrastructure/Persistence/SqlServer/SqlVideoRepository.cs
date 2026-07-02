@@ -39,7 +39,7 @@ public class SqlVideoRepository : IVideoRepository
         return MapVideo(reader, videoId);
     }
 
-    public async Task SaveAsync(Video video, CancellationToken ct = default)
+    public async Task UpsertAsync(Video video, CancellationToken ct = default)
     {
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
@@ -47,28 +47,7 @@ public class SqlVideoRepository : IVideoRepository
 
         try
         {
-            await InsertVideoAsync(video, conn, tx, ct);
-            if (video.Transcricao != null) await InsertTranscricaoAsync(video.Transcricao, conn, tx, ct);
-            if (video.Resumo != null) await InsertResumoAsync(video.Resumo, conn, tx, ct);
-            foreach (var cat in video.Categorias) await InsertCategoriaAsync(cat, conn, tx, ct);
-            await tx.CommitAsync(ct);
-        }
-        catch
-        {
-            await tx.RollbackAsync(ct);
-            throw;
-        }
-    }
-
-    public async Task UpdateAsync(Video video, CancellationToken ct = default)
-    {
-        await using var conn = new SqlConnection(_connectionString);
-        await conn.OpenAsync(ct);
-        await using var tx = conn.BeginTransaction();
-
-        try
-        {
-            await UpdateVideoAsync(video, conn, tx, ct);
+            await UpsertVideoAsync(video, conn, tx, ct);
             if (video.Transcricao != null) await UpsertTranscricaoAsync(video.Transcricao, conn, tx, ct);
             if (video.Resumo != null) await UpsertResumoAsync(video.Resumo, conn, tx, ct);
             foreach (var cat in video.Categorias) await UpsertCategoriaAsync(cat, conn, tx, ct);
@@ -81,31 +60,21 @@ public class SqlVideoRepository : IVideoRepository
         }
     }
 
-    private static async Task InsertVideoAsync(Video v, SqlConnection conn, SqlTransaction tx, CancellationToken ct)
+    private static async Task UpsertVideoAsync(Video v, SqlConnection conn, SqlTransaction tx, CancellationToken ct)
     {
         await using var cmd = new SqlCommand(
-            "INSERT INTO Video (Id, PlaylistId, ChannelId, ChannelTitle, Title, Description, Length, PrivacyStatus, UploadedAt) " +
-            "VALUES (@Id, @PlaylistId, @ChannelId, @ChannelTitle, @Title, @Description, @Length, @PrivacyStatus, @UploadedAt)",
-            conn, tx);
-
-        cmd.Parameters.AddWithValue("@Id", v.Id);
-        cmd.Parameters.AddWithValue("@PlaylistId", (object?)v.PlaylistId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@ChannelId", (object?)v.ChannelId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@ChannelTitle", (object?)v.ChannelTitle ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@Title", (object?)v.Title ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@Description", (object?)v.Description ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@Length", (object?)v.Length ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@PrivacyStatus", (object?)v.PrivacyStatus ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@UploadedAt", (object?)v.UploadedAt ?? DBNull.Value);
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task UpdateVideoAsync(Video v, SqlConnection conn, SqlTransaction tx, CancellationToken ct)
-    {
-        await using var cmd = new SqlCommand(
-            "UPDATE Video SET PlaylistId=@PlaylistId, ChannelId=@ChannelId, ChannelTitle=@ChannelTitle, " +
-            "Title=@Title, Description=@Description, Length=@Length, PrivacyStatus=@PrivacyStatus, " +
-            "UploadedAt=@UploadedAt, ProcessedAt=GETDATE() WHERE Id=@Id",
+            @"MERGE Video AS target
+              USING (VALUES (@Id,@PlaylistId,@ChannelId,@ChannelTitle,@Title,@Description,@Length,@PrivacyStatus,@UploadedAt))
+                AS source (Id,PlaylistId,ChannelId,ChannelTitle,Title,Description,Length,PrivacyStatus,UploadedAt)
+              ON target.Id = source.Id
+              WHEN MATCHED THEN
+                UPDATE SET PlaylistId=source.PlaylistId, ChannelId=source.ChannelId, ChannelTitle=source.ChannelTitle,
+                           Title=source.Title, Description=source.Description, Length=source.Length,
+                           PrivacyStatus=source.PrivacyStatus, UploadedAt=source.UploadedAt, ProcessedAt=GETDATE()
+              WHEN NOT MATCHED THEN
+                INSERT (Id,PlaylistId,ChannelId,ChannelTitle,Title,Description,Length,PrivacyStatus,UploadedAt)
+                VALUES (source.Id,source.PlaylistId,source.ChannelId,source.ChannelTitle,source.Title,
+                        source.Description,source.Length,source.PrivacyStatus,source.UploadedAt);",
             conn, tx);
 
         cmd.Parameters.AddWithValue("@Id", v.Id);

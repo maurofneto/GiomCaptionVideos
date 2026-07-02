@@ -77,13 +77,15 @@ public class YouTubeTranscriptService : ICaptionService
         _logger.LogInformation("Transcrição obtida para {VideoId} — idioma: {Lang}, automática: {Auto}, {Chars} chars",
             video.Id, track.LanguageCode, track.IsAuto, texto.Length);
 
+        // ParseVtt já entrega texto limpo — ConteudoLimpo == Conteudo para este serviço
         return new Transcricao
         {
-            VideoId  = video.Id,
-            Conteudo = texto,
-            Formato  = "vtt",
-            Origem   = "YouTubeTranscript",
-            GeradoEm = DateTime.UtcNow
+            VideoId       = video.Id,
+            Conteudo      = texto,
+            ConteudoLimpo = texto,
+            Formato       = "vtt",
+            Origem        = "YouTubeTranscript",
+            GeradoEm      = DateTime.UtcNow
         };
     }
 

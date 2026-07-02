@@ -1,6 +1,7 @@
 using Application.Handlers;
 using Domain.ValueObjects;
 using Infrastructure.Extensions;
+using Infrastructure.Secrets;
 using Serilog;
 
 var host = Host.CreateDefaultBuilder(args)
@@ -9,6 +10,8 @@ var host = Host.CreateDefaultBuilder(args)
         config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
         config.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production"}.json", optional: true);
         config.AddEnvironmentVariables();
+        // Pluggable secrets — troque "Configuration" por "AwsParameterStore" ou "AzureAppConfiguration" em produção
+        config.AddSecretsProvider(config.Build());
     })
     .UseSerilog((context, _, configuration) =>
     {
@@ -22,6 +25,8 @@ var host = Host.CreateDefaultBuilder(args)
     {
         var config = ctx.Configuration;
 
+        services.AddPromptLoader();
+        services.AddInfrastructureHttpClients();
         services.AddYouTubeServices(config);
         services.AddPersistence(config);
         services.AddTranscriptionService(config);  // YouTubeCaption por padrão

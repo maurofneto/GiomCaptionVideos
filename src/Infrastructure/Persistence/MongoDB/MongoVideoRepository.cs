@@ -31,9 +31,6 @@ public class MongoVideoRepository : IVideoRepository
     public Task<Video?> GetByIdAsync(string videoId, CancellationToken ct = default)
         => throw new NotImplementedException();
 
-    public Task SaveAsync(Video video, CancellationToken ct = default)
-        => throw new NotImplementedException();
-
-    public Task UpdateAsync(Video video, CancellationToken ct = default)
+    public Task UpsertAsync(Video video, CancellationToken ct = default)
         => throw new NotImplementedException();
 }

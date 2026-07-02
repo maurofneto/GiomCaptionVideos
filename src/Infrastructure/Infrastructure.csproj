@@ -7,6 +7,8 @@
 
   <ItemGroup>
     <PackageReference Include="Anthropic.SDK" Version="5.10.0" />
+    <PackageReference Include="AWSSDK.SimpleSystemsManagement" Version="4.0.100.1" />
+    <PackageReference Include="Azure.Data.AppConfiguration" Version="1.10.0" />
     <PackageReference Include="Google.Apis.Auth" Version="1.75.0" />
     <PackageReference Include="Google.Apis.YouTube.v3" Version="1.75.0.4176" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
@@ -17,6 +19,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Polly" Version="8.7.0" />
     <PackageReference Include="Polly.Extensions" Version="8.7.0" />
+    <PackageReference Include="VaultSharp" Version="1.17.5.1" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -3,6 +3,7 @@ using Anthropic.SDK.Messaging;
 using Domain.Entities;
 using Domain.Enums;
 using Domain.Interfaces;
+using Infrastructure.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -16,59 +17,44 @@ public class ClaudeCategorizacaoOptions
 }
 
 /// <summary>
-/// Classifica o resumo em até 3 áreas da Teologia Sistemática usando Claude.
-/// Retorna uma lista ordenada por peso desc — a primeira é a área principal.
+/// Classifica o resumo em até 3 áreas da Teologia Sistemática usando Claude Haiku.
+/// System prompt carregado de Prompts/categorizacao.md e cacheado via PromptCaching.
 /// </summary>
 public class ClaudeCategorizacaoService : ICategorizacaoService
 {
     private readonly AnthropicClient _client;
     private readonly ClaudeCategorizacaoOptions _options;
     private readonly ILogger<ClaudeCategorizacaoService> _logger;
+    private readonly string _systemPrompt;
 
-    private static readonly string Prompt =
-        """
-        Classifique o resumo da aula teológica abaixo nas áreas da Teologia Sistemática relevantes.
-
-        Áreas disponíveis (use o nome exato):
-        Prolegomenos, TeologiaPropria, Angelologia, AntropologiaTeologica, Cristologia,
-        Pneumatologia, Soteriologia, Eclesiologia, Sacramentologia, Escatologia, EticaCrista, Missiologia
-
-        Retorne entre 1 e 3 áreas que melhor descrevem o conteúdo.
-        Para cada área, atribua um peso de 0.01 a 1.00 indicando sua relevância para esta aula.
-        A soma dos pesos não precisa ser 1 — cada peso é independente.
-
-        Responda SOMENTE em JSON válido, sem markdown:
-        [
-          {"area": "<nome exato>", "subcategoria": "<tema específico>", "peso": <0.01 a 1.00>},
-          ...
-        ]
-
-        RESUMO:
-        {resumo}
-        """;
-
-    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, ILogger<ClaudeCategorizacaoService> logger)
+    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger)
     {
         _options = options.Value;
         _logger = logger;
-        _client = new AnthropicClient(_options.ApiKey);
+        _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
+        _systemPrompt = prompts.Load("categorizacao.md");
     }
 
     public async Task<IReadOnlyList<CategoriaTeologica>> ClassificarAsync(Video video, CancellationToken ct = default)
     {
-        var prompt = Prompt.Replace("{resumo}", video.Resumo?.Descricao ?? string.Empty);
+        var resumo = video.Resumo?.Descricao ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(resumo)) return [];
 
         try
         {
             var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
             {
-                Model = _options.Model,
-                MaxTokens = 512,
-                Messages = [new Message { Role = RoleType.User, Content = [new TextContent { Text = prompt }] }]
+                Model         = _options.Model,
+                MaxTokens     = 512,
+                PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
+                System        = [new SystemMessage(_systemPrompt)],
+                Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = resumo }] }]
             }, ct);
 
             var json = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;
             if (string.IsNullOrWhiteSpace(json)) return [];
+
+            _logger.LogInformation("Categorização gerada para {VideoId}", video.Id);
 
             json = json.Replace("\n", "").Replace("\r", "").Replace("```json", "").Replace("```", "").Trim();
 
@@ -88,15 +74,14 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
 
                 categorias.Add(new CategoriaTeologica
                 {
-                    VideoId    = video.Id,
-                    Area       = area,
-                    Subcategoria = item.subcategoria ?? string.Empty,
-                    Peso       = (decimal)Math.Clamp(item.peso, 0.01, 1.0),
+                    VideoId        = video.Id,
+                    Area           = area,
+                    Subcategoria   = item.subcategoria ?? string.Empty,
+                    Peso           = (decimal)Math.Clamp(item.peso, 0.01, 1.0),
                     ClassificadoEm = DateTime.UtcNow
                 });
             }
 
-            // Ordena por peso desc — a principal fica em primeiro
             return categorias.OrderByDescending(c => c.Peso).ToList();
         }
         catch (Exception ex)

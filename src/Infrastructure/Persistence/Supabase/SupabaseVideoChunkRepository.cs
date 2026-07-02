@@ -15,12 +15,13 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
 
     private const int BatchSize = 20;
 
-    public SupabaseVideoChunkRepository(IOptions<SupabaseOptions> options, ILogger<SupabaseVideoChunkRepository> logger)
+    public SupabaseVideoChunkRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory, ILogger<SupabaseVideoChunkRepository> logger)
     {
         _logger = logger;
 
         var sb = options.Value;
-        _http = new HttpClient { BaseAddress = new Uri(sb.Url) };
+        _http = httpClientFactory.CreateClient("supabase");
+        _http.BaseAddress = new Uri(sb.Url);
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sb.SecretKey);
         _http.DefaultRequestHeaders.Add("apikey", sb.SecretKey);
         _http.Timeout = TimeSpan.FromMinutes(5);

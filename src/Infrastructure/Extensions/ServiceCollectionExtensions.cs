@@ -3,6 +3,7 @@ using Domain.Interfaces;
 using Google.Apis.Auth.OAuth2;
 using Infrastructure.Categorization;
 using Infrastructure.Embedding;
+using Infrastructure.Helpers;
 using Infrastructure.Persistence.MongoDB;
 using Infrastructure.Persistence.SqlServer;
 using Infrastructure.Persistence.Supabase;
@@ -11,15 +12,43 @@ using Infrastructure.Transcription;
 using Infrastructure.YouTube;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http.Resilience;
 
 namespace Infrastructure.Extensions;
 
 public static class ServiceCollectionExtensions
 {
+    public static IServiceCollection AddPromptLoader(this IServiceCollection services)
+    {
+        services.AddSingleton<PromptLoader>();
+        return services;
+    }
+
     /// <summary>
-    /// Registra IVideoRepository e IProgressoRepository conforme Persistence:Provider no appsettings.
-    /// Valores aceitos: SqlServer (padrão), Supabase, MongoDB
+    /// Registra named HttpClients com Polly resilience para todos os serviços de infraestrutura.
+    /// Deve ser chamado antes de AddPersistence, AddSummaryService, AddEmbeddingService.
     /// </summary>
+    public static IServiceCollection AddInfrastructureHttpClients(this IServiceCollection services)
+    {
+        // Supabase PostgREST — base URL e auth configurados per-service (variam por ambiente)
+        services.AddHttpClient("supabase").AddStandardResilienceHandler();
+
+        // Supabase Edge Functions
+        services.AddHttpClient("supabase-functions").AddStandardResilienceHandler();
+
+        // OpenAI Embeddings API
+        services.AddHttpClient("openai", client =>
+        {
+            client.BaseAddress = new Uri("https://api.openai.com/");
+            client.Timeout = TimeSpan.FromMinutes(5);
+        }).AddStandardResilienceHandler();
+
+        // Anthropic (SDK gerencia BaseAddress e auth; factory provê pooling de sockets)
+        services.AddHttpClient("anthropic").AddStandardResilienceHandler();
+
+        return services;
+    }
+
     public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration config)
     {
         var provider = config["Persistence:Provider"] ?? "SqlServer";
@@ -69,6 +98,7 @@ public static class ServiceCollectionExtensions
                 break;
 
             case "YouTubeCaption":
+                services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
                 services.AddSingleton<ICaptionService, YouTubeCaptionService>();
                 break;
 

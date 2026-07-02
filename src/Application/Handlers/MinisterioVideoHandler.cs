@@ -33,7 +33,8 @@ public class MinisterioVideoHandler(
         if (existing != null)
         {
             video.Transcricao = existing.Transcricao;
-            video.Resumo = existing.Resumo;
+            video.Resumo      = existing.Resumo;
+            video.Chunks      = existing.Chunks;
         }
 
         if (video.Transcricao == null && _options.ShouldGetCaption)
@@ -47,11 +48,7 @@ public class MinisterioVideoHandler(
         }
 
         video.ProcessedAt = DateTime.UtcNow;
-
-        if (existing == null)
-            await videoRepository.SaveAsync(video, ct);
-        else
-            await videoRepository.UpdateAsync(video, ct);
+        await videoRepository.UpsertAsync(video, ct);
 
         logger.LogInformation("Ministério — processado: {Title} ({Id})", video.Title, video.Id);
     }

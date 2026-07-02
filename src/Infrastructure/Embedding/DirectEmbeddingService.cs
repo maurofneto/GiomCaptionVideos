@@ -40,24 +40,24 @@ public class DirectEmbeddingService : IEmbeddingService
         IOptions<DirectEmbeddingOptions> options,
         IOptions<SupabaseOptions> supabaseOptions,
         IVideoChunkRepository chunkRepository,
+        IHttpClientFactory httpClientFactory,
         ILogger<DirectEmbeddingService> logger)
     {
         _options         = options.Value;
         _chunkRepository = chunkRepository;
         _logger          = logger;
 
-        _openAi = new HttpClient { BaseAddress = new Uri("https://api.openai.com/") };
+        _openAi = httpClientFactory.CreateClient("openai");
         _openAi.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _options.OpenAiApiKey);
-        _openAi.Timeout = TimeSpan.FromMinutes(5);
 
         // Apenas para chamar Edge Functions (buscar-similar) — não acessa tabelas diretamente
         var sb = supabaseOptions.Value;
-        _supabaseFunctions = new HttpClient { BaseAddress = new Uri(sb.Url) };
+        _supabaseFunctions = httpClientFactory.CreateClient("supabase-functions");
+        _supabaseFunctions.BaseAddress = new Uri(sb.Url);
         _supabaseFunctions.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", sb.SecretKey);
         _supabaseFunctions.DefaultRequestHeaders.Add("apikey", sb.SecretKey);
-        _supabaseFunctions.Timeout = TimeSpan.FromMinutes(2);
     }
 
     // =========================================================
@@ -80,8 +80,8 @@ public class DirectEmbeddingService : IEmbeddingService
 
         _logger.LogInformation("Iniciando indexação direta: {VideoId}", video.Id);
 
-        var conteudo = video.Transcricao.Conteudo;
-        _logger.LogInformation("{VideoId} — transcrição ({Chars} chars), primeiros 300: {Preview}",
+        var conteudo = video.Transcricao.ConteudoLimpo;
+        _logger.LogDebug("{VideoId} — conteúdo para embedding ({Chars} chars), primeiros 300: {Preview}",
             video.Id, conteudo.Length,
             conteudo.Length > 300 ? conteudo[..300] : conteudo);
 

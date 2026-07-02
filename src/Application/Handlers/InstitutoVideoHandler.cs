@@ -66,10 +66,7 @@ public class InstitutoVideoHandler(
         video.ProcessedAt = DateTime.UtcNow;
 
         // Persiste o vídeo antes de indexar — video_chunk tem FK para video
-        if (existing == null)
-            await videoRepository.SaveAsync(video, ct);
-        else
-            await videoRepository.UpdateAsync(video, ct);
+        await videoRepository.UpsertAsync(video, ct);
 
         // Indexa a transcrição completa em chunks — não o resumo.
         // Cada chunk (~600 tokens) recebe seu próprio embedding para RAG preciso.

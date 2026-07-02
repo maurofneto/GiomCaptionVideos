@@ -72,13 +72,15 @@ public class YtDlpCaptionService : ICaptionService
 
             _logger.LogInformation("Legenda obtida via yt-dlp: {VideoId} ({Chars} chars)", video.Id, texto.Length);
 
+            // ParseVtt já entrega texto limpo — ConteudoLimpo == Conteudo para este serviço
             return new Transcricao
             {
-                VideoId  = video.Id,
-                Conteudo = texto,
-                Formato  = "vtt",
-                Origem   = "YtDlpCaption",
-                GeradoEm = DateTime.UtcNow
+                VideoId       = video.Id,
+                Conteudo      = texto,
+                ConteudoLimpo = texto,
+                Formato       = "vtt",
+                Origem        = "YtDlpCaption",
+                GeradoEm      = DateTime.UtcNow
             };
         }
         finally
