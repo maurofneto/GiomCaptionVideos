@@ -37,18 +37,29 @@ public class MinisterioVideoHandler(
             video.Chunks      = existing.Chunks;
         }
 
-        if (video.Transcricao == null && _options.ShouldGetCaption)
+        try
         {
-            video.Transcricao = await captionService.GetCaptionAsync(video, ct);
-        }
+            if (video.Transcricao == null && _options.ShouldGetCaption)
+            {
+                video.Transcricao = await captionService.GetCaptionAsync(video, ct);
+            }
 
-        if (video.Resumo == null && _options.ShouldGenerateSummary && video.Transcricao != null)
+            if (video.Resumo == null && _options.ShouldGenerateSummary && video.Transcricao != null)
+            {
+                video.Resumo = await resumoService.GerarResumoAsync(video, ct);
+            }
+        }
+        catch (Exception ex)
         {
-            video.Resumo = await resumoService.GerarResumoAsync(video, ct);
+            // Salva o progresso obtido até aqui (ex: transcrição) mesmo se o resumo falhar —
+            // evita perder a legenda já baixada e refazer a chamada no próximo run.
+            logger.LogError(ex, "Ministério — falha ao processar {Title} ({Id}), salvando progresso parcial", video.Title, video.Id);
         }
-
-        video.ProcessedAt = DateTime.UtcNow;
-        await videoRepository.UpsertAsync(video, ct);
+        finally
+        {
+            video.ProcessedAt = DateTime.UtcNow;
+            await videoRepository.UpsertAsync(video, ct);
+        }
 
         logger.LogInformation("Ministério — processado: {Title} ({Id})", video.Title, video.Id);
     }

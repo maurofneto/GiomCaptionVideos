@@ -44,7 +44,14 @@ public static class ServiceCollectionExtensions
         }).AddStandardResilienceHandler();
 
         // Anthropic (SDK gerencia BaseAddress e auth; factory provê pooling de sockets)
-        services.AddHttpClient("anthropic").AddStandardResilienceHandler();
+        // Timeouts maiores que o padrão (10s/tentativa, 30s total) — transcrições longas
+        // fazem o Claude demorar mais para gerar o resumo completo.
+        services.AddHttpClient("anthropic").AddStandardResilienceHandler(options =>
+        {
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(200);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+        });
 
         return services;
     }

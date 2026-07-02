@@ -47,26 +47,37 @@ public class InstitutoVideoHandler(
         //    logger.LogInformation("Instituto — transcrição obtida: {Title}", video.Title);
         //}
 
-        if (video.Transcricao == null && _options.ShouldGetCaption)
+        try
         {
-            video.Transcricao = await captionService.GetCaptionAsync(video, ct);
-            logger.LogInformation("Instituto — legenda obtida: {Title}", video.Title);
-        }
+            if (video.Transcricao == null && _options.ShouldGetCaption)
+            {
+                video.Transcricao = await captionService.GetCaptionAsync(video, ct);
+                logger.LogInformation("Instituto — legenda obtida: {Title}", video.Title);
+            }
 
-        if (video.Resumo == null && _options.ShouldGenerateSummary && video.Transcricao != null)
+            if (video.Resumo == null && _options.ShouldGenerateSummary && video.Transcricao != null)
+            {
+                video.Resumo = await resumoService.GerarResumoAsync(video, ct);
+            }
+
+            if (video.Categorias.Count == 0 && _options.ShouldCategorize && video.Resumo != null)
+            {
+                video.Categorias = (IList<CategoriaTeologica>)await categorizacaoService.ClassificarAsync(video, ct);
+            }
+        }
+        catch (Exception ex)
         {
-            video.Resumo = await resumoService.GerarResumoAsync(video, ct);
+            // Salva o progresso obtido até aqui (ex: transcrição) mesmo se resumo/categorização falharem —
+            // evita perder a legenda já baixada e refazer a chamada no próximo run.
+            logger.LogError(ex, "Instituto — falha ao processar {Title} ({Id}), salvando progresso parcial", video.Title, video.Id);
         }
-
-        if (video.Categorias.Count == 0 && _options.ShouldCategorize && video.Resumo != null)
+        finally
         {
-            video.Categorias = (IList<CategoriaTeologica>)await categorizacaoService.ClassificarAsync(video, ct);
+            video.ProcessedAt = DateTime.UtcNow;
+
+            // Persiste o vídeo antes de indexar — video_chunk tem FK para video
+            await videoRepository.UpsertAsync(video, ct);
         }
-
-        video.ProcessedAt = DateTime.UtcNow;
-
-        // Persiste o vídeo antes de indexar — video_chunk tem FK para video
-        await videoRepository.UpsertAsync(video, ct);
 
         // Indexa a transcrição completa em chunks — não o resumo.
         // Cada chunk (~600 tokens) recebe seu próprio embedding para RAG preciso.
