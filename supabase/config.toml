@@ -1,0 +1,31 @@
+# Configuração do Supabase CLI
+# Documentação: https://supabase.com/docs/guides/cli/config
+
+[api]
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+port = 54323
+
+[inbucket]
+port = 54324
+
+[storage]
+file_size_limit = "50MiB"
+
+[auth]
+site_url = "http://localhost:3000"
+jwt_expiry = 3600
+
+[functions.indexar-video]
+verify_jwt = false   # worker C# usa service_role_key no header
+
+[functions.buscar-similar]
+verify_jwt = false   # bot Telegram/WhatsApp chama sem JWT
