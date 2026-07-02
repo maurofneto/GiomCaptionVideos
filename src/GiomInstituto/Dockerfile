@@ -15,7 +15,7 @@ COPY src/Infrastructure/ src/Infrastructure/
 
 RUN dotnet publish "src/GiomInstituto/GiomInstituto.csproj" -c Release -o /app/publish --no-restore
 
-FROM mcr.microsoft.com/dotnet/runtime:9.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "GiomInstituto.dll"]
