@@ -27,7 +27,7 @@ steps:
       AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
   - script: |
-      docker build -f src/GiomInstituto/Dockerfile \
+      docker build -f src/Giom.VideoManager.Instituto.Worker/Dockerfile \
         -t $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-instituto:latest .
       docker push $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId)
@@ -35,7 +35,7 @@ steps:
     displayName: 'Build e push — GiomInstituto'
 
   - script: |
-      docker build -f src/GiomMinisterio/Dockerfile \
+      docker build -f src/Giom.VideoManager.Ministerio.Worker/Dockerfile \
         -t $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-ministerio:latest .
       docker push $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId)
