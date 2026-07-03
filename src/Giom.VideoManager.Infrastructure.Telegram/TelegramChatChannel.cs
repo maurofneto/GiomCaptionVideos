@@ -118,6 +118,18 @@ public class TelegramChatChannel : IChatChannel
         return true;
     }
 
+    public async Task IndicarProcessandoAsync(string chatId, CancellationToken ct = default)
+    {
+        try
+        {
+            await _bot.SendChatAction(long.Parse(chatId), ChatAction.Typing, cancellationToken: ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Não foi possível enviar indicador de digitação para {ChatId}", chatId);
+        }
+    }
+
     public async Task ResponderAsync(string chatId, string texto, CancellationToken ct = default)
     {
         var id = long.Parse(chatId);

@@ -26,19 +26,49 @@ public class ChatBotProcessor(
 
         await foreach (var mensagem in channel.OuvirAsync(ct))
         {
+            using var indicadorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var indicadorTask = ManterIndicandoProcessandoAsync(mensagem.ChatId, indicadorCts.Token);
+
             try
             {
                 var historico = await historicoService.ObterAsync(mensagem.ChatId, ct);
                 var busca = await embeddingService.BuscarAsync(mensagem.Texto, ct: ct);
                 var resposta = await agentService.ResponderAsync(mensagem.Texto, busca.ContextoFormatado, historico, ct);
-                await channel.ResponderAsync(mensagem.ChatId, resposta, ct);
                 await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, resposta), ct);
+
+                indicadorCts.Cancel();
+                await channel.ResponderAsync(mensagem.ChatId, resposta, ct);
                 logger.LogInformation("Respondido: {ChatId} — {Usuario}", mensagem.ChatId, mensagem.UserName);
             }
             catch (Exception ex)
             {
+                indicadorCts.Cancel();
                 logger.LogError(ex, "Erro ao processar mensagem de {ChatId}", mensagem.ChatId);
             }
+            finally
+            {
+                await indicadorTask;
+            }
+        }
+    }
+
+    /// <summary>
+    /// O indicador de "digitando" do Telegram expira a cada ~5s — refresca em loop
+    /// enquanto a busca+geração da resposta estiver em andamento.
+    /// </summary>
+    private async Task ManterIndicandoProcessandoAsync(string chatId, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await channel.IndicarProcessandoAsync(chatId, ct);
+                await Task.Delay(TimeSpan.FromSeconds(4), ct);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // esperado ao cancelar assim que a resposta fica pronta
         }
     }
 }

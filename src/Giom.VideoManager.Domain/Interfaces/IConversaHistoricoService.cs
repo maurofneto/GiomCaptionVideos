@@ -11,7 +11,11 @@ public interface IConversaHistoricoService
 
     Task AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default);
 
-    /// <summary>Apaga todo o histórico de um chat — usado pelo comando /limpar.</summary>
+    /// <summary>
+    /// Reinicia a conversa de um chat pro agente — usado pelo comando /limpar. Não apaga o
+    /// histórico anterior (fica preservado pra auditoria/depuração), só faz o agente parar
+    /// de enxergá-lo: as próximas mensagens começam do zero, como uma nova conversa.
+    /// </summary>
     Task LimparAsync(string chatId, CancellationToken ct = default);
 }
 
