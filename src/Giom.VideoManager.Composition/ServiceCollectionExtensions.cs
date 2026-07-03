@@ -28,7 +28,7 @@ public static class ServiceCollectionExtensions
         return provider switch
         {
             "MongoDB" => services.AddMongoPersistence(config),
-            "SqlServer" => services.AddSqlPersistence(),
+            "SqlServer" => services.AddSqlPersistence(config),
             _ => services.AddSupabasePersistence(config)
         };
     }

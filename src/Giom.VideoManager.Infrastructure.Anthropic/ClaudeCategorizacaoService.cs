@@ -14,6 +14,7 @@ public class ClaudeCategorizacaoOptions
 {
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "claude-haiku-4-5-20251001";
+    public int MaxTokens { get; init; } = 512;
 }
 
 /// <summary>
@@ -46,7 +47,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
             var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
             {
                 Model         = _options.Model,
-                MaxTokens     = 512,
+                MaxTokens     = _options.MaxTokens,
                 PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
                 System        = [new SystemMessage(_systemPrompt)],
                 Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = resumo }] }]

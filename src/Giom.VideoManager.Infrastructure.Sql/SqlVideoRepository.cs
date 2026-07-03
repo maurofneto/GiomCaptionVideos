@@ -1,7 +1,7 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Infrastructure.Sql;
 
@@ -9,10 +9,11 @@ public class SqlVideoRepository : IVideoRepository
 {
     private readonly string _connectionString;
 
-    public SqlVideoRepository(IConfiguration configuration)
+    public SqlVideoRepository(IOptions<SqlOptions> options)
     {
-        _connectionString = configuration["ConnectionStrings:Default"]
-            ?? throw new InvalidOperationException("ConnectionStrings:Default não configurado");
+        _connectionString = options.Value.ConnectionString;
+        if (string.IsNullOrWhiteSpace(_connectionString))
+            throw new InvalidOperationException("ConnectionStrings:Default não configurado");
     }
 
     public async Task<Video?> GetByIdAsync(string videoId, CancellationToken ct = default)

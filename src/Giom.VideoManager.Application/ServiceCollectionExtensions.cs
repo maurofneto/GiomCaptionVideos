@@ -25,8 +25,9 @@ public static class ServiceCollectionExtensions
     /// Não registra IConversaHistoricoService — quem compõe o worker escolhe o provider via
     /// AddConversaHistorico (Composition) ou registra um diretamente.
     /// </summary>
-    public static IServiceCollection AddChatBotProcessor(this IServiceCollection services)
+    public static IServiceCollection AddChatBotProcessor(this IServiceCollection services, IConfiguration config)
     {
+        services.Configure<RagOptions>(config.GetSection("Rag"));
         services.AddSingleton<ChatBotProcessor>();
         return services;
     }

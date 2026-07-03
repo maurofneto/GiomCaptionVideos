@@ -1,6 +1,6 @@
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Infrastructure.Sql;
 
@@ -8,10 +8,11 @@ public class SqlProgressoRepository : IProgressoRepository
 {
     private readonly string _connectionString;
 
-    public SqlProgressoRepository(IConfiguration configuration)
+    public SqlProgressoRepository(IOptions<SqlOptions> options)
     {
-        _connectionString = configuration["ConnectionStrings:Default"]
-            ?? throw new InvalidOperationException("ConnectionStrings:Default não configurado");
+        _connectionString = options.Value.ConnectionString;
+        if (string.IsNullOrWhiteSpace(_connectionString))
+            throw new InvalidOperationException("ConnectionStrings:Default não configurado");
     }
 
     public async Task<string?> GetLastPageTokenAsync(string channelKey, string playlistId, CancellationToken ct = default)

@@ -73,7 +73,7 @@ public class SupabaseEmbeddingService : IEmbeddingService
         string pergunta,
         string? area = null,
         int limite = 6,
-        double threshold = 0.70,
+        double threshold = 0.35,
         CancellationToken ct = default)
     {
         var payload = new { pergunta, area, limite, threshold };
