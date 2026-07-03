@@ -83,7 +83,9 @@ public class ChannelProcessor(
                 {
                     await videoHandler.HandleAsync(video, ct);
 
-                    if (video.UploadedAt > lastProcessedDate)
+                    // Comparação com DateTime? nulo via '>' sempre retorna false — sem o
+                    // HasValue explícito, lastProcessedDate nunca sai de null.
+                    if (video.UploadedAt.HasValue && (!lastProcessedDate.HasValue || video.UploadedAt > lastProcessedDate))
                         lastProcessedDate = video.UploadedAt;
                 }
                 catch (Exception ex)
