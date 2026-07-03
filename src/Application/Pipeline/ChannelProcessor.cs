@@ -7,10 +7,6 @@ using Microsoft.Extensions.Options;
 
 namespace Application.Pipeline;
 
-/// <summary>
-/// Itera os vídeos de um canal/playlist e delega o processamento para o IVideoHandler injetado.
-/// Completamente genérico — não conhece YouTube, SQL ou Claude.
-/// </summary>
 public class ChannelProcessor(
     IVideoSourceService videoSource,
     IProgressoRepository progressoRepository,
@@ -51,9 +47,6 @@ public class ChannelProcessor(
         var pageToken        = await progressoRepository.GetLastPageTokenAsync(channelKey, playlistId, ct);
         var lastProcessedDate = await progressoRepository.GetLastProcessedDateAsync(channelKey, playlistId, ct);
 
-        // Filtro de data só vale quando começando do topo (sem pageToken).
-        // Ao retomar do meio da playlist, os vídeos restantes têm datas mais antigas
-        // e seriam todos pulados incorretamente.
         bool applyDateFilter = pageToken == null;
 
         if (pageToken != null)
@@ -73,7 +66,7 @@ public class ChannelProcessor(
             {
                 if (processedIds.Count >= _options.MaxVideosPerRun || ct.IsCancellationRequested) break;
 
-                if (applyDateFilter && lastProcessedDate.HasValue && video.UploadedAt <= lastProcessedDate.Value) continue;
+                if (applyDateFilter && video.UploadedAt <= (lastProcessedDate ?? DateTime.MinValue)) continue;
 
                 if (!videoHandler.IsRelevant(video)) continue;
 
@@ -83,8 +76,6 @@ public class ChannelProcessor(
                 {
                     await videoHandler.HandleAsync(video, ct);
 
-                    // Comparação com DateTime? nulo via '>' sempre retorna false — lastProcessedDate
-                    // nunca sairia de null sem o fallback via '??'.
                     if ((video.UploadedAt ?? DateTime.MinValue) > (lastProcessedDate ?? DateTime.MinValue))
                         lastProcessedDate = video.UploadedAt;
                 }
