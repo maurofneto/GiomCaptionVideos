@@ -90,10 +90,16 @@ public class ChannelProcessor(
             pageToken = page.NextPageToken;
             await progressoRepository.SaveProgressoAsync(channelKey, playlistId, pageToken, lastProcessedDate, ct);
 
-            if (!string.IsNullOrEmpty(pageToken))
-                await Task.Delay(_options.DelayBetweenPagesMs, ct);
-            else
+            if (string.IsNullOrEmpty(pageToken))
+            {
+                // Fim da playlist — sem isso, o while continuava rodando (processedIds.Count
+                // ainda < MaxVideosPerRun) e reiniciava a paginação do zero pra sempre, num
+                // loop infinito que nunca deixava o processo terminar.
                 logger.LogInformation("Canal {Name} — playlist percorrida até o fim ({Count} processados)", config.Name, processedIds.Count);
+                break;
+            }
+
+            await Task.Delay(_options.DelayBetweenPagesMs, ct);
         }
     }
 }
