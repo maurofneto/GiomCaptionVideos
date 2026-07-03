@@ -53,3 +53,6 @@ steps:
   - script: |
       aws ecs update-service --cluster giom-cluster --service giom-agenteinstituto-service --force-new-deployment --region $(AWS_REGION)
     displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
+    env:
+      AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+      AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
