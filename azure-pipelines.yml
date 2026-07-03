@@ -41,3 +41,15 @@ steps:
       docker push $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId)
       docker push $(ECR_REGISTRY)/giom-ministerio:latest
     displayName: 'Build e push — GiomMinisterio'
+
+  - script: |
+      docker build -f src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile \
+        -t $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId) \
+        -t $(ECR_REGISTRY)/giom-agenteinstituto:latest .
+      docker push $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId)
+      docker push $(ECR_REGISTRY)/giom-agenteinstituto:latest
+    displayName: 'Build e push — GiomAgenteInstituto'
+
+  - script: |
+      aws ecs update-service --cluster giom-cluster --service giom-agenteinstituto-service --force-new-deployment --region $(AWS_REGION)
+    displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
