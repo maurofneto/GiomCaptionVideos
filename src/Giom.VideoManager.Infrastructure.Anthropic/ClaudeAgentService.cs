@@ -37,8 +37,16 @@ public class ClaudeAgentService : IAgentService
         _systemPrompt = prompts.Load("agent.md");
     }
 
-    public async Task<string> ResponderAsync(string pergunta, string contexto, CancellationToken ct = default)
+    public async Task<string> ResponderAsync(string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
+        var mensagens = new List<Message>();
+
+        foreach (var turno in historico)
+        {
+            mensagens.Add(new Message { Role = RoleType.User, Content = [new TextContent { Text = turno.Pergunta }] });
+            mensagens.Add(new Message { Role = RoleType.Assistant, Content = [new TextContent { Text = turno.Resposta }] });
+        }
+
         var userMessage = $"""
             Contexto das aulas:
             {contexto}
@@ -46,6 +54,7 @@ public class ClaudeAgentService : IAgentService
             Pergunta do aluno:
             {pergunta}
             """;
+        mensagens.Add(new Message { Role = RoleType.User, Content = [new TextContent { Text = userMessage }] });
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {
@@ -53,7 +62,7 @@ public class ClaudeAgentService : IAgentService
             MaxTokens     = 1536,
             PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
             System        = [new SystemMessage(_systemPrompt)],
-            Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = userMessage }] }]
+            Messages      = mensagens
         }, ct);
 
         var texto = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;

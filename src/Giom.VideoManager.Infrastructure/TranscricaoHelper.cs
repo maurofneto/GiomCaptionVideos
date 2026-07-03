@@ -20,8 +20,15 @@ public static class TranscricaoHelper
         @"^\d{2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}",
         RegexOptions.Compiled);
 
+    // Interjeições litúrgicas repetidas em sequência (ex: "Aleluia! Glória a Deus! Aleluia!
+    // Deus! Glória a Deus! Glória a Deus!") não carregam conteúdo teológico e diluem o
+    // embedding do chunk — 3+ ocorrências seguidas colapsam pra uma única.
+    private static readonly Regex RepeticaoLiturgica = new(
+        @"(?:\b(?:Aleluia|Am[ée]m|Gl[óo]ria a Deus|Gl[óo]ria)\b[!.,]?\s*){3,}",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     /// <summary>
-    /// Remove timestamps, tags HTML e duplicações do conteúdo bruto.
+    /// Remove timestamps, tags HTML, duplicações e ruído litúrgico repetitivo do conteúdo bruto.
     /// Detecta o formato via parâmetro (sbv, vtt, srt).
     /// </summary>
     public static string StripTimestamps(string conteudo, string formato)
@@ -45,7 +52,8 @@ public static class TranscricaoHelper
                 parts.Add(clean);
         }
 
-        return string.Join(" ", parts);
+        var texto = string.Join(" ", parts);
+        return RepeticaoLiturgica.Replace(texto, match => Regex.Match(match.Value, @"\b\w+\b").Value + ". ");
     }
 
     /// <summary>

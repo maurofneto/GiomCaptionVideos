@@ -18,7 +18,7 @@ public interface IEmbeddingService
     /// Busca os chunks mais semanticamente próximos da pergunta.
     /// Retorna chunks de múltiplos vídeos, mais o contexto já formatado para o Claude.
     /// </summary>
-    Task<BuscaSemanticaResultado> BuscarAsync(string pergunta, string? area = null, int limite = 6, double threshold = 0.70, CancellationToken ct = default);
+    Task<BuscaSemanticaResultado> BuscarAsync(string pergunta, string? area = null, int limite = 6, double threshold = 0.35, CancellationToken ct = default);
 }
 
 /// <summary>Resultado da busca semântica por chunks.</summary>

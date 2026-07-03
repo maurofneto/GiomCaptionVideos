@@ -7,5 +7,5 @@ namespace Giom.VideoManager.Domain.Interfaces;
 /// </summary>
 public interface IAgentService
 {
-    Task<string> ResponderAsync(string pergunta, string contexto, CancellationToken ct = default);
+    Task<string> ResponderAsync(string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default);
 }

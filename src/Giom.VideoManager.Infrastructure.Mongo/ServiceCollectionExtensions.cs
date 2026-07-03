@@ -13,4 +13,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IProgressoRepository, MongoProgressoRepository>();
         return services;
     }
+
+    /// <summary>Histórico de conversa persistido — sobrevive a reinícios do worker.</summary>
+    public static IServiceCollection AddMongoConversaHistorico(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<MongoOptions>(config.GetSection("MongoDB"));
+        services.AddSingleton<IConversaHistoricoService, MongoConversaHistoricoService>();
+        return services;
+    }
 }

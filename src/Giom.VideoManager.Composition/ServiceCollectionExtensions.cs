@@ -1,3 +1,4 @@
+using Giom.VideoManager.Application;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
@@ -77,4 +78,17 @@ public static class ServiceCollectionExtensions
     /// <summary>VideoSource:Provider — YouTube (padrão, único por enquanto).</summary>
     public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
         => services.AddYouTubeVideoSource(config);
+
+    /// <summary>ConversaHistorico:Provider — InMemory (padrão), Supabase, MongoDB.</summary>
+    public static IServiceCollection AddConversaHistorico(this IServiceCollection services, IConfiguration config)
+    {
+        var provider = config["ConversaHistorico:Provider"] ?? "InMemory";
+
+        return provider switch
+        {
+            "Supabase" => services.AddSupabaseConversaHistorico(config),
+            "MongoDB" => services.AddMongoConversaHistorico(config),
+            _ => services.AddInMemoryConversaHistorico()
+        };
+    }
 }
