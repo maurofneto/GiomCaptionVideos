@@ -2,6 +2,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using Telegram.Bot;
 using Telegram.Bot.Types;
@@ -20,6 +21,10 @@ public class TelegramChatChannelOptions
 public class TelegramChatChannel : IChatChannel
 {
     private static readonly Regex TagHtml = new(@"<[^>]+>", RegexOptions.Compiled);
+
+    // Telegram rejeita mensagens de texto acima de 4096 caracteres — margem de segurança
+    // porque a conversão pra HTML (negrito/itálico) ainda vai acrescentar alguns caracteres.
+    private const int LimiteSeguroPorMensagem = 3800;
 
     // Só o menu de autocomplete do "/" no cliente Telegram — os comandos em si são
     // tratados pelo ChatBotProcessor (Application), que funciona em qualquer canal.
@@ -134,20 +139,65 @@ public class TelegramChatChannel : IChatChannel
     {
         var id = long.Parse(chatId);
 
-        // O agente escreve em markdown simples, sem saber que o canal é o Telegram —
-        // a conversão para o formato de exibição é responsabilidade deste canal.
-        var html = TelegramFormatador.ParaHtml(texto);
+        // Divide ANTES de converter pra HTML — cada parte vira uma mensagem própria, então
+        // dividir por parágrafo aqui evita cortar uma tag <b>/<i> ao meio entre duas mensagens.
+        foreach (var parte in DividirEmPartes(texto, LimiteSeguroPorMensagem))
+        {
+            // O agente escreve em markdown simples, sem saber que o canal é o Telegram —
+            // a conversão para o formato de exibição é responsabilidade deste canal.
+            var html = TelegramFormatador.ParaHtml(parte);
 
-        try
-        {
-            await _bot.SendMessage(id, html, parseMode: ParseMode.Html, cancellationToken: ct);
+            try
+            {
+                await _bot.SendMessage(id, html, parseMode: ParseMode.Html, cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                // HTML do Telegram só aceita um subconjunto de tags e não perdoa marcação malformada —
+                // se o texto gerado quebrar o parser, reenvia sem formatação a perder a resposta.
+                _logger.LogWarning(ex, "Falha ao enviar mensagem formatada (HTML) para {ChatId} — reenviando como texto simples", chatId);
+                var textoSimples = TagHtml.Replace(html, string.Empty);
+                await _bot.SendMessage(id, textoSimples, cancellationToken: ct);
+            }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>
+    /// Corta o texto em pedaços que cabem numa mensagem do Telegram, preferindo cortar
+    /// em quebra de parágrafo (linha em branco) — só corta no meio de um parágrafo se ele
+    /// sozinho já for maior que o limite.
+    /// </summary>
+    private static List<string> DividirEmPartes(string texto, int limite)
+    {
+        if (texto.Length <= limite) return [texto];
+
+        var partes = new List<string>();
+        var atual = new StringBuilder();
+
+        foreach (var paragrafo in texto.Split("\n\n"))
         {
-            // HTML do Telegram só aceita um subconjunto de tags e não perdoa marcação malformada —
-            // se o texto gerado quebrar o parser, reenvia sem formatação a perder a resposta.
-            _logger.LogWarning(ex, "Falha ao enviar mensagem formatada (HTML) para {ChatId} — reenviando como texto simples", chatId);
-            await _bot.SendMessage(id, TagHtml.Replace(texto, string.Empty), cancellationToken: ct);
+            var candidato = atual.Length == 0 ? paragrafo : $"{atual}\n\n{paragrafo}";
+
+            if (candidato.Length > limite && atual.Length > 0)
+            {
+                partes.Add(atual.ToString());
+                atual.Clear();
+                atual.Append(paragrafo);
+            }
+            else
+            {
+                atual.Clear();
+                atual.Append(candidato);
+            }
+
+            while (atual.Length > limite)
+            {
+                partes.Add(atual.ToString(0, limite));
+                atual.Remove(0, limite);
+            }
         }
+
+        if (atual.Length > 0) partes.Add(atual.ToString());
+        return partes;
     }
 }
