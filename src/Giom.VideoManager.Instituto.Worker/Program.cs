@@ -3,6 +3,7 @@ using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Instituto.Worker;
 using Serilog;
 
@@ -21,7 +22,8 @@ var host = Host.CreateDefaultBuilder(args)
             .ReadFrom.Configuration(context.Configuration)
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
-            .Enrich.WithThreadId();
+            .Enrich.WithThreadId()
+            .Enrich.With<ShortSourceContextEnricher>();
     })
     .ConfigureServices((ctx, services) =>
     {

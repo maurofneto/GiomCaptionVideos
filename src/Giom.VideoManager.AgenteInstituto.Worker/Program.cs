@@ -1,6 +1,7 @@
 using Giom.VideoManager.Application;
 using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
+using Giom.VideoManager.Infrastructure.Logging;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 
@@ -18,7 +19,8 @@ var host = Host.CreateDefaultBuilder(args)
             .ReadFrom.Configuration(context.Configuration)
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
-            .Enrich.WithThreadId();
+            .Enrich.WithThreadId()
+            .Enrich.With<ShortSourceContextEnricher>();
     })
     .ConfigureServices((ctx, services) =>
     {
@@ -29,7 +31,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddChatChannel(config);           // Telegram
         services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB
         services.AddBotComandos(config);           // ajuda/sobre/limpar — cada canal decide como invocar
-        services.AddChatBotProcessor();
+        services.AddChatBotProcessor(config);
     })
     .Build();
 

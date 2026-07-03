@@ -1,5 +1,7 @@
+using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Application.Pipeline;
 
@@ -18,6 +20,7 @@ public class ChatBotProcessor(
     IEmbeddingService embeddingService,
     IAgentService agentService,
     IConversaHistoricoService historicoService,
+    IOptions<RagOptions> ragOptions,
     ILogger<ChatBotProcessor> logger)
 {
     public async Task RunAsync(CancellationToken ct = default)
@@ -26,13 +29,26 @@ public class ChatBotProcessor(
 
         await foreach (var mensagem in channel.OuvirAsync(ct))
         {
+            // CorrelationId + ChatId via BeginScope (abstração padrão do .NET, não Serilog
+            // direto) — o provider de log (Serilog) injeta esses valores em TODAS as linhas
+            // emitidas durante o processamento desta mensagem, mesmo as de outras classes
+            // (ClaudeAgentService, SupabaseEmbeddingService, etc.), permitindo rastrear uma
+            // conversa inteira nos logs mesmo espalhada entre componentes diferentes.
+            var correlationId = Guid.NewGuid().ToString("N")[..8];
+            using var escopo = logger.BeginScope(new Dictionary<string, object>
+            {
+                ["CorrelationId"] = correlationId,
+                ["ChatId"] = mensagem.ChatId
+            });
+
             using var indicadorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var indicadorTask = ManterIndicandoProcessandoAsync(mensagem.ChatId, indicadorCts.Token);
 
             try
             {
                 var historico = await historicoService.ObterAsync(mensagem.ChatId, ct);
-                var busca = await embeddingService.BuscarAsync(mensagem.Texto, ct: ct);
+                var busca = await embeddingService.BuscarAsync(
+                    mensagem.Texto, limite: ragOptions.Value.Limite, threshold: ragOptions.Value.Threshold, ct: ct);
                 var resposta = await agentService.ResponderAsync(mensagem.Texto, busca.ContextoFormatado, historico, ct);
                 await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, resposta), ct);
 
