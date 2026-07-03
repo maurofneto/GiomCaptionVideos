@@ -39,7 +39,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddPromptLoader();
         services.AddAnthropicHttpClient();
-        services.Configure<ClaudeResumoOptions>(config.GetSection("Claude"));
+        services.Configure<ClaudeResumoOptions>(config.GetSection("ClaudeResumo"));
         services.AddSingleton<IResumoService, ClaudeResumoService>();
         return services;
     }
@@ -48,7 +48,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddPromptLoader();
         services.AddAnthropicHttpClient();
-        services.Configure<ClaudeCategorizacaoOptions>(config.GetSection("Claude"));
+        services.Configure<ClaudeCategorizacaoOptions>(config.GetSection("ClaudeCategorizacao"));
         services.AddSingleton<ICategorizacaoService, ClaudeCategorizacaoService>();
         return services;
     }

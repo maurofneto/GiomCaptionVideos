@@ -7,8 +7,20 @@ using Google.Apis.Util.Store;
 using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Infrastructure.YouTube;
+
+public class GoogleCredentialOptions
+{
+    public string ClientId { get; init; } = string.Empty;
+    public string ClientSecret { get; init; } = string.Empty;
+    public string ApplicationName { get; init; } = "Giom Video Processor";
+    public string User { get; init; } = "user";
+
+    /// <summary>Presente só em produção (ex: ECS Fargate) — habilita o fluxo não-interativo.</summary>
+    public string? RefreshToken { get; init; }
+}
 
 public static class ServiceCollectionExtensions
 {
@@ -18,15 +30,22 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddYouTubeVideoSource(this IServiceCollection services, IConfiguration config)
     {
-        services.AddSingleton(_ => GetGoogleCredential(config).GetAwaiter().GetResult());
+        services.Configure<GoogleCredentialOptions>(config.GetSection("Google"));
+
+        services.AddSingleton(provider =>
+        {
+            var options = provider.GetRequiredService<IOptions<GoogleCredentialOptions>>().Value;
+            return GetGoogleCredential(options).GetAwaiter().GetResult();
+        });
 
         services.AddSingleton(provider =>
         {
             var cred = provider.GetRequiredService<UserCredential>();
+            var options = provider.GetRequiredService<IOptions<GoogleCredentialOptions>>().Value;
             return new YouTubeService(new BaseClientService.Initializer
             {
                 HttpClientInitializer = cred,
-                ApplicationName = config["Google:ApplicationName"] ?? "Giom Video Processor"
+                ApplicationName = options.ApplicationName
             });
         });
 
@@ -63,12 +82,12 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    private static async Task<UserCredential> GetGoogleCredential(IConfiguration config)
+    private static async Task<UserCredential> GetGoogleCredential(GoogleCredentialOptions options)
     {
-        var clientId = config["Google:ClientId"]
-            ?? throw new InvalidOperationException("Google:ClientId não configurado");
-        var clientSecret = config["Google:ClientSecret"]
-            ?? throw new InvalidOperationException("Google:ClientSecret não configurado");
+        if (string.IsNullOrWhiteSpace(options.ClientId))
+            throw new InvalidOperationException("Google:ClientId não configurado");
+        if (string.IsNullOrWhiteSpace(options.ClientSecret))
+            throw new InvalidOperationException("Google:ClientSecret não configurado");
 
         string[] scopes =
         [
@@ -79,29 +98,26 @@ public static class ServiceCollectionExtensions
             "https://www.googleapis.com/auth/cloud-translation"
         ];
 
-        var clientSecrets = new ClientSecrets { ClientId = clientId, ClientSecret = clientSecret };
-        var user = config["Google:User"] ?? "user";
+        var clientSecrets = new ClientSecrets { ClientId = options.ClientId, ClientSecret = options.ClientSecret };
 
         // Modo não-interativo (produção/cloud) — reusa um refresh token já emitido, sem abrir
         // navegador. Necessário porque os workers rodam headless (ex: ECS Fargate).
-        var refreshToken = config["Google:RefreshToken"];
-        if (!string.IsNullOrWhiteSpace(refreshToken))
+        if (!string.IsNullOrWhiteSpace(options.RefreshToken))
         {
             var flow = new GoogleAuthorizationCodeFlow(
                 new GoogleAuthorizationCodeFlow.Initializer { ClientSecrets = clientSecrets, Scopes = scopes });
 
-            var token = new TokenResponse { RefreshToken = refreshToken };
-            return new UserCredential(flow, user, token);
+            var token = new TokenResponse { RefreshToken = options.RefreshToken };
+            return new UserCredential(flow, options.User, token);
         }
 
         // Modo interativo (dev local) — abre navegador na primeira vez, cacheia o refresh token
         // num arquivo isolado por aplicação (Google:ApplicationName). Isolado porque Instituto e
         // Ministério usam Client Id/Secret diferentes — compartilhar o cache faz um sobrescrever
         // o token do outro.
-        var appName = config["Google:ApplicationName"] ?? "GiomWorker";
-        var dataStore = new FileDataStore($"Google.Apis.Auth.{appName}", true);
+        var dataStore = new FileDataStore($"Google.Apis.Auth.{options.ApplicationName}", true);
 
         return await GoogleWebAuthorizationBroker.AuthorizeAsync(
-            clientSecrets, scopes, user, CancellationToken.None, dataStore);
+            clientSecrets, scopes, options.User, CancellationToken.None, dataStore);
     }
 }

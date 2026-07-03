@@ -17,7 +17,8 @@ public class ClaudeCategorizacaoOptions
 }
 
 /// <summary>
-/// Classifica o resumo em até 3 áreas da Teologia Sistemática usando Claude Haiku.
+/// Classifica o resumo em até 3 áreas da Teologia Sistemática usando Claude — modelo
+/// configurável via ClaudeCategorizacao:Model, independente do resumo ou do bot.
 /// System prompt carregado de Prompts/categorizacao.md e cacheado via PromptCaching.
 /// </summary>
 public class ClaudeCategorizacaoService : ICategorizacaoService

@@ -15,7 +15,8 @@ public class ClaudeResumoOptions
 }
 
 /// <summary>
-/// Gera resumo executivo usando Claude Haiku.
+/// Gera resumo executivo usando Claude — modelo configurável via ClaudeResumo:Model,
+/// independente do modelo usado pela categorização ou pelo bot.
 /// System prompt carregado de Prompts/resumo.md e cacheado via PromptCaching.
 /// Usa Transcricao.ConteudoLimpo (sem timestamps) como entrada.
 /// </summary>
