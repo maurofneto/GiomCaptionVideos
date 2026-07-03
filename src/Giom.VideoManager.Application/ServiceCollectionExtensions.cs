@@ -1,5 +1,7 @@
+using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Application.Pipeline;
+using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -20,10 +22,33 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Registra o orquestrador genérico do bot de chat — não conhece canal nem LLM concretos.
+    /// Não registra IConversaHistoricoService — quem compõe o worker escolhe o provider via
+    /// AddConversaHistorico (Composition) ou registra um diretamente.
     /// </summary>
     public static IServiceCollection AddChatBotProcessor(this IServiceCollection services)
     {
         services.AddSingleton<ChatBotProcessor>();
+        return services;
+    }
+
+    /// <summary>
+    /// Comandos utilitários do bot (ajuda, sobre, limpar) — quem chama cada método, e como
+    /// reconhece a invocação (ex: "/limpar" no Telegram), é responsabilidade de cada canal.
+    /// </summary>
+    public static IServiceCollection AddBotComandos(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<BotOptions>(config.GetSection("Bot"));
+        services.AddSingleton<IBotComandosService, BotComandosService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Histórico de conversa em memória — some ao reiniciar o processo. Suficiente para
+    /// desenvolvimento local ou baixo volume; trocar por Supabase/MongoDB em produção.
+    /// </summary>
+    public static IServiceCollection AddInMemoryConversaHistorico(this IServiceCollection services)
+    {
+        services.AddSingleton<IConversaHistoricoService, InMemoryConversaHistoricoService>();
         return services;
     }
 }

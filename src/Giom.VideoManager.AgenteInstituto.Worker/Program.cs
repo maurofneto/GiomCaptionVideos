@@ -24,9 +24,11 @@ var host = Host.CreateDefaultBuilder(args)
     {
         var config = ctx.Configuration;
 
-        services.AddEmbeddingService(config);  // SupabaseEdgeFunction — retrieval (RAG)
-        services.AddAgentService(config);       // Claude
-        services.AddChatChannel(config);        // Telegram
+        services.AddEmbeddingService(config);      // SupabaseEdgeFunction — retrieval (RAG)
+        services.AddAgentService(config);          // Claude
+        services.AddChatChannel(config);           // Telegram
+        services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB
+        services.AddBotComandos(config);           // ajuda/sobre/limpar — cada canal decide como invocar
         services.AddChatBotProcessor();
     })
     .Build();
