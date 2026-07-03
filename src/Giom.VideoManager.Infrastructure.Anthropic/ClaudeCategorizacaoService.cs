@@ -53,8 +53,13 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
                 Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = resumo }] }]
             }, ct);
 
-            var json = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;
+            // Concatena todos os blocos de texto — FirstOrDefault() descartava o resto
+            // quando a resposta vinha em mais de um bloco.
+            var json = string.Concat(response.Content.OfType<TextContent>().Select(c => c.Text));
             if (string.IsNullOrWhiteSpace(json)) return [];
+
+            if (response.StopReason == "max_tokens")
+                _logger.LogWarning("Categorização cortada por MaxTokens ({MaxTokens}) para {VideoId}", _options.MaxTokens, video.Id);
 
             _logger.LogInformation("Categorização gerada para {VideoId}", video.Id);
 

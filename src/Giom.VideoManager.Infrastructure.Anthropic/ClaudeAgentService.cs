@@ -11,7 +11,7 @@ public class ClaudeAgentOptions
 {
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "claude-haiku-4-5-20251001";
-    public int MaxTokens { get; init; } = 1536;
+    public int MaxTokens { get; init; } = 4096;
 }
 
 /// <summary>
@@ -66,7 +66,14 @@ public class ClaudeAgentService : IAgentService
             Messages      = mensagens
         }, ct);
 
-        var texto = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;
+        // Concatena TODOS os blocos de texto — FirstOrDefault() pegava só o primeiro e
+        // descartava o resto quando a resposta vinha em mais de um bloco, cortando a
+        // resposta no meio sem erro nenhum (o StopReason continuava "end_turn" normal).
+        var texto = string.Concat(response.Content.OfType<TextContent>().Select(c => c.Text));
+
+        if (response.StopReason == "max_tokens")
+            _logger.LogWarning("Resposta cortada por MaxTokens ({MaxTokens}) para a pergunta: {Pergunta}", _options.MaxTokens, pergunta);
+
         if (string.IsNullOrWhiteSpace(texto))
         {
             _logger.LogWarning("Claude não retornou texto para a pergunta: {Pergunta}", pergunta);

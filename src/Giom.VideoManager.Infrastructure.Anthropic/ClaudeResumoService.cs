@@ -12,7 +12,10 @@ public class ClaudeResumoOptions
 {
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "claude-haiku-4-5-20251001";
-    public int MaxTokens { get; init; } = 2048;
+
+    // O prompt pede ~1200-1500 palavras (resumo.md) — em português isso passa fácil de
+    // 2048 tokens; deixado com folga pra não cortar o resumo no meio.
+    public int MaxTokens { get; init; } = 4096;
 }
 
 /// <summary>
@@ -53,9 +56,14 @@ public class ClaudeResumoService : IResumoService
                 Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = textoLimpo }] }]
             }, ct);
 
-            var content = response.Content.OfType<TextContent>().FirstOrDefault()?.Text;
+            // Concatena todos os blocos de texto — FirstOrDefault() descartava o resto
+            // quando a resposta vinha em mais de um bloco.
+            var content = string.Concat(response.Content.OfType<TextContent>().Select(c => c.Text));
             if (string.IsNullOrWhiteSpace(content))
                 return null;
+
+            if (response.StopReason == "max_tokens")
+                _logger.LogWarning("Resumo cortado por MaxTokens ({MaxTokens}) para {VideoId}", _options.MaxTokens, video.Id);
 
             _logger.LogInformation("Resumo gerado para {VideoId}", video.Id);
 
