@@ -19,6 +19,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Polly" Version="8.7.0" />
     <PackageReference Include="Polly.Extensions" Version="8.7.0" />
+    <PackageReference Include="Telegram.Bot" Version="22.10.1" />
     <PackageReference Include="VaultSharp" Version="1.17.5.1" />
   </ItemGroup>
 

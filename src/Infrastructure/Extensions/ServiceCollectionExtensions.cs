@@ -1,9 +1,11 @@
 using Application.Options;
 using Domain.Interfaces;
 using Google.Apis.Auth.OAuth2;
+using Infrastructure.Agent;
 using Infrastructure.Categorization;
 using Infrastructure.Embedding;
 using Infrastructure.Helpers;
+using Infrastructure.Messaging;
 using Infrastructure.Persistence.MongoDB;
 using Infrastructure.Persistence.SqlServer;
 using Infrastructure.Persistence.Supabase;
@@ -168,6 +170,26 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<IEmbeddingService, DirectEmbeddingService>();
         }
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registra IAgentService (Claude + retrieval via IEmbeddingService — já deve estar registrado).
+    /// </summary>
+    public static IServiceCollection AddAgentService(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<ClaudeAgentOptions>(config.GetSection("ClaudeAgent"));
+        services.AddSingleton<IAgentService, ClaudeAgentService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registra IChatChannel conforme Channel:Provider. Valores aceitos: Telegram (padrão).
+    /// </summary>
+    public static IServiceCollection AddChatChannel(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<TelegramChatChannelOptions>(config.GetSection("Telegram"));
+        services.AddSingleton<IChatChannel, TelegramChatChannel>();
         return services;
     }
 
