@@ -59,11 +59,13 @@ public class InstitutoVideoHandler(
             if (video.Resumo == null && _options.ShouldGenerateSummary && video.Transcricao != null)
             {
                 video.Resumo = await resumoService.GerarResumoAsync(video, ct);
+                logger.LogInformation("Instituto — resumo gerado: {Title}", video.Title);
             }
 
             if (video.Categorias.Count == 0 && _options.ShouldCategorize && video.Resumo != null)
             {
                 video.Categorias = (IList<CategoriaTeologica>)await categorizacaoService.ClassificarAsync(video, ct);
+                logger.LogInformation("Instituto — categorização concluída: {Title}", video.Title);
             }
         }
         catch (Exception ex)
@@ -85,6 +87,7 @@ public class InstitutoVideoHandler(
         if (_options.ShouldIndexEmbedding && video.Transcricao != null && !video.Chunks.Any())
         {
             await embeddingService.IndexarAsync(video, ct);
+            logger.LogInformation("Instituto — embedding indexado: {Title}", video.Title);
         }
 
         logger.LogInformation("Instituto — processado: {Title} ({Id})", video.Title, video.Id);
