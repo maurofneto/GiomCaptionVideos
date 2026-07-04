@@ -49,15 +49,23 @@ public class ChannelProcessor(
 
         bool applyDateFilter = pageToken == null;
 
+        // Congela o corte de data usado só pra decidir o que pular — a playlist do YouTube
+        // vem do mais novo pro mais antigo, então assim que o primeiro vídeo (o mais novo)
+        // era processado, lastProcessedDate avançava pra aquela data e passava a filtrar
+        // TODO o resto da mesma execução como "antigo demais", limitando cada run a 1 vídeo
+        // processado, mesmo com MaxVideosPerRun bem maior e o progresso zerado.
+        var filtroDataBase = lastProcessedDate;
+
         if (pageToken != null)
             logger.LogInformation("Canal {Name} — retomando da página salva (filtro de data desativado)", config.Name);
-        else if (lastProcessedDate.HasValue)
-            logger.LogInformation("Canal {Name} — iniciando do topo, ignorando vídeos antes de {Date:d}", config.Name, lastProcessedDate);
+        else if (filtroDataBase.HasValue)
+            logger.LogInformation("Canal {Name} — iniciando do topo, ignorando vídeos antes de {Date:d}", config.Name, filtroDataBase);
 
         var processedIds = new HashSet<string>();
 
         while (processedIds.Count < _options.MaxVideosPerRun && !ct.IsCancellationRequested)
         {
+            logger.LogInformation($"Canal {config.Name} — processando página (já processados: {processedIds.Count})", config.Name);
             var page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, _options.MaxVideosPerRun), pageToken, ct);
 
             if (page.Videos.Count == 0) break;
@@ -66,11 +74,13 @@ public class ChannelProcessor(
             {
                 if (processedIds.Count >= _options.MaxVideosPerRun || ct.IsCancellationRequested) break;
 
-                if (applyDateFilter && video.UploadedAt <= (lastProcessedDate ?? DateTime.MinValue)) continue;
+                if (applyDateFilter && video.UploadedAt <= (filtroDataBase ?? DateTime.MinValue)) continue;
 
                 if (!videoHandler.IsRelevant(video)) continue;
 
                 if (!processedIds.Add(video.Id)) continue;
+
+                logger.LogInformation("Canal {Name} — processando vídeo {Id} — {Title}", config.Name, video.Id, video.Title);
 
                 try
                 {
@@ -89,6 +99,8 @@ public class ChannelProcessor(
 
             pageToken = page.NextPageToken;
             await progressoRepository.SaveProgressoAsync(channelKey, playlistId, pageToken, lastProcessedDate, ct);
+
+            logger.LogInformation("Canal {Name} — página processada (próxima página: {NextPageToken})", config.Name, pageToken ?? "fim");
 
             if (string.IsNullOrEmpty(pageToken))
             {
