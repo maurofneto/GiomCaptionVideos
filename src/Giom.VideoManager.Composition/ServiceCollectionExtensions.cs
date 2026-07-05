@@ -91,4 +91,8 @@ public static class ServiceCollectionExtensions
             _ => services.AddInMemoryConversaHistorico()
         };
     }
+
+    /// <summary>Telemetria:Provider — Supabase (único por enquanto).</summary>
+    public static IServiceCollection AddTelemetriaService(this IServiceCollection services, IConfiguration config)
+        => services.AddSupabaseTelemetria(config);
 }

@@ -33,6 +33,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddPersistence(config);
         services.AddTranscriptionService(config);  // YouTubeCaption por padrão
         services.AddSummaryService(config);        // Claude por padrão
+        services.AddTelemetriaService(config);     // Supabase — auditoria de operações de IA
         services.AddChannelProcessor(config);
 
         // Handler específico do Ministério

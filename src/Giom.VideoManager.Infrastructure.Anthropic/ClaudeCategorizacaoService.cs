@@ -7,6 +7,7 @@ using Giom.VideoManager.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using System.Diagnostics;
 
 namespace Giom.VideoManager.Infrastructure.Anthropic;
 
@@ -27,12 +28,14 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
     private readonly AnthropicClient _client;
     private readonly ClaudeCategorizacaoOptions _options;
     private readonly ILogger<ClaudeCategorizacaoService> _logger;
+    private readonly ITelemetriaService _telemetriaService;
     private readonly string _systemPrompt;
 
-    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger)
+    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, ITelemetriaService telemetriaService)
     {
         _options = options.Value;
         _logger = logger;
+        _telemetriaService = telemetriaService;
         _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
         _systemPrompt = prompts.Load("categorizacao.md");
     }
@@ -42,6 +45,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         var resumo = video.Resumo?.Descricao ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resumo)) return [];
 
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
@@ -62,6 +66,18 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
                 _logger.LogWarning("Categorização cortada por MaxTokens ({MaxTokens}) para {VideoId}", _options.MaxTokens, video.Id);
 
             _logger.LogInformation("Categorização gerada para {VideoId}", video.Id);
+
+            await _telemetriaService.RegistrarAsync(new RegistroTelemetria(
+                Tipo: "categorizacao",
+                EntidadeId: video.Id,
+                TempoMs: stopwatch.ElapsedMilliseconds,
+                Sucesso: true,
+                Provedor: "Claude",
+                Modelo: _options.Model,
+                TokensEntrada: response.Usage?.InputTokens,
+                TokensSaida: response.Usage?.OutputTokens,
+                Detalhes: new { stopReason = response.StopReason }
+            ), ct);
 
             json = json.Replace("\n", "").Replace("\r", "").Replace("```json", "").Replace("```", "").Trim();
 
@@ -94,6 +110,16 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao classificar vídeo {VideoId}", video.Id);
+
+            await _telemetriaService.RegistrarAsync(new RegistroTelemetria(
+                Tipo: "categorizacao",
+                EntidadeId: video.Id,
+                TempoMs: stopwatch.ElapsedMilliseconds,
+                Sucesso: false,
+                Provedor: "Claude",
+                Modelo: _options.Model
+            ), ct);
+
             throw;
         }
     }

@@ -5,6 +5,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 
 namespace Giom.VideoManager.Infrastructure.Anthropic;
 
@@ -29,12 +30,14 @@ public class ClaudeResumoService : IResumoService
     private readonly AnthropicClient _client;
     private readonly ClaudeResumoOptions _options;
     private readonly ILogger<ClaudeResumoService> _logger;
+    private readonly ITelemetriaService _telemetriaService;
     private readonly string _systemPrompt;
 
-    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger)
+    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, ITelemetriaService telemetriaService)
     {
         _options = options.Value;
         _logger = logger;
+        _telemetriaService = telemetriaService;
         _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
         _systemPrompt = prompts.Load("resumo.md");
     }
@@ -45,6 +48,7 @@ public class ClaudeResumoService : IResumoService
         if (string.IsNullOrWhiteSpace(textoLimpo))
             return null;
 
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
@@ -67,6 +71,18 @@ public class ClaudeResumoService : IResumoService
 
             _logger.LogInformation("Resumo gerado para {VideoId}", video.Id);
 
+            await _telemetriaService.RegistrarAsync(new RegistroTelemetria(
+                Tipo: "resumo",
+                EntidadeId: video.Id,
+                TempoMs: stopwatch.ElapsedMilliseconds,
+                Sucesso: true,
+                Provedor: "Claude",
+                Modelo: _options.Model,
+                TokensEntrada: response.Usage?.InputTokens,
+                TokensSaida: response.Usage?.OutputTokens,
+                Detalhes: new { stopReason = response.StopReason }
+            ), ct);
+
             return new Resumo
             {
                 VideoId   = video.Id,
@@ -79,6 +95,16 @@ public class ClaudeResumoService : IResumoService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao gerar resumo via Claude para vídeo {VideoId}", video.Id);
+
+            await _telemetriaService.RegistrarAsync(new RegistroTelemetria(
+                Tipo: "resumo",
+                EntidadeId: video.Id,
+                TempoMs: stopwatch.ElapsedMilliseconds,
+                Sucesso: false,
+                Provedor: "Claude",
+                Modelo: _options.Model
+            ), ct);
+
             throw;
         }
     }

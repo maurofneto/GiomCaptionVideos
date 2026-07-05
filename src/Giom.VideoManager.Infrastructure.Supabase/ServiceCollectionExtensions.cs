@@ -43,4 +43,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConversaHistoricoService, SupabaseConversaHistoricoService>();
         return services;
     }
+
+    /// <summary>Auditoria genérica de operações de IA (resumo, categorização, bot) — tabela interacao_log.</summary>
+    public static IServiceCollection AddSupabaseTelemetria(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
+        services.AddSingleton<ITelemetriaService, SupabaseTelemetriaService>();
+        return services;
+    }
 }

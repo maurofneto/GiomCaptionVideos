@@ -38,7 +38,7 @@ public class ClaudeAgentService : IAgentService
         _systemPrompt = prompts.Load("agent.md");
     }
 
-    public async Task<string> ResponderAsync(string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<RespostaAgente> ResponderAsync(string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var mensagens = new List<Message>();
 
@@ -77,9 +77,9 @@ public class ClaudeAgentService : IAgentService
         if (string.IsNullOrWhiteSpace(texto))
         {
             _logger.LogWarning("Claude não retornou texto para a pergunta: {Pergunta}", pergunta);
-            return "Desculpe, não consegui gerar uma resposta agora. Tente novamente em instantes.";
+            return new RespostaAgente("Desculpe, não consegui gerar uma resposta agora. Tente novamente em instantes.", "Claude", _options.Model);
         }
 
-        return texto;
+        return new RespostaAgente(texto, "Claude", _options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens);
     }
 }
