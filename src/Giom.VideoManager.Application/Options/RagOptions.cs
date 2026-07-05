@@ -9,4 +9,7 @@ public class RagOptions
 {
     public int Limite { get; init; } = 6;
     public double Threshold { get; init; } = 0.35;
+
+    /// <summary>Restringe a busca semântica do bot a um único canal do YouTube; null = sem restrição.</summary>
+    public string? CanalId { get; init; } = null;
 }

@@ -17,7 +17,9 @@
  *     pergunta:   string,       // dúvida do aluno
  *     area?:      string,       // filtra por área teológica (opcional)
  *     limite?:    number,       // max itens no resultado final (padrão: 6)
- *     threshold?: number        // similaridade mínima (padrão: 0.35)
+ *     threshold?: number,       // similaridade mínima (padrão: 0.35)
+ *     canal_id?:  string        // restringe a busca a um canal do YouTube (opcional;
+ *                                // omitido = sem restrição, busca em todos os canais)
  *   }
  *
  * Response:
@@ -66,6 +68,7 @@ serve(async (req) => {
     area?: string;
     limite?: number;
     threshold?: number;
+    canal_id?: string;
   };
 
   try {
@@ -74,7 +77,7 @@ serve(async (req) => {
     return json({ error: "JSON inválido" }, 400);
   }
 
-  const { pergunta, area, limite = 6, threshold = 0.35 } = body;
+  const { pergunta, area, limite = 6, threshold = 0.35, canal_id } = body;
   if (!pergunta?.trim()) {
     return json({ error: "pergunta é obrigatória" }, 400);
   }
@@ -90,8 +93,8 @@ serve(async (req) => {
 
   const rpcName   = area ? "match_chunks_hibrido_por_area" : "match_chunks_hibrido";
   const rpcParams = area
-    ? { query_embedding: embedding, query_texto: pergunta, area_filtro: area, match_count: candidatosLimite }
-    : { query_embedding: embedding, query_texto: pergunta, match_count: candidatosLimite };
+    ? { query_embedding: embedding, query_texto: pergunta, area_filtro: area, match_count: candidatosLimite, ...(canal_id ? { canal_id_filtro: canal_id } : {}) }
+    : { query_embedding: embedding, query_texto: pergunta, match_count: candidatosLimite, ...(canal_id ? { canal_id_filtro: canal_id } : {}) };
 
   const { data, error } = await supabase.rpc(rpcName, rpcParams);
 

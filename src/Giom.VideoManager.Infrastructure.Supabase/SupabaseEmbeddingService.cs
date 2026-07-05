@@ -72,11 +72,12 @@ public class SupabaseEmbeddingService : IEmbeddingService
     public async Task<BuscaSemanticaResultado> BuscarAsync(
         string pergunta,
         string? area = null,
+        string? canalId = null,
         int limite = 6,
         double threshold = 0.35,
         CancellationToken ct = default)
     {
-        var payload = new { pergunta, area, limite, threshold };
+        var payload = new { pergunta, area, limite, threshold, canal_id = canalId };
         var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
 
         var response = await _http.PostAsync($"{_options.Url}/functions/v1/buscar-similar", content, ct);
