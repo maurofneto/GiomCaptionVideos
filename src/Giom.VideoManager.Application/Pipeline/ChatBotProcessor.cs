@@ -14,6 +14,10 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// já respondeu — sem isso, cada pergunta é tratada isoladamente.
 /// Comandos utilitários (ajuda, sobre, limpar) não passam por aqui — cada canal os
 /// reconhece do seu próprio jeito e chama IBotComandosService diretamente (ver TelegramChatChannel).
+/// Telemetria do agente (tempo/modelo/tokens da chamada ao Claude em si) é responsabilidade
+/// do decorator TelemetriaAgentService que envolve IAgentService. Aqui registramos só o
+/// round-trip completo do ponto de vista do aluno (busca RAG + geração + envio), que é uma
+/// métrica própria da orquestração — não de uma implementação específica de IAgentService.
 /// </summary>
 public class ChatBotProcessor(
     IChatChannel channel,
@@ -48,27 +52,41 @@ public class ChatBotProcessor(
 
             try
             {
+                logger.LogInformation("Pergunta recebida de {ChatId} ({Usuario}): {Pergunta}", mensagem.ChatId, mensagem.UserName, mensagem.Texto);
+
                 var historico = await historicoService.ObterAsync(mensagem.ChatId, ct);
                 var busca = await embeddingService.BuscarAsync(
                     mensagem.Texto, canalId: ragOptions.Value.CanalId, limite: ragOptions.Value.Limite, threshold: ragOptions.Value.Threshold, ct: ct);
-                var resposta = await agentService.ResponderAsync(mensagem.Texto, busca.ContextoFormatado, historico, ct);
-                await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, resposta.Texto), ct);
+
+                if (busca.Chunks.Count == 0)
+                {
+                    logger.LogWarning("Busca RAG sem resultados para {ChatId} (threshold {Threshold})", mensagem.ChatId, ragOptions.Value.Threshold);
+                }
+                else
+                {
+                    logger.LogInformation(
+                        "Busca RAG: {Qtd} chunks de [{Videos}] — similaridade {Min:P0}-{Max:P0}",
+                        busca.Chunks.Count,
+                        string.Join(", ", busca.Chunks.Select(c => c.Titulo).Distinct()),
+                        busca.Chunks.Min(c => c.Similarity),
+                        busca.Chunks.Max(c => c.Similarity));
+                }
+
+                var respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, mensagem.Texto, busca.ContextoFormatado, historico, ct);
+                await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, respostaTexto), ct);
 
                 indicadorCts.Cancel();
-                await channel.ResponderAsync(mensagem.ChatId, resposta.Texto, ct);
-                logger.LogInformation("Respondido: {ChatId} — {Usuario}", mensagem.ChatId, mensagem.UserName);
+                await channel.ResponderAsync(mensagem.ChatId, respostaTexto, ct);
+                logger.LogInformation("Respondido: {ChatId} — {Usuario} ({TempoMs}ms)", mensagem.ChatId, mensagem.UserName, stopwatch.ElapsedMilliseconds);
 
                 // Tempo entre a pergunta e a resposta enviada, do ponto de vista do aluno —
-                // inclui busca RAG + geração + envio, não só a chamada ao Claude isoladamente.
+                // inclui busca RAG + geração + envio, não só a chamada ao Claude isoladamente
+                // (essa já é medida à parte pelo decorator TelemetriaAgentService).
                 await telemetriaService.RegistrarAsync(new RegistroTelemetria(
-                    Tipo: "bot_resposta",
+                    Tipo: "bot_interacao",
                     EntidadeId: mensagem.ChatId,
                     TempoMs: stopwatch.ElapsedMilliseconds,
-                    Sucesso: true,
-                    Provedor: resposta.Provedor,
-                    Modelo: resposta.Modelo,
-                    TokensEntrada: resposta.TokensEntrada,
-                    TokensSaida: resposta.TokensSaida
+                    Sucesso: true
                 ), ct);
             }
             catch (Exception ex)
@@ -77,7 +95,7 @@ public class ChatBotProcessor(
                 logger.LogError(ex, "Erro ao processar mensagem de {ChatId}", mensagem.ChatId);
 
                 await telemetriaService.RegistrarAsync(new RegistroTelemetria(
-                    Tipo: "bot_resposta",
+                    Tipo: "bot_interacao",
                     EntidadeId: mensagem.ChatId,
                     TempoMs: stopwatch.ElapsedMilliseconds,
                     Sucesso: false

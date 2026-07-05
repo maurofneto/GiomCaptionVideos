@@ -24,21 +24,24 @@ public class ClaudeAgentService : IAgentService
     private readonly AnthropicClient _client;
     private readonly ClaudeAgentOptions _options;
     private readonly ILogger<ClaudeAgentService> _logger;
+    private readonly IContextoTelemetria _contextoTelemetria;
     private readonly string _systemPrompt;
 
     public ClaudeAgentService(
         IOptions<ClaudeAgentOptions> options,
         PromptLoader prompts,
         IHttpClientFactory httpClientFactory,
-        ILogger<ClaudeAgentService> logger)
+        ILogger<ClaudeAgentService> logger,
+        IContextoTelemetria contextoTelemetria)
     {
         _options = options.Value;
         _logger = logger;
+        _contextoTelemetria = contextoTelemetria;
         _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
         _systemPrompt = prompts.Load("agent.md");
     }
 
-    public async Task<RespostaAgente> ResponderAsync(string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<string> ResponderAsync(string chatId, string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var mensagens = new List<Message>();
 
@@ -72,14 +75,21 @@ public class ClaudeAgentService : IAgentService
         var texto = string.Concat(response.Content.OfType<TextContent>().Select(c => c.Text));
 
         if (response.StopReason == "max_tokens")
-            _logger.LogWarning("Resposta cortada por MaxTokens ({MaxTokens}) para a pergunta: {Pergunta}", _options.MaxTokens, pergunta);
+            _logger.LogWarning("Resposta cortada por MaxTokens ({MaxTokens}) para {ChatId} — pergunta: {Pergunta}", _options.MaxTokens, chatId, pergunta);
+
+        _contextoTelemetria.Registrar(
+            provedor: "Claude",
+            modelo: _options.Model,
+            tokensEntrada: response.Usage?.InputTokens,
+            tokensSaida: response.Usage?.OutputTokens,
+            detalhes: new { stopReason = response.StopReason });
 
         if (string.IsNullOrWhiteSpace(texto))
         {
-            _logger.LogWarning("Claude não retornou texto para a pergunta: {Pergunta}", pergunta);
-            return new RespostaAgente("Desculpe, não consegui gerar uma resposta agora. Tente novamente em instantes.", "Claude", _options.Model);
+            _logger.LogWarning("Claude não retornou texto para {ChatId} — pergunta: {Pergunta}", chatId, pergunta);
+            return "Desculpe, não consegui gerar uma resposta agora. Tente novamente em instantes.";
         }
 
-        return new RespostaAgente(texto, "Claude", _options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens);
+        return texto;
     }
 }

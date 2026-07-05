@@ -5,7 +5,6 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Diagnostics;
 
 namespace Giom.VideoManager.Infrastructure.Anthropic;
 
@@ -24,20 +23,22 @@ public class ClaudeResumoOptions
 /// independente do modelo usado pela categorização ou pelo bot.
 /// System prompt carregado de Prompts/resumo.md e cacheado via PromptCaching.
 /// Usa Transcricao.ConteudoLimpo (sem timestamps) como entrada.
+/// Telemetria (tempo/sucesso/falha) é responsabilidade do decorator TelemetriaResumoService —
+/// aqui só contribuímos os metadados ricos (provedor/modelo/tokens) via IContextoTelemetria.
 /// </summary>
 public class ClaudeResumoService : IResumoService
 {
     private readonly AnthropicClient _client;
     private readonly ClaudeResumoOptions _options;
     private readonly ILogger<ClaudeResumoService> _logger;
-    private readonly ITelemetriaService _telemetriaService;
+    private readonly IContextoTelemetria _contextoTelemetria;
     private readonly string _systemPrompt;
 
-    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, ITelemetriaService telemetriaService)
+    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria)
     {
         _options = options.Value;
         _logger = logger;
-        _telemetriaService = telemetriaService;
+        _contextoTelemetria = contextoTelemetria;
         _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
         _systemPrompt = prompts.Load("resumo.md");
     }
@@ -48,64 +49,41 @@ public class ClaudeResumoService : IResumoService
         if (string.IsNullOrWhiteSpace(textoLimpo))
             return null;
 
-        var stopwatch = Stopwatch.StartNew();
-        try
+        var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {
-            var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
-            {
-                Model         = _options.Model,
-                MaxTokens     = _options.MaxTokens,
-                PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
-                System        = [new SystemMessage(_systemPrompt)],
-                Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = textoLimpo }] }]
-            }, ct);
+            Model         = _options.Model,
+            MaxTokens     = _options.MaxTokens,
+            PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
+            System        = [new SystemMessage(_systemPrompt)],
+            Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = textoLimpo }] }]
+        }, ct);
 
-            // Concatena todos os blocos de texto — FirstOrDefault() descartava o resto
-            // quando a resposta vinha em mais de um bloco.
-            var content = string.Concat(response.Content.OfType<TextContent>().Select(c => c.Text));
-            if (string.IsNullOrWhiteSpace(content))
-                return null;
+        // Concatena todos os blocos de texto — FirstOrDefault() descartava o resto
+        // quando a resposta vinha em mais de um bloco.
+        var content = string.Concat(response.Content.OfType<TextContent>().Select(c => c.Text));
 
-            if (response.StopReason == "max_tokens")
-                _logger.LogWarning("Resumo cortado por MaxTokens ({MaxTokens}) para {VideoId}", _options.MaxTokens, video.Id);
+        _contextoTelemetria.Registrar(
+            provedor: "Claude",
+            modelo: _options.Model,
+            tokensEntrada: response.Usage?.InputTokens,
+            tokensSaida: response.Usage?.OutputTokens,
+            detalhes: new { stopReason = response.StopReason });
 
-            _logger.LogInformation("Resumo gerado para {VideoId}", video.Id);
+        if (string.IsNullOrWhiteSpace(content))
+            return null;
 
-            await _telemetriaService.RegistrarAsync(new RegistroTelemetria(
-                Tipo: "resumo",
-                EntidadeId: video.Id,
-                TempoMs: stopwatch.ElapsedMilliseconds,
-                Sucesso: true,
-                Provedor: "Claude",
-                Modelo: _options.Model,
-                TokensEntrada: response.Usage?.InputTokens,
-                TokensSaida: response.Usage?.OutputTokens,
-                Detalhes: new { stopReason = response.StopReason }
-            ), ct);
+        if (response.StopReason == "max_tokens")
+            _logger.LogWarning("Resumo cortado por MaxTokens ({MaxTokens}) para {VideoId}", _options.MaxTokens, video.Id);
 
-            return new Resumo
-            {
-                VideoId   = video.Id,
-                Descricao = content,
-                Origem    = "Claude",
-                GeradoEm  = DateTime.UtcNow,
-                Capitulos = []
-            };
-        }
-        catch (Exception ex)
+        _logger.LogInformation("Resumo gerado para {VideoId}", video.Id);
+
+        return new Resumo
         {
-            _logger.LogError(ex, "Erro ao gerar resumo via Claude para vídeo {VideoId}", video.Id);
-
-            await _telemetriaService.RegistrarAsync(new RegistroTelemetria(
-                Tipo: "resumo",
-                EntidadeId: video.Id,
-                TempoMs: stopwatch.ElapsedMilliseconds,
-                Sucesso: false,
-                Provedor: "Claude",
-                Modelo: _options.Model
-            ), ct);
-
-            throw;
-        }
+            VideoId   = video.Id,
+            Descricao = content,
+            Origem    = "Claude",
+            GeradoEm  = DateTime.UtcNow,
+            Capitulos = []
+        };
     }
 }
