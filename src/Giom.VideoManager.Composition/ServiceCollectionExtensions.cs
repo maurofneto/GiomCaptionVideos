@@ -1,5 +1,7 @@
 using Giom.VideoManager.Application;
+using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Anthropic;
+using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
 using Giom.VideoManager.Infrastructure.Sql;
@@ -92,7 +94,18 @@ public static class ServiceCollectionExtensions
         };
     }
 
-    /// <summary>Telemetria:Provider — Supabase (único por enquanto).</summary>
+    /// <summary>
+    /// Sinks de telemetria — hoje Supabase (interacao_log) + Sentry (breadcrumb). Cada
+    /// RegistrarAsync chega em TODOS via CompositeTelemetriaService; adicionar um novo sink no
+    /// futuro é só registrar o tipo concreto aqui e incluir na lista.
+    /// </summary>
     public static IServiceCollection AddTelemetriaService(this IServiceCollection services, IConfiguration config)
-        => services.AddSupabaseTelemetria(config);
+    {
+        services.AddSupabaseTelemetria(config);
+        services.AddSingleton<SentryTelemetriaService>();
+        services.AddSingleton<ITelemetriaService>(sp => new CompositeTelemetriaService(
+            [sp.GetRequiredService<SupabaseTelemetriaService>(), sp.GetRequiredService<SentryTelemetriaService>()],
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CompositeTelemetriaService>>()));
+        return services;
+    }
 }

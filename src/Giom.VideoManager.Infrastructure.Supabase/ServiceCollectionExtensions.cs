@@ -44,12 +44,18 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Auditoria genérica de operações de IA (resumo, categorização, bot) — tabela interacao_log.</summary>
+    /// <summary>
+    /// Auditoria genérica de operações de IA (resumo, categorização, bot) — tabela interacao_log.
+    /// Registra só o tipo concreto (não o ITelemetriaService diretamente) — quem decide como
+    /// isso vira o ITelemetriaService de fato injetado no app é a composição raiz (ver
+    /// Composition.AddTelemetriaService), que combina esse sink com outros (ex: Sentry) via
+    /// CompositeTelemetriaService.
+    /// </summary>
     public static IServiceCollection AddSupabaseTelemetria(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
         services.AddSupabaseHttpClient();
-        services.AddSingleton<ITelemetriaService, SupabaseTelemetriaService>();
+        services.AddSingleton<SupabaseTelemetriaService>();
         return services;
     }
 }

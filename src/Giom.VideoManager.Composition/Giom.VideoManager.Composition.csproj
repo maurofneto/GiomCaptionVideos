@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Giom.VideoManager.Domain\Giom.VideoManager.Domain.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Application\Giom.VideoManager.Application.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure\Giom.VideoManager.Infrastructure.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Anthropic\Giom.VideoManager.Infrastructure.Anthropic.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.OpenAI\Giom.VideoManager.Infrastructure.OpenAI.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.YouTube\Giom.VideoManager.Infrastructure.YouTube.csproj" />
