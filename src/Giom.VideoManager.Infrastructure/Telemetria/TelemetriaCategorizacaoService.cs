@@ -24,6 +24,7 @@ public class TelemetriaCategorizacaoService(ICategorizacaoService inner, ITeleme
                 Modelo: meta.Modelo,
                 TokensEntrada: meta.TokensEntrada,
                 TokensSaida: meta.TokensSaida,
+                CustoEstimadoUsd: meta.CustoEstimadoUsd,
                 Detalhes: meta.Detalhes
             ), ct);
             return resultado;

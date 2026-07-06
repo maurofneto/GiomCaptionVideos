@@ -50,6 +50,12 @@ public class ChatBotProcessor(
             var indicadorTask = ManterIndicandoProcessandoAsync(mensagem.ChatId, indicadorCts.Token);
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
+            // Vira o EntidadeId do telemetria "bot_interacao" assim que existir — identifica a
+            // pergunta/resposta específica (conversa_historico.id), não só o chat. Só fica null
+            // se a exceção acontecer antes do AdicionarAsync (ex.: falha na busca RAG ou no
+            // agente), quando ainda não existe uma linha de conversa pra apontar.
+            long? conversaId = null;
+
             try
             {
                 logger.LogInformation("Pergunta recebida de {ChatId} ({Usuario}): {Pergunta}", mensagem.ChatId, mensagem.UserName, mensagem.Texto);
@@ -76,7 +82,7 @@ public class ChatBotProcessor(
 
                 // O id retornado vira o "avaliacaoId" repassado ao canal — é o que liga o
                 // voto de 👍/👎 do usuário de volta a esta pergunta/resposta específica.
-                var conversaId = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, respostaTexto), ct);
+                conversaId = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, respostaTexto), ct);
 
                 indicadorCts.Cancel();
                 await channel.ResponderAsync(mensagem.ChatId, respostaTexto, conversaId.ToString(), ct);
@@ -87,7 +93,7 @@ public class ChatBotProcessor(
                 // (essa já é medida à parte pelo decorator TelemetriaAgentService).
                 await telemetriaService.RegistrarAsync(new RegistroTelemetria(
                     Tipo: "bot_interacao",
-                    EntidadeId: mensagem.ChatId,
+                    EntidadeId: conversaId!.Value.ToString(),
                     TempoMs: stopwatch.ElapsedMilliseconds,
                     Sucesso: true
                 ), ct);
@@ -97,9 +103,11 @@ public class ChatBotProcessor(
                 indicadorCts.Cancel();
                 logger.LogError(ex, "Erro ao processar mensagem de {ChatId}", mensagem.ChatId);
 
+                // Antes do AdicionarAsync (ex.: falha na busca RAG/agente) ainda não existe
+                // conversa_historico pra apontar — cai de volta pro chatId nesse caso.
                 await telemetriaService.RegistrarAsync(new RegistroTelemetria(
                     Tipo: "bot_interacao",
-                    EntidadeId: mensagem.ChatId,
+                    EntidadeId: conversaId?.ToString() ?? mensagem.ChatId,
                     TempoMs: stopwatch.ElapsedMilliseconds,
                     Sucesso: false
                 ), ct);

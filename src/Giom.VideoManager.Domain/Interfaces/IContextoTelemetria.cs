@@ -10,5 +10,5 @@ namespace Giom.VideoManager.Domain.Interfaces;
 /// </summary>
 public interface IContextoTelemetria
 {
-    void Registrar(string? provedor = null, string? modelo = null, int? tokensEntrada = null, int? tokensSaida = null, object? detalhes = null);
+    void Registrar(string? provedor = null, string? modelo = null, int? tokensEntrada = null, int? tokensSaida = null, decimal? custoEstimadoUsd = null, object? detalhes = null);
 }

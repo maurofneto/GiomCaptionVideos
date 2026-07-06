@@ -86,6 +86,7 @@ public class ClaudeAgentService : IAgentService
             modelo: _options.Model,
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
+            custoEstimadoUsd: AnthropicPricingCalculator.Calcular(_options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens),
             detalhes: new { stopReason = response.StopReason });
 
         if (string.IsNullOrWhiteSpace(texto))

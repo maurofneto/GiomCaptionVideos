@@ -22,6 +22,7 @@ public class TelemetriaAgentService(IAgentService inner, ITelemetriaService tele
                 Modelo: meta.Modelo,
                 TokensEntrada: meta.TokensEntrada,
                 TokensSaida: meta.TokensSaida,
+                CustoEstimadoUsd: meta.CustoEstimadoUsd,
                 Detalhes: meta.Detalhes
             ), ct);
             return resposta;

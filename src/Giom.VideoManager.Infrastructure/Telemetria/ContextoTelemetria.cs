@@ -28,7 +28,7 @@ public class ContextoTelemetria : IContextoTelemetria
         return novo;
     }
 
-    public void Registrar(string? provedor = null, string? modelo = null, int? tokensEntrada = null, int? tokensSaida = null, object? detalhes = null)
+    public void Registrar(string? provedor = null, string? modelo = null, int? tokensEntrada = null, int? tokensSaida = null, decimal? custoEstimadoUsd = null, object? detalhes = null)
     {
         var atual = _atual.Value;
         if (atual == null) return; // chamado fora de um escopo iniciado pelo decorator — no-op
@@ -37,6 +37,7 @@ public class ContextoTelemetria : IContextoTelemetria
         atual.Modelo = modelo;
         atual.TokensEntrada = tokensEntrada;
         atual.TokensSaida = tokensSaida;
+        atual.CustoEstimadoUsd = custoEstimadoUsd;
         atual.Detalhes = detalhes;
     }
 }
@@ -47,5 +48,6 @@ public class MetadadosTelemetria
     public string? Modelo { get; set; }
     public int? TokensEntrada { get; set; }
     public int? TokensSaida { get; set; }
+    public decimal? CustoEstimadoUsd { get; set; }
     public object? Detalhes { get; set; }
 }
