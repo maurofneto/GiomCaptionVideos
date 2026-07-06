@@ -26,19 +26,28 @@ categorização).
 | `{tipo}.provedor` | Ex.: `"Claude"` |
 | `{tipo}.modelo` | Ex.: `"claude-sonnet-5"` |
 
-## Como criar os widgets (manual, feito na UI do Sentry)
+## Dashboard "Giom - Observabilidade" (já criado)
 
-Não tenho acesso à API de management do Sentry (só ao SDK de ingestão via DSN) — os
-dashboards precisam ser montados manualmente na UI do Sentry:
+Criado via API do Sentry (`POST /api/0/organizations/{org}/dashboards/`, usando um Auth Token
+de organização — diferente do DSN, que só serve pra ingestão) — não precisou ser montado à mão
+na UI. Acesse em https://furigo-neto-tecnologia.sentry.io/dashboard/7977167/
 
+Widgets:
+- **Latência do bot (p95)** — `p95(transaction.duration)`, `transaction:bot.interacao`
+- **Custo do bot por dia (Claude)** — `sum(measurements.bot_resposta.custo_usd)`
+- **Tokens do bot por dia** — entrada/saída, `measurements.bot_resposta.tokens_*`
+- **Tempo por etapa da pipeline (média)** — transcrição/resumo/categorização/embedding
+- **Custo por etapa da pipeline (soma diária)** — resumo/categorização/embedding
+
+Ponto técnico: o dataset "transactions" da API do Sentry está em depreciação — os widgets
+usam `widgetType: "spans"` com `is_transaction:true` na condição em vez de
+`widgetType: "transaction-like"` (que a API rejeita hoje com esse aviso).
+
+Pra criar mais widgets/dashboards depois (manual, na UI):
 1. Sentry → **Dashboards** → **Create Dashboard**.
-2. Adicionar um widget do tipo **Line Chart** ou **Table**, dataset **Transactions**.
-3. Query de exemplo — custo médio de resumo por dia: `avg(measurements.resumo.custo_usd)`,
-   agrupado por `transaction` ou por dia.
-4. Repetir para os outros pares tipo/measurement da tabela acima (tempo por etapa, custo por
-   etapa, tokens por etapa).
-5. Tags (`{tipo}.provedor`, `{tipo}.modelo`) servem de filtro/`group by` nos mesmos widgets —
-   ex.: comparar custo por modelo, se algum dia dois modelos rodarem em paralelo.
+2. Widget tipo **Line Chart**, dataset **Spans**, com `is_transaction:true` na query.
+3. Campo de exemplo — custo médio de resumo por dia: `avg(measurements.resumo.custo_usd)`.
+4. Tags (`{tipo}.provedor`, `{tipo}.modelo`) servem de filtro/`group by` nos mesmos widgets.
 
 ## Por que não breadcrumb
 
