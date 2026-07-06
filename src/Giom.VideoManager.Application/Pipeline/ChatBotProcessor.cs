@@ -25,6 +25,7 @@ public class ChatBotProcessor(
     IAgentService agentService,
     IConversaHistoricoService historicoService,
     ITelemetriaService telemetriaService,
+    ITracingService tracingService,
     IOptions<RagOptions> ragOptions,
     ILogger<ChatBotProcessor> logger)
 {
@@ -49,6 +50,7 @@ public class ChatBotProcessor(
             using var indicadorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var indicadorTask = ManterIndicandoProcessandoAsync(mensagem.ChatId, indicadorCts.Token);
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            using var trace = tracingService.IniciarTrace("bot.interacao", "bot.responder");
 
             // Vira o EntidadeId do telemetria "bot_interacao" assim que existir — identifica a
             // pergunta/resposta específica (conversa_historico.id), não só o chat. Só fica null
@@ -69,8 +71,12 @@ public class ChatBotProcessor(
                 var historico = await historicoService.ObterAsync(mensagem.ChatId, ct);
 
                 var buscaStopwatch = System.Diagnostics.Stopwatch.StartNew();
-                var busca = await embeddingService.BuscarAsync(
-                    mensagem.Texto, canalId: ragOptions.Value.CanalId, limite: ragOptions.Value.Limite, threshold: ragOptions.Value.Threshold, ct: ct);
+                BuscaSemanticaResultado busca;
+                using (trace.IniciarEtapa("busca_rag"))
+                {
+                    busca = await embeddingService.BuscarAsync(
+                        mensagem.Texto, canalId: ragOptions.Value.CanalId, limite: ragOptions.Value.Limite, threshold: ragOptions.Value.Threshold, ct: ct);
+                }
 
                 if (busca.Chunks.Count == 0)
                 {
@@ -101,7 +107,11 @@ public class ChatBotProcessor(
                     }
                 ), ct);
 
-                var respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, turno, busca.ContextoFormatado, historico, ct);
+                string respostaTexto;
+                using (trace.IniciarEtapa("agente"))
+                {
+                    respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, turno, busca.ContextoFormatado, historico, ct);
+                }
 
                 turno = turno with { Resposta = respostaTexto };
                 await historicoService.AtualizarAsync(mensagem.ChatId, turno, ct);
@@ -109,7 +119,10 @@ public class ChatBotProcessor(
                 indicadorCts.Cancel();
                 // O Id vira o "avaliacaoId" repassado ao canal — é o que liga o voto de 👍/👎
                 // do usuário de volta a esta pergunta/resposta específica.
-                await channel.ResponderAsync(mensagem.ChatId, respostaTexto, turno.Id.ToString(), ct);
+                using (trace.IniciarEtapa("envio"))
+                {
+                    await channel.ResponderAsync(mensagem.ChatId, respostaTexto, turno.Id.ToString(), ct);
+                }
                 logger.LogInformation("Respondido: {ChatId} — {Usuario} ({TempoMs}ms)", mensagem.ChatId, mensagem.UserName, stopwatch.ElapsedMilliseconds);
 
                 // Tempo entre a pergunta e a resposta enviada, do ponto de vista do aluno —

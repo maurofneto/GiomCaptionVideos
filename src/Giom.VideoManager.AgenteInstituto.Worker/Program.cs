@@ -32,7 +32,8 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddChatChannel(config);           // Telegram
         services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB
         services.AddBotComandos(config);           // ajuda/sobre/limpar — cada canal decide como invocar
-        services.AddTelemetriaService(config);     // Supabase — auditoria de operações de IA
+        services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
+        services.AddTracingService();              // Sentry Performance — quebra de tempo por etapa
         services.AddChatBotProcessor(config);
     })
     .Build();

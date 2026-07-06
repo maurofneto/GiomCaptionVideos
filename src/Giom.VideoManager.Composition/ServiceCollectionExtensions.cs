@@ -2,6 +2,7 @@ using Giom.VideoManager.Application;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Telemetria;
+using Giom.VideoManager.Infrastructure.Tracing;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
 using Giom.VideoManager.Infrastructure.Sql;
@@ -106,6 +107,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITelemetriaService>(sp => new CompositeTelemetriaService(
             [sp.GetRequiredService<SupabaseTelemetriaService>(), sp.GetRequiredService<SentryTelemetriaService>()],
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CompositeTelemetriaService>>()));
+        return services;
+    }
+
+    /// <summary>Rastreamento de etapas de uma interação (ex: busca RAG / agente / envio) — hoje via Sentry Performance.</summary>
+    public static IServiceCollection AddTracingService(this IServiceCollection services)
+    {
+        services.AddSingleton<ITracingService, SentryTracingService>();
         return services;
     }
 }
