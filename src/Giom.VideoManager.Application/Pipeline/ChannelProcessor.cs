@@ -11,6 +11,7 @@ public class ChannelProcessor(
     IVideoSourceService videoSource,
     IProgressoRepository progressoRepository,
     IVideoHandler videoHandler,
+    ITracingService tracingService,
     ILogger<ChannelProcessor> logger,
     IOptions<ProcessingOptions> options)
 {
@@ -70,6 +71,13 @@ public class ChannelProcessor(
 
             if (page.Videos.Count == 0) break;
 
+            // Uma transação por página — cada vídeo vira uma etapa dela, e a telemetria de
+            // transcrição/resumo/categorização/embedding (RegistrarAsync) gravada durante o
+            // processamento do vídeo se anexa automaticamente à etapa "video" ainda aberta
+            // (Sentry resolve pra span ativa mais recente), sem o Handler precisar conhecer
+            // ITracingService.
+            using var trace = tracingService.IniciarTrace("pipeline.pagina", "video_pipeline");
+
             foreach (var video in page.Videos)
             {
                 if (processedIds.Count >= _options.MaxVideosPerRun || ct.IsCancellationRequested) break;
@@ -84,7 +92,10 @@ public class ChannelProcessor(
 
                 try
                 {
-                    await videoHandler.HandleAsync(video, ct);
+                    using (trace.IniciarEtapa("video"))
+                    {
+                        await videoHandler.HandleAsync(video, ct);
+                    }
 
                     if ((video.UploadedAt ?? DateTime.MinValue) > (lastProcessedDate ?? DateTime.MinValue))
                         lastProcessedDate = video.UploadedAt;

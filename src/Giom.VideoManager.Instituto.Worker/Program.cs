@@ -37,7 +37,8 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSummaryService(config);        // Claude
         services.AddCategorizacaoService(config);  // Claude (Haiku)
         services.AddEmbeddingService(config);      // Supabase pgvector
-        services.AddTelemetriaService(config);     // Supabase — auditoria de operações de IA
+        services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
+        services.AddTracingService();              // Sentry Performance — quebra de tempo por página/vídeo
         services.AddChannelProcessor(config);
 
         // Handler específico do Instituto
