@@ -25,6 +25,11 @@ public static class AnthropicClientFactory
         {
             client.ApiUrlFormat = HeliconeApiUrlFormat;
             httpClient.DefaultRequestHeaders.Add("Helicone-Auth", $"Bearer {helicone.ApiKey}");
+
+            // Filtra Dev/Prod no dashboard do Helicone via Custom Property — funciona mesmo se
+            // as duas keys (Dev/Prod) estiverem na mesma conta/projeto do Helicone.
+            if (!string.IsNullOrWhiteSpace(helicone.Environment))
+                httpClient.DefaultRequestHeaders.Add("Helicone-Property-Environment", helicone.Environment);
         }
 
         return client;

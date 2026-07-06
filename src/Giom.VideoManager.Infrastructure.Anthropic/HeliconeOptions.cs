@@ -9,4 +9,11 @@ namespace Giom.VideoManager.Infrastructure.Anthropic;
 public class HeliconeOptions
 {
     public string? ApiKey { get; init; }
+
+    /// <summary>
+    /// Vira o header Helicone-Property-Environment — separa Dev/Prod no dashboard do Helicone
+    /// via filtro de propriedade, independente de as duas keys estarem na mesma conta/projeto
+    /// do Helicone ou não.
+    /// </summary>
+    public string? Environment { get; init; }
 }

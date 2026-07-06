@@ -16,6 +16,10 @@
 # Mono auto generated files
 mono_crash.*
 
+# Cache local do fluxo interativo de OAuth do Google (GoogleWebAuthorizationBroker) —
+# guarda o refresh token, nunca deve ir pro repo
+Google.Apis.Auth.*/
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
