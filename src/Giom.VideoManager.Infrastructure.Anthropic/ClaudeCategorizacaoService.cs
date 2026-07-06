@@ -15,6 +15,9 @@ public class ClaudeCategorizacaoOptions
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "claude-haiku-4-5-20251001";
     public int MaxTokens { get; init; } = 512;
+
+    /// <summary>Roteia as chamadas pelo gateway do Helicone (custo/latência/tokens por chamada) — requer Helicone:ApiKey configurada.</summary>
+    public bool UseHelicone { get; init; } = false;
 }
 
 /// <summary>
@@ -37,7 +40,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), heliconeOptions.Value);
+        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("categorizacao.md");
     }
 

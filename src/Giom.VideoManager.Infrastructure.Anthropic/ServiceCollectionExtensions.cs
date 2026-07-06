@@ -17,16 +17,11 @@ public static class ServiceCollectionExtensions
             return services;
 
         services.AddSingleton<AnthropicHttpClientMarker>();
+        // Helicone:ApiKey é compartilhada — cada Claude*Service decide individualmente se
+        // usa (via sua própria opção UseHelicone), ver AnthropicClientFactory.
         services.Configure<HeliconeOptions>(config.GetSection("Helicone"));
-        var heliconeApiKey = config["Helicone:ApiKey"];
 
-        services.AddHttpClient("anthropic", client =>
-        {
-            // Helicone proxeia a chamada e registra custo/latência/tokens — a autenticação
-            // com a Anthropic em si continua igual (x-api-key), Helicone só intercepta.
-            if (!string.IsNullOrWhiteSpace(heliconeApiKey))
-                client.DefaultRequestHeaders.Add("Helicone-Auth", $"Bearer {heliconeApiKey}");
-        }).AddStandardResilienceHandler(options =>
+        services.AddHttpClient("anthropic").AddStandardResilienceHandler(options =>
         {
             options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
             options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(200);

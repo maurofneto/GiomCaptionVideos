@@ -16,6 +16,9 @@ public class ClaudeResumoOptions
     // O prompt pede ~1200-1500 palavras (resumo.md) — em português isso passa fácil de
     // 2048 tokens; deixado com folga pra não cortar o resumo no meio.
     public int MaxTokens { get; init; } = 4096;
+
+    /// <summary>Roteia as chamadas pelo gateway do Helicone (custo/latência/tokens por chamada) — requer Helicone:ApiKey configurada.</summary>
+    public bool UseHelicone { get; init; } = false;
 }
 
 /// <summary>
@@ -39,7 +42,7 @@ public class ClaudeResumoService : IResumoService
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), heliconeOptions.Value);
+        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("resumo.md");
     }
 
