@@ -12,6 +12,7 @@ var host = Host.CreateDefaultBuilder(args)
         config.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production"}.json", optional: true);
         config.AddEnvironmentVariables();
         config.AddSecretsProvider(config.Build());
+        config.AddSentryDsnFromSecrets();
     })
     .UseSerilog((context, _, configuration) =>
     {
@@ -20,8 +21,7 @@ var host = Host.CreateDefaultBuilder(args)
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
-            .Enrich.With<ShortSourceContextEnricher>()
-            .AddSentryIfConfigured(context.Configuration, environment: "agenteinstituto");
+            .Enrich.With<ShortSourceContextEnricher>();
     })
     .ConfigureServices((ctx, services) =>
     {

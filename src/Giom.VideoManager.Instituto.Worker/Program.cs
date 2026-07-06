@@ -15,6 +15,7 @@ var host = Host.CreateDefaultBuilder(args)
         config.AddEnvironmentVariables();
         // Pluggable secrets — troque "Configuration" por "AwsParameterStore" ou "AzureAppConfiguration" em produção
         config.AddSecretsProvider(config.Build());
+        config.AddSentryDsnFromSecrets();
     })
     .UseSerilog((context, _, configuration) =>
     {
@@ -23,8 +24,7 @@ var host = Host.CreateDefaultBuilder(args)
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
-            .Enrich.With<ShortSourceContextEnricher>()
-            .AddSentryIfConfigured(context.Configuration, environment: "instituto");
+            .Enrich.With<ShortSourceContextEnricher>();
     })
     .ConfigureServices((ctx, services) =>
     {
