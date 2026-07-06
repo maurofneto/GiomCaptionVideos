@@ -60,7 +60,15 @@ public class ChatBotProcessor(
             {
                 logger.LogInformation("Pergunta recebida de {ChatId} ({Usuario}): {Pergunta}", mensagem.ChatId, mensagem.UserName, mensagem.Texto);
 
+                // Grava a pergunta antes de qualquer outra coisa (mesmo antes da busca RAG) —
+                // se algo falhar logo em seguida, a pergunta já fica registrada. O turno (com
+                // Id) também vira o EntidadeId de toda telemetria desta interação, inclusive a
+                // da busca RAG abaixo.
+                turno = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(null, mensagem.Texto, null), ct);
+
                 var historico = await historicoService.ObterAsync(mensagem.ChatId, ct);
+
+                var buscaStopwatch = System.Diagnostics.Stopwatch.StartNew();
                 var busca = await embeddingService.BuscarAsync(
                     mensagem.Texto, canalId: ragOptions.Value.CanalId, limite: ragOptions.Value.Limite, threshold: ragOptions.Value.Threshold, ct: ct);
 
@@ -78,10 +86,20 @@ public class ChatBotProcessor(
                         busca.Chunks.Max(c => c.Similarity));
                 }
 
-                // Grava a pergunta ANTES de chamar o agente — o turno (com Id) vai junto na
-                // chamada, permitindo que a telemetria do agente (TelemetriaAgentService)
-                // identifique exatamente a qual pergunta/resposta ela pertence, não só o chat.
-                turno = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(null, mensagem.Texto, null), ct);
+                await telemetriaService.RegistrarAsync(new RegistroTelemetria(
+                    Tipo: "busca_rag",
+                    EntidadeId: turno.Id!.Value.ToString(),
+                    TempoMs: buscaStopwatch.ElapsedMilliseconds,
+                    Sucesso: true,
+                    Detalhes: new
+                    {
+                        chunks = busca.Chunks.Count,
+                        similaridadeMin = busca.Chunks.Count > 0 ? busca.Chunks.Min(c => c.Similarity) : (double?)null,
+                        similaridadeMax = busca.Chunks.Count > 0 ? busca.Chunks.Max(c => c.Similarity) : (double?)null,
+                        videos = busca.Chunks.Select(c => c.Titulo).Distinct(),
+                        canalId = ragOptions.Value.CanalId
+                    }
+                ), ct);
 
                 var respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, turno, busca.ContextoFormatado, historico, ct);
 
