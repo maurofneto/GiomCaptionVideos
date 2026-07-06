@@ -1,7 +1,7 @@
 using Giom.VideoManager.Domain.Interfaces;
 using Sentry;
 
-namespace Giom.VideoManager.Infrastructure.Tracing;
+namespace Giom.VideoManager.Infrastructure.Sentry;
 
 /// <summary>
 /// Seguro mesmo se o Sentry não estiver inicializado nesse worker (Sentry:Dsn vazio ou

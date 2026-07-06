@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.33627.172
@@ -48,6 +48,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Secrets.HashiCorp", "src\Giom.VideoManager.Infrastructure.Secrets.HashiCorp\Giom.VideoManager.Infrastructure.Secrets.HashiCorp.csproj", "{224F3870-2179-4C6C-8859-18634EBAC6F6}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Composition", "src\Giom.VideoManager.Composition\Giom.VideoManager.Composition.csproj", "{42F597DA-3CFA-4C35-A280-A70859D1A1F8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Sentry", "src\Giom.VideoManager.Infrastructure.Sentry\Giom.VideoManager.Infrastructure.Sentry.csproj", "{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -299,6 +301,18 @@ Global
 		{42F597DA-3CFA-4C35-A280-A70859D1A1F8}.Release|x64.Build.0 = Release|Any CPU
 		{42F597DA-3CFA-4C35-A280-A70859D1A1F8}.Release|x86.ActiveCfg = Release|Any CPU
 		{42F597DA-3CFA-4C35-A280-A70859D1A1F8}.Release|x86.Build.0 = Release|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Debug|x64.Build.0 = Debug|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Debug|x86.Build.0 = Debug|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Release|x64.ActiveCfg = Release|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Release|x64.Build.0 = Release|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Release|x86.ActiveCfg = Release|Any CPU
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -324,6 +338,7 @@ Global
 		{5D0D2E40-EF84-4DBE-8528-63F62AE66D96} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{224F3870-2179-4C6C-8859-18634EBAC6F6} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{42F597DA-3CFA-4C35-A280-A70859D1A1F8} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
+		{1CD9850F-0451-45F2-A39E-CD3CB7FDBD28} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C7A72C10-8571-4565-BE89-8679CD2F3695}

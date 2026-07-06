@@ -2,6 +2,7 @@ using Giom.VideoManager.Application;
 using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Infrastructure.Logging;
+using Giom.VideoManager.Infrastructure.Sentry;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 
@@ -28,6 +29,7 @@ var host = Host.CreateDefaultBuilder(args)
         var config = ctx.Configuration;
 
         services.AddEmbeddingService(config);      // SupabaseEdgeFunction — retrieval (RAG)
+        services.AddIncertezaDetectorService(config); // Heuristica (padrão) — usado pelo agente pra marcar telemetria
         services.AddAgentService(config);          // Claude
         services.AddChatChannel(config);           // Telegram
         services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB

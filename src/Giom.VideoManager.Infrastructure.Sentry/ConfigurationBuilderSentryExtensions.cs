@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration;
 
-namespace Giom.VideoManager.Infrastructure.Logging;
+namespace Giom.VideoManager.Infrastructure.Sentry;
 
 /// <summary>
 /// O sink do Sentry é declarado no appsettings.json normalmente (Serilog:WriteTo, ao lado de

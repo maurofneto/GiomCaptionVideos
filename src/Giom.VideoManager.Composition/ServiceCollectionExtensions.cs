@@ -1,8 +1,9 @@
 using Giom.VideoManager.Application;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Telemetria;
-using Giom.VideoManager.Infrastructure.Tracing;
+using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
 using Giom.VideoManager.Infrastructure.Sql;
@@ -103,7 +104,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddTelemetriaService(this IServiceCollection services, IConfiguration config)
     {
         services.AddSupabaseTelemetria(config);
-        services.AddSingleton<SentryTelemetriaService>();
+        services.AddSentryTelemetria();
         services.AddSingleton<ITelemetriaService>(sp => new CompositeTelemetriaService(
             [sp.GetRequiredService<SupabaseTelemetriaService>(), sp.GetRequiredService<SentryTelemetriaService>()],
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CompositeTelemetriaService>>()));
@@ -112,8 +113,20 @@ public static class ServiceCollectionExtensions
 
     /// <summary>Rastreamento de etapas de uma interação (ex: busca RAG / agente / envio) — hoje via Sentry Performance.</summary>
     public static IServiceCollection AddTracingService(this IServiceCollection services)
+        => services.AddSentryTracing();
+
+    /// <summary>
+    /// IncertezaDetector:Provider — Heuristica (padrão). Deixado plugável (switch, não uma
+    /// ligação direta) porque a forma de detectar incerteza numa resposta pode virar um
+    /// classificador de IA ou outra lib no futuro, sem afetar quem consome o resultado.
+    /// </summary>
+    public static IServiceCollection AddIncertezaDetectorService(this IServiceCollection services, IConfiguration config)
     {
-        services.AddSingleton<ITracingService, SentryTracingService>();
-        return services;
+        var provider = config["IncertezaDetector:Provider"] ?? "Heuristica";
+
+        return provider switch
+        {
+            _ => services.AddHeuristicaIncertezaDetector()
+        };
     }
 }

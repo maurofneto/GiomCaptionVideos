@@ -4,6 +4,7 @@ using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Logging;
+using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Ministerio.Worker;
 using Serilog;
 

@@ -13,6 +13,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sql\Giom.VideoManager.Infrastructure.Sql.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Mongo\Giom.VideoManager.Infrastructure.Mongo.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Supabase\Giom.VideoManager.Infrastructure.Supabase.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sentry\Giom.VideoManager.Infrastructure.Sentry.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets\Giom.VideoManager.Infrastructure.Secrets.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Aws\Giom.VideoManager.Infrastructure.Secrets.Aws.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Azure\Giom.VideoManager.Infrastructure.Secrets.Azure.csproj" />
