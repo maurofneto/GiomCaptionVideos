@@ -138,6 +138,7 @@ public class ChatBotProcessor(
             catch (Exception ex)
             {
                 indicadorCts.Cancel();
+                trace.MarcarErro(ex);
                 logger.LogError(ex, "Erro ao processar mensagem de {ChatId}", mensagem.ChatId);
 
                 // Antes do AdicionarAsync (ex.: falha na busca RAG) ainda não existe
