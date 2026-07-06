@@ -45,14 +45,14 @@ public class ClaudeAgentService : IAgentService
         _systemPrompt = prompts.Load("agent.md");
     }
 
-    public async Task<string> ResponderAsync(string chatId, string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var mensagens = new List<Message>();
 
         foreach (var turno in historico)
         {
             mensagens.Add(new Message { Role = RoleType.User, Content = [new TextContent { Text = turno.Pergunta }] });
-            mensagens.Add(new Message { Role = RoleType.Assistant, Content = [new TextContent { Text = turno.Resposta }] });
+            mensagens.Add(new Message { Role = RoleType.Assistant, Content = [new TextContent { Text = turno.Resposta ?? string.Empty }] });
         }
 
         var userMessage = $"""
@@ -60,7 +60,7 @@ public class ClaudeAgentService : IAgentService
             {contexto}
 
             Pergunta do aluno:
-            {pergunta}
+            {turnoAtual.Pergunta}
             """;
         mensagens.Add(new Message { Role = RoleType.User, Content = [new TextContent { Text = userMessage }] });
 
@@ -79,7 +79,7 @@ public class ClaudeAgentService : IAgentService
         var texto = string.Concat(response.Content.OfType<TextContent>().Select(c => c.Text));
 
         if (response.StopReason == "max_tokens")
-            _logger.LogWarning("Resposta cortada por MaxTokens ({MaxTokens}) para {ChatId} — pergunta: {Pergunta}", _options.MaxTokens, chatId, pergunta);
+            _logger.LogWarning("Resposta cortada por MaxTokens ({MaxTokens}) para {ChatId} — pergunta: {Pergunta}", _options.MaxTokens, chatId, turnoAtual.Pergunta);
 
         _contextoTelemetria.Registrar(
             provedor: "Claude",
@@ -91,7 +91,7 @@ public class ClaudeAgentService : IAgentService
 
         if (string.IsNullOrWhiteSpace(texto))
         {
-            _logger.LogWarning("Claude não retornou texto para {ChatId} — pergunta: {Pergunta}", chatId, pergunta);
+            _logger.LogWarning("Claude não retornou texto para {ChatId} — pergunta: {Pergunta}", chatId, turnoAtual.Pergunta);
             return "Desculpe, não consegui gerar uma resposta agora. Tente novamente em instantes.";
         }
 

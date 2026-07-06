@@ -30,20 +30,36 @@ public class InMemoryConversaHistoricoService : IConversaHistoricoService
         if (!_historicos.TryGetValue(Chave(chatId), out var lista))
             return Task.FromResult<IReadOnlyList<TurnoConversa>>([]);
 
-        lock (lista) return Task.FromResult<IReadOnlyList<TurnoConversa>>(lista.ToList());
+        // Exclui um turno em andamento (pergunta gravada, resposta ainda não preenchida) do
+        // contexto passado pro agente.
+        lock (lista) return Task.FromResult<IReadOnlyList<TurnoConversa>>(lista.Where(t => t.Resposta != null).ToList());
     }
 
-    public Task<long> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    public Task<TurnoConversa> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
         var lista = _historicos.GetOrAdd(Chave(chatId), _ => []);
         var id = Interlocked.Increment(ref _proximoId);
+        var turnoComId = turno with { Id = id };
         lock (lista)
         {
-            lista.Add(turno);
+            lista.Add(turnoComId);
             if (lista.Count > MaxTurnos)
                 lista.RemoveAt(0);
         }
-        return Task.FromResult(id);
+        return Task.FromResult(turnoComId);
+    }
+
+    public Task AtualizarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    {
+        if (_historicos.TryGetValue(Chave(chatId), out var lista))
+        {
+            lock (lista)
+            {
+                var indice = lista.FindIndex(t => t.Id == turno.Id);
+                if (indice >= 0) lista[indice] = turno;
+            }
+        }
+        return Task.CompletedTask;
     }
 
     public Task LimparAsync(string chatId, CancellationToken ct = default)

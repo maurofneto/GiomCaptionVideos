@@ -32,17 +32,19 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
     {
         var geracao = await ObterGeracaoAtualAsync(chatId, ct);
 
+        // Resposta != null — exclui um turno em andamento (pergunta gravada, resposta ainda
+        // não preenchida) do contexto passado pro agente.
         var documentos = await _collection
-            .Find(d => d.ChatId == chatId && d.Geracao == geracao)
+            .Find(d => d.ChatId == chatId && d.Geracao == geracao && d.Resposta != null)
             .SortByDescending(d => d.CriadoEm)
             .Limit(MaxTurnos)
             .ToListAsync(ct);
 
         documentos.Reverse();
-        return documentos.Select(d => new TurnoConversa(d.Pergunta, d.Resposta)).ToList();
+        return documentos.Select(d => new TurnoConversa(d.NumericId, d.Pergunta, d.Resposta)).ToList();
     }
 
-    public async Task<long> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    public async Task<TurnoConversa> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
         var geracao = await ObterGeracaoAtualAsync(chatId, ct);
 
@@ -53,7 +55,7 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         var id = await ProximoIdAsync(ct);
         var documento = new TurnoConversaDocumento
         {
-            FeedbackId = id,
+            NumericId = id,
             ChatId = chatId,
             Pergunta = turno.Pergunta,
             Resposta = turno.Resposta,
@@ -62,7 +64,13 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         };
         await _collection.InsertOneAsync(documento, cancellationToken: ct);
 
-        return id;
+        return turno with { Id = id };
+    }
+
+    public async Task AtualizarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    {
+        var update = Builders<TurnoConversaDocumento>.Update.Set(d => d.Resposta, turno.Resposta);
+        await _collection.UpdateOneAsync(d => d.NumericId == turno.Id, update, cancellationToken: ct);
     }
 
     public async Task RegistrarFeedbackAsync(string conversaId, bool util, CancellationToken ct = default)
@@ -70,7 +78,7 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         if (!long.TryParse(conversaId, out var id)) return;
 
         var update = Builders<TurnoConversaDocumento>.Update.Set(d => d.Feedback, util ? 1 : -1);
-        await _collection.UpdateOneAsync(d => d.FeedbackId == id, update, cancellationToken: ct);
+        await _collection.UpdateOneAsync(d => d.NumericId == id, update, cancellationToken: ct);
     }
 
     private async Task<long> ProximoIdAsync(CancellationToken ct)
@@ -110,10 +118,10 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         public ObjectId Id { get; set; }
 
         /// <summary>Id numérico exposto pela interface (ver AdicionarAsync) — não é o _id do Mongo.</summary>
-        public long FeedbackId { get; set; }
+        public long NumericId { get; set; }
         public string ChatId { get; set; } = string.Empty;
         public string Pergunta { get; set; } = string.Empty;
-        public string Resposta { get; set; } = string.Empty;
+        public string? Resposta { get; set; }
         public DateTime CriadoEm { get; set; }
         public int Geracao { get; set; } = 1;
         public int? Feedback { get; set; }

@@ -52,9 +52,9 @@ public class ChatBotProcessor(
 
             // Vira o EntidadeId do telemetria "bot_interacao" assim que existir — identifica a
             // pergunta/resposta específica (conversa_historico.id), não só o chat. Só fica null
-            // se a exceção acontecer antes do AdicionarAsync (ex.: falha na busca RAG ou no
-            // agente), quando ainda não existe uma linha de conversa pra apontar.
-            long? conversaId = null;
+            // se a exceção acontecer antes do AdicionarAsync (ex.: falha na busca RAG), quando
+            // ainda não existe uma linha de conversa pra apontar.
+            TurnoConversa? turno = null;
 
             try
             {
@@ -78,14 +78,20 @@ public class ChatBotProcessor(
                         busca.Chunks.Max(c => c.Similarity));
                 }
 
-                var respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, mensagem.Texto, busca.ContextoFormatado, historico, ct);
+                // Grava a pergunta ANTES de chamar o agente — o turno (com Id) vai junto na
+                // chamada, permitindo que a telemetria do agente (TelemetriaAgentService)
+                // identifique exatamente a qual pergunta/resposta ela pertence, não só o chat.
+                turno = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(null, mensagem.Texto, null), ct);
 
-                // O id retornado vira o "avaliacaoId" repassado ao canal — é o que liga o
-                // voto de 👍/👎 do usuário de volta a esta pergunta/resposta específica.
-                conversaId = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, respostaTexto), ct);
+                var respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, turno, busca.ContextoFormatado, historico, ct);
+
+                turno = turno with { Resposta = respostaTexto };
+                await historicoService.AtualizarAsync(mensagem.ChatId, turno, ct);
 
                 indicadorCts.Cancel();
-                await channel.ResponderAsync(mensagem.ChatId, respostaTexto, conversaId.ToString(), ct);
+                // O Id vira o "avaliacaoId" repassado ao canal — é o que liga o voto de 👍/👎
+                // do usuário de volta a esta pergunta/resposta específica.
+                await channel.ResponderAsync(mensagem.ChatId, respostaTexto, turno.Id.ToString(), ct);
                 logger.LogInformation("Respondido: {ChatId} — {Usuario} ({TempoMs}ms)", mensagem.ChatId, mensagem.UserName, stopwatch.ElapsedMilliseconds);
 
                 // Tempo entre a pergunta e a resposta enviada, do ponto de vista do aluno —
@@ -93,7 +99,7 @@ public class ChatBotProcessor(
                 // (essa já é medida à parte pelo decorator TelemetriaAgentService).
                 await telemetriaService.RegistrarAsync(new RegistroTelemetria(
                     Tipo: "bot_interacao",
-                    EntidadeId: conversaId!.Value.ToString(),
+                    EntidadeId: turno.Id!.Value.ToString(),
                     TempoMs: stopwatch.ElapsedMilliseconds,
                     Sucesso: true
                 ), ct);
@@ -103,11 +109,11 @@ public class ChatBotProcessor(
                 indicadorCts.Cancel();
                 logger.LogError(ex, "Erro ao processar mensagem de {ChatId}", mensagem.ChatId);
 
-                // Antes do AdicionarAsync (ex.: falha na busca RAG/agente) ainda não existe
+                // Antes do AdicionarAsync (ex.: falha na busca RAG) ainda não existe
                 // conversa_historico pra apontar — cai de volta pro chatId nesse caso.
                 await telemetriaService.RegistrarAsync(new RegistroTelemetria(
                     Tipo: "bot_interacao",
-                    EntidadeId: conversaId?.ToString() ?? mensagem.ChatId,
+                    EntidadeId: turno?.Id?.ToString() ?? mensagem.ChatId,
                     TempoMs: stopwatch.ElapsedMilliseconds,
                     Sucesso: false
                 ), ct);

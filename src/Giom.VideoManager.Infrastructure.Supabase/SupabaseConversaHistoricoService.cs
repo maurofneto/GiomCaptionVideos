@@ -42,8 +42,11 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
     public async Task<IReadOnlyList<TurnoConversa>> ObterAsync(string chatId, CancellationToken ct = default)
     {
         var geracao = await ObterGeracaoAtualAsync(chatId, ct);
+
+        // resposta=not.is.null — exclui um turno em andamento (pergunta gravada, resposta
+        // ainda não preenchida) do contexto passado pro agente.
         var response = await _http.GetAsync(
-            $"/rest/v1/conversa_historico?chat_id=eq.{chatId}&geracao=eq.{geracao}&select=pergunta,resposta&order=criado_em.asc", ct);
+            $"/rest/v1/conversa_historico?chat_id=eq.{chatId}&geracao=eq.{geracao}&resposta=not.is.null&select=id,pergunta,resposta&order=criado_em.asc", ct);
 
         if (!response.IsSuccessStatusCode) return [];
 
@@ -51,7 +54,7 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
         return JsonConvert.DeserializeObject<List<TurnoConversa>>(json, JsonSettings) ?? [];
     }
 
-    public async Task<long> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    public async Task<TurnoConversa> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
         var geracao = await ObterGeracaoAtualAsync(chatId, ct);
         var dto = new { chat_id = chatId, pergunta = turno.Pergunta, resposta = turno.Resposta, geracao };
@@ -66,8 +69,17 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
 
         var json = await response.Content.ReadAsStringAsync(ct);
         var criados = JsonConvert.DeserializeObject<List<ConversaHistoricoDto>>(json, JsonSettings);
-        return criados?.FirstOrDefault()?.Id
-            ?? throw new InvalidOperationException("Supabase não retornou o id do registro criado em conversa_historico.");
+        var criado = criados?.FirstOrDefault()
+            ?? throw new InvalidOperationException("Supabase não retornou o registro criado em conversa_historico.");
+        return turno with { Id = criado.Id };
+    }
+
+    public async Task AtualizarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    {
+        var dto = new { resposta = turno.Resposta };
+        var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
+        var request = new HttpRequestMessage(HttpMethod.Patch, $"/rest/v1/conversa_historico?id=eq.{turno.Id}") { Content = content };
+        await _http.SendAsync(request, ct);
     }
 
     public async Task RegistrarFeedbackAsync(string conversaId, bool util, CancellationToken ct = default)

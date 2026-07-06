@@ -6,16 +6,21 @@ namespace Giom.VideoManager.Infrastructure.Telemetria;
 /// <summary>Decorator genérico — ver TelemetriaResumoService para a explicação do padrão.</summary>
 public class TelemetriaAgentService(IAgentService inner, ITelemetriaService telemetria, ContextoTelemetria contextoTelemetria) : IAgentService
 {
-    public async Task<string> ResponderAsync(string chatId, string pergunta, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
         var meta = contextoTelemetria.IniciarEscopo();
+
+        // turnoAtual.Id já existe nesse ponto (quem orquestra grava a pergunta antes de chamar
+        // o agente) — identifica a pergunta/resposta específica, não só o chat.
+        var entidadeId = turnoAtual.Id?.ToString() ?? chatId;
+
         try
         {
-            var resposta = await inner.ResponderAsync(chatId, pergunta, contexto, historico, ct);
+            var resposta = await inner.ResponderAsync(chatId, turnoAtual, contexto, historico, ct);
             await telemetria.RegistrarAsync(new RegistroTelemetria(
                 Tipo: "bot_resposta",
-                EntidadeId: chatId,
+                EntidadeId: entidadeId,
                 TempoMs: stopwatch.ElapsedMilliseconds,
                 Sucesso: true,
                 Provedor: meta.Provedor,
@@ -31,7 +36,7 @@ public class TelemetriaAgentService(IAgentService inner, ITelemetriaService tele
         {
             await telemetria.RegistrarAsync(new RegistroTelemetria(
                 Tipo: "bot_resposta",
-                EntidadeId: chatId,
+                EntidadeId: entidadeId,
                 TempoMs: stopwatch.ElapsedMilliseconds,
                 Sucesso: false,
                 Provedor: meta.Provedor,
