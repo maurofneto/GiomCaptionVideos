@@ -14,8 +14,10 @@ namespace Giom.VideoManager.Infrastructure.Mongo;
 public class MongoConversaHistoricoService : IConversaHistoricoService
 {
     private const int MaxTurnos = 6;
+    private const string SequenciaId = "conversa_historico_feedback_id";
     private readonly IMongoCollection<TurnoConversaDocumento> _collection;
     private readonly IMongoCollection<ChatSessaoDocumento> _sessoes;
+    private readonly IMongoCollection<SequenciaDocumento> _sequencias;
 
     public MongoConversaHistoricoService(IOptions<MongoOptions> options)
     {
@@ -23,6 +25,7 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         var database = client.GetDatabase(options.Value.DatabaseName);
         _collection = database.GetCollection<TurnoConversaDocumento>("conversa_historico");
         _sessoes = database.GetCollection<ChatSessaoDocumento>("chat_sessao");
+        _sequencias = database.GetCollection<SequenciaDocumento>("sequencia");
     }
 
     public async Task<IReadOnlyList<TurnoConversa>> ObterAsync(string chatId, CancellationToken ct = default)
@@ -39,11 +42,18 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         return documentos.Select(d => new TurnoConversa(d.Pergunta, d.Resposta)).ToList();
     }
 
-    public async Task AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    public async Task<long> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
         var geracao = await ObterGeracaoAtualAsync(chatId, ct);
+
+        // IConversaHistoricoService expõe o id como long (o tipo real da PK no Supabase, a
+        // implementação de produção). O _id nativo do Mongo é um ObjectId, não numérico —
+        // geramos um long próprio via $inc atômico numa coleção de sequência à parte, que
+        // sobrevive a restart do worker (diferente de um contador em memória).
+        var id = await ProximoIdAsync(ct);
         var documento = new TurnoConversaDocumento
         {
+            FeedbackId = id,
             ChatId = chatId,
             Pergunta = turno.Pergunta,
             Resposta = turno.Resposta,
@@ -51,6 +61,28 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
             Geracao = geracao
         };
         await _collection.InsertOneAsync(documento, cancellationToken: ct);
+
+        return id;
+    }
+
+    public async Task RegistrarFeedbackAsync(string conversaId, bool util, CancellationToken ct = default)
+    {
+        if (!long.TryParse(conversaId, out var id)) return;
+
+        var update = Builders<TurnoConversaDocumento>.Update.Set(d => d.Feedback, util ? 1 : -1);
+        await _collection.UpdateOneAsync(d => d.FeedbackId == id, update, cancellationToken: ct);
+    }
+
+    private async Task<long> ProximoIdAsync(CancellationToken ct)
+    {
+        var update = Builders<SequenciaDocumento>.Update.Inc(d => d.Valor, 1);
+        var opcoes = new FindOneAndUpdateOptions<SequenciaDocumento>
+        {
+            IsUpsert = true,
+            ReturnDocument = ReturnDocument.After
+        };
+        var resultado = await _sequencias.FindOneAndUpdateAsync(d => d.Id == SequenciaId, update, opcoes, ct);
+        return resultado.Valor;
     }
 
     public async Task LimparAsync(string chatId, CancellationToken ct = default)
@@ -76,11 +108,15 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
     private class TurnoConversaDocumento
     {
         public ObjectId Id { get; set; }
+
+        /// <summary>Id numérico exposto pela interface (ver AdicionarAsync) — não é o _id do Mongo.</summary>
+        public long FeedbackId { get; set; }
         public string ChatId { get; set; } = string.Empty;
         public string Pergunta { get; set; } = string.Empty;
         public string Resposta { get; set; } = string.Empty;
         public DateTime CriadoEm { get; set; }
         public int Geracao { get; set; } = 1;
+        public int? Feedback { get; set; }
     }
 
     private class ChatSessaoDocumento
@@ -88,5 +124,11 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         public ObjectId Id { get; set; }
         public string ChatId { get; set; } = string.Empty;
         public int Geracao { get; set; } = 1;
+    }
+
+    private class SequenciaDocumento
+    {
+        public string Id { get; set; } = string.Empty;
+        public long Valor { get; set; }
     }
 }

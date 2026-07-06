@@ -73,10 +73,13 @@ public class ChatBotProcessor(
                 }
 
                 var respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, mensagem.Texto, busca.ContextoFormatado, historico, ct);
-                await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, respostaTexto), ct);
+
+                // O id retornado vira o "avaliacaoId" repassado ao canal — é o que liga o
+                // voto de 👍/👎 do usuário de volta a esta pergunta/resposta específica.
+                var conversaId = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(mensagem.Texto, respostaTexto), ct);
 
                 indicadorCts.Cancel();
-                await channel.ResponderAsync(mensagem.ChatId, respostaTexto, ct);
+                await channel.ResponderAsync(mensagem.ChatId, respostaTexto, conversaId.ToString(), ct);
                 logger.LogInformation("Respondido: {ChatId} — {Usuario} ({TempoMs}ms)", mensagem.ChatId, mensagem.UserName, stopwatch.ElapsedMilliseconds);
 
                 // Tempo entre a pergunta e a resposta enviada, do ponto de vista do aluno —

@@ -8,7 +8,13 @@ public interface IChatChannel
 {
     IAsyncEnumerable<IncomingMessage> OuvirAsync(CancellationToken ct = default);
 
-    Task ResponderAsync(string chatId, string texto, CancellationToken ct = default);
+    /// <summary>
+    /// Envia a resposta ao chat. Quando <paramref name="avaliacaoId"/> não é nulo, o canal
+    /// pode anexar algum jeito do usuário avaliar essa resposta específica (ex: botões de
+    /// 👍/👎 no Telegram) — o Domain só expõe o id, sem saber como cada canal representa isso.
+    /// Nulo (ex: respostas de comando como /ajuda, /sobre) significa "não há o que avaliar".
+    /// </summary>
+    Task ResponderAsync(string chatId, string texto, string? avaliacaoId = null, CancellationToken ct = default);
 
     /// <summary>
     /// Sinaliza que uma resposta está sendo processada (ex: "digitando..."). Nem todo canal

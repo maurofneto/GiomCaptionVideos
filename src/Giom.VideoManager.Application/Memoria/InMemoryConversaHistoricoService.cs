@@ -16,6 +16,12 @@ public class InMemoryConversaHistoricoService : IConversaHistoricoService
     private const int MaxTurnos = 6;
     private readonly ConcurrentDictionary<string, int> _geracoes = new();
     private readonly ConcurrentDictionary<string, List<TurnoConversa>> _historicos = new();
+    private long _proximoId;
+
+    // Feedback nesta implementação é só best-effort (some ao reiniciar, igual ao resto do
+    // histórico em memória) — não há um id real de linha pra atualizar, apenas registramos
+    // o voto em memória para não quebrar o contrato da interface.
+    private readonly ConcurrentDictionary<long, bool> _feedback = new();
 
     private string Chave(string chatId) => $"{chatId}:{_geracoes.GetOrAdd(chatId, 1)}";
 
@@ -27,21 +33,29 @@ public class InMemoryConversaHistoricoService : IConversaHistoricoService
         lock (lista) return Task.FromResult<IReadOnlyList<TurnoConversa>>(lista.ToList());
     }
 
-    public Task AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    public Task<long> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
         var lista = _historicos.GetOrAdd(Chave(chatId), _ => []);
+        var id = Interlocked.Increment(ref _proximoId);
         lock (lista)
         {
             lista.Add(turno);
             if (lista.Count > MaxTurnos)
                 lista.RemoveAt(0);
         }
-        return Task.CompletedTask;
+        return Task.FromResult(id);
     }
 
     public Task LimparAsync(string chatId, CancellationToken ct = default)
     {
         _geracoes.AddOrUpdate(chatId, 2, (_, atual) => atual + 1);
+        return Task.CompletedTask;
+    }
+
+    public Task RegistrarFeedbackAsync(string conversaId, bool util, CancellationToken ct = default)
+    {
+        if (long.TryParse(conversaId, out var id))
+            _feedback[id] = util;
         return Task.CompletedTask;
     }
 }

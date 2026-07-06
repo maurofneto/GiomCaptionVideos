@@ -51,12 +51,31 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
         return JsonConvert.DeserializeObject<List<TurnoConversa>>(json, JsonSettings) ?? [];
     }
 
-    public async Task AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
+    public async Task<long> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
         var geracao = await ObterGeracaoAtualAsync(chatId, ct);
         var dto = new { chat_id = chatId, pergunta = turno.Pergunta, resposta = turno.Resposta, geracao };
         var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
-        await _http.PostAsync("/rest/v1/conversa_historico", content, ct);
+
+        // "Prefer: return=representation" faz o PostgREST devolver o registro criado (com o id
+        // gerado pela identity column) no corpo da resposta — sem isso o POST retorna 201 vazio.
+        var request = new HttpRequestMessage(HttpMethod.Post, "/rest/v1/conversa_historico") { Content = content };
+        request.Headers.Add("Prefer", "return=representation");
+        var response = await _http.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var criados = JsonConvert.DeserializeObject<List<ConversaHistoricoDto>>(json, JsonSettings);
+        return criados?.FirstOrDefault()?.Id
+            ?? throw new InvalidOperationException("Supabase não retornou o id do registro criado em conversa_historico.");
+    }
+
+    public async Task RegistrarFeedbackAsync(string conversaId, bool util, CancellationToken ct = default)
+    {
+        var dto = new { feedback = util ? 1 : -1 };
+        var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
+        var request = new HttpRequestMessage(HttpMethod.Patch, $"/rest/v1/conversa_historico?id=eq.{conversaId}") { Content = content };
+        await _http.SendAsync(request, ct);
     }
 
     public async Task LimparAsync(string chatId, CancellationToken ct = default)
@@ -93,5 +112,10 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
     private class ChatSessaoDto
     {
         public int Geracao { get; set; }
+    }
+
+    private class ConversaHistoricoDto
+    {
+        public long Id { get; set; }
     }
 }

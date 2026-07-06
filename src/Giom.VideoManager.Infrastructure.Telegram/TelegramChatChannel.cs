@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Giom.VideoManager.Infrastructure.Telegram;
 
@@ -35,14 +36,24 @@ public class TelegramChatChannel : IChatChannel
         new() { Command = "limpar", Description = "Apaga o histórico da conversa e recomeça" },
     ];
 
+    // "fb:" + id (bigint, até 19 dígitos) + ":" + voto ("1" ou "-1") fica bem abaixo dos
+    // 64 bytes que o Telegram permite em callback_data — folga enorme mesmo em cenários extremos.
+    private const string PrefixoCallbackFeedback = "fb:";
+
     private readonly ITelegramBotClient _bot;
     private readonly IBotComandosService _comandos;
+    private readonly IConversaHistoricoService _historicoService;
     private readonly ILogger<TelegramChatChannel> _logger;
 
-    public TelegramChatChannel(IOptions<TelegramChatChannelOptions> options, IBotComandosService comandos, ILogger<TelegramChatChannel> logger)
+    public TelegramChatChannel(
+        IOptions<TelegramChatChannelOptions> options,
+        IBotComandosService comandos,
+        IConversaHistoricoService historicoService,
+        ILogger<TelegramChatChannel> logger)
     {
         _bot = new TelegramBotClient(options.Value.BotToken);
         _comandos = comandos;
+        _historicoService = historicoService;
         _logger = logger;
     }
 
@@ -80,6 +91,15 @@ public class TelegramChatChannel : IChatChannel
             foreach (var update in updates)
             {
                 offset = update.Id + 1;
+
+                if (update.CallbackQuery is { Data: not null } callback)
+                {
+                    // Fluxo à parte do de mensagens normais — tratado inteiramente aqui dentro
+                    // do canal, não vira IncomingMessage (o Domain/Application não precisam
+                    // saber que um voto de feedback é, no Telegram, um callback de botão).
+                    await TratarCallbackFeedbackAsync(callback, ct);
+                    continue;
+                }
 
                 var mensagem = update.Message;
                 var texto = mensagem?.Text;
@@ -119,7 +139,9 @@ public class TelegramChatChannel : IChatChannel
             _ => $"Não conheço o comando {comando}. Manda /ajuda pra ver o que eu sei fazer."
         };
 
-        await ResponderAsync(chatId, resposta, ct);
+        // Respostas de comando (ajuda, sobre, etc.) não são "avaliáveis" — não fazem parte
+        // do fluxo de pergunta/resposta do RAG, então não recebem botões de feedback.
+        await ResponderAsync(chatId, resposta, ct: ct);
         return true;
     }
 
@@ -135,21 +157,27 @@ public class TelegramChatChannel : IChatChannel
         }
     }
 
-    public async Task ResponderAsync(string chatId, string texto, CancellationToken ct = default)
+    public async Task ResponderAsync(string chatId, string texto, string? avaliacaoId = null, CancellationToken ct = default)
     {
         var id = long.Parse(chatId);
+        var partes = DividirEmPartes(texto, LimiteSeguroPorMensagem);
 
         // Divide ANTES de converter pra HTML — cada parte vira uma mensagem própria, então
         // dividir por parágrafo aqui evita cortar uma tag <b>/<i> ao meio entre duas mensagens.
-        foreach (var parte in DividirEmPartes(texto, LimiteSeguroPorMensagem))
+        for (var i = 0; i < partes.Count; i++)
         {
             // O agente escreve em markdown simples, sem saber que o canal é o Telegram —
             // a conversão para o formato de exibição é responsabilidade deste canal.
-            var html = TelegramFormatador.ParaHtml(parte);
+            var html = TelegramFormatador.ParaHtml(partes[i]);
+
+            // Só a ÚLTIMA parte leva os botões — não faz sentido pedir feedback em cada
+            // pedaço de uma resposta longa dividida em várias mensagens.
+            var ehUltimaParte = i == partes.Count - 1;
+            var teclado = ehUltimaParte ? CriarTecladoFeedback(avaliacaoId) : null;
 
             try
             {
-                await _bot.SendMessage(id, html, parseMode: ParseMode.Html, cancellationToken: ct);
+                await _bot.SendMessage(id, html, parseMode: ParseMode.Html, replyMarkup: teclado, cancellationToken: ct);
             }
             catch (Exception ex)
             {
@@ -157,8 +185,59 @@ public class TelegramChatChannel : IChatChannel
                 // se o texto gerado quebrar o parser, reenvia sem formatação a perder a resposta.
                 _logger.LogWarning(ex, "Falha ao enviar mensagem formatada (HTML) para {ChatId} — reenviando como texto simples", chatId);
                 var textoSimples = TagHtml.Replace(html, string.Empty);
-                await _bot.SendMessage(id, textoSimples, cancellationToken: ct);
+                await _bot.SendMessage(id, textoSimples, replyMarkup: teclado, cancellationToken: ct);
             }
+        }
+    }
+
+    private static InlineKeyboardMarkup? CriarTecladoFeedback(string? avaliacaoId)
+    {
+        if (avaliacaoId is null) return null;
+
+        return new InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton.WithCallbackData("👍 Útil", $"{PrefixoCallbackFeedback}{avaliacaoId}:1"),
+                InlineKeyboardButton.WithCallbackData("👎 Não útil", $"{PrefixoCallbackFeedback}{avaliacaoId}:-1"),
+            ]
+        ]);
+    }
+
+    /// <summary>
+    /// Trata o clique nos botões de feedback (👍/👎). Sempre responde ao callback (mesmo em
+    /// erro) para o Telegram parar de mostrar o "relógio girando" no botão do usuário.
+    /// </summary>
+    private async Task TratarCallbackFeedbackAsync(CallbackQuery callback, CancellationToken ct)
+    {
+        var data = callback.Data!;
+        if (!data.StartsWith(PrefixoCallbackFeedback, StringComparison.Ordinal))
+            return;
+
+        var partes = data[PrefixoCallbackFeedback.Length..].Split(':');
+        if (partes.Length != 2)
+        {
+            _logger.LogWarning("callback_data de feedback em formato inesperado: {Data}", data);
+            return;
+        }
+
+        var conversaId = partes[0];
+        var util = partes[1] == "1";
+
+        try
+        {
+            await _historicoService.RegistrarFeedbackAsync(conversaId, util, ct);
+            await _bot.AnswerCallbackQuery(callback.Id, "Valeu pelo feedback!", cancellationToken: ct);
+
+            // Remove os botões pra não deixar votar de novo na mesma resposta — não é crítico
+            // (RegistrarFeedbackAsync apenas sobrescreve o voto), então falha aqui é só logada.
+            if (callback.Message is not null)
+            {
+                await _bot.EditMessageReplyMarkup(callback.Message.Chat.Id, callback.Message.MessageId, replyMarkup: null, cancellationToken: ct);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Falha ao registrar feedback do callback {Data}", data);
         }
     }
 
