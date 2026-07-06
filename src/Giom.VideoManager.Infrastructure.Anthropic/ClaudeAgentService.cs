@@ -29,6 +29,7 @@ public class ClaudeAgentService : IAgentService
 
     public ClaudeAgentService(
         IOptions<ClaudeAgentOptions> options,
+        IOptions<HeliconeOptions> heliconeOptions,
         PromptLoader prompts,
         IHttpClientFactory httpClientFactory,
         ILogger<ClaudeAgentService> logger,
@@ -37,7 +38,7 @@ public class ClaudeAgentService : IAgentService
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
+        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), heliconeOptions.Value);
         _systemPrompt = prompts.Load("agent.md");
     }
 

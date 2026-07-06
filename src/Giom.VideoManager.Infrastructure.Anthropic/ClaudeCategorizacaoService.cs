@@ -32,12 +32,12 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly string _systemPrompt;
 
-    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria)
+    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
+        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), heliconeOptions.Value);
         _systemPrompt = prompts.Load("categorizacao.md");
     }
 

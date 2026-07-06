@@ -23,7 +23,8 @@ var host = Host.CreateDefaultBuilder(args)
             .Enrich.FromLogContext()
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
-            .Enrich.With<ShortSourceContextEnricher>();
+            .Enrich.With<ShortSourceContextEnricher>()
+            .AddSentryIfConfigured(context.Configuration, environment: "ministerio");
     })
     .ConfigureServices((ctx, services) =>
     {

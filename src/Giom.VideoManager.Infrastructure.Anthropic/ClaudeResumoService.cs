@@ -34,12 +34,12 @@ public class ClaudeResumoService : IResumoService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly string _systemPrompt;
 
-    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria)
+    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
+        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), heliconeOptions.Value);
         _systemPrompt = prompts.Load("resumo.md");
     }
 

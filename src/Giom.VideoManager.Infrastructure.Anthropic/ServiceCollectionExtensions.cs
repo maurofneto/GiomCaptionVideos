@@ -11,13 +11,22 @@ public static class ServiceCollectionExtensions
 {
     private sealed class AnthropicHttpClientMarker;
 
-    private static IServiceCollection AddAnthropicHttpClient(this IServiceCollection services)
+    private static IServiceCollection AddAnthropicHttpClient(this IServiceCollection services, IConfiguration config)
     {
         if (services.Any(d => d.ServiceType == typeof(AnthropicHttpClientMarker)))
             return services;
 
         services.AddSingleton<AnthropicHttpClientMarker>();
-        services.AddHttpClient("anthropic").AddStandardResilienceHandler(options =>
+        services.Configure<HeliconeOptions>(config.GetSection("Helicone"));
+        var heliconeApiKey = config["Helicone:ApiKey"];
+
+        services.AddHttpClient("anthropic", client =>
+        {
+            // Helicone proxeia a chamada e registra custo/latência/tokens — a autenticação
+            // com a Anthropic em si continua igual (x-api-key), Helicone só intercepta.
+            if (!string.IsNullOrWhiteSpace(heliconeApiKey))
+                client.DefaultRequestHeaders.Add("Helicone-Auth", $"Bearer {heliconeApiKey}");
+        }).AddStandardResilienceHandler(options =>
         {
             options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
             options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(200);
@@ -35,7 +44,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddClaudeAgent(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
-        services.AddAnthropicHttpClient();
+        services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
         services.Configure<ClaudeAgentOptions>(config.GetSection("ClaudeAgent"));
         services.AddSingleton<ClaudeAgentService>();
@@ -49,7 +58,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddClaudeSummary(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
-        services.AddAnthropicHttpClient();
+        services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
         services.Configure<ClaudeResumoOptions>(config.GetSection("ClaudeResumo"));
         services.AddSingleton<ClaudeResumoService>();
@@ -64,7 +73,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddClaudeCategorizacao(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
-        services.AddAnthropicHttpClient();
+        services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
         services.Configure<ClaudeCategorizacaoOptions>(config.GetSection("ClaudeCategorizacao"));
         services.AddSingleton<ClaudeCategorizacaoService>();
