@@ -33,6 +33,7 @@ public class DirectEmbeddingService : IEmbeddingService
     private readonly DirectEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
     private readonly ILogger<DirectEmbeddingService> _logger;
+    private readonly IContextoTelemetria _contextoTelemetria;
     private readonly HttpClient _openAi;
     private readonly HttpClient _supabaseFunctions;
 
@@ -41,11 +42,13 @@ public class DirectEmbeddingService : IEmbeddingService
         IOptions<SupabaseOptions> supabaseOptions,
         IVideoChunkRepository chunkRepository,
         IHttpClientFactory httpClientFactory,
-        ILogger<DirectEmbeddingService> logger)
+        ILogger<DirectEmbeddingService> logger,
+        IContextoTelemetria contextoTelemetria)
     {
         _options         = options.Value;
         _chunkRepository = chunkRepository;
         _logger          = logger;
+        _contextoTelemetria = contextoTelemetria;
 
         _openAi = httpClientFactory.CreateClient("openai");
         _openAi.DefaultRequestHeaders.Authorization =
@@ -89,7 +92,13 @@ public class DirectEmbeddingService : IEmbeddingService
         _logger.LogInformation("{VideoId} — {Chunks} chunks de {Chars} chars",
             video.Id, chunks.Count, conteudo.Length);
 
-        var embeddings = await GenerateEmbeddingsAsync(chunks, ct);
+        var (embeddings, tokensTotais) = await GenerateEmbeddingsAsync(chunks, ct);
+
+        _contextoTelemetria.Registrar(
+            provedor: "OpenAI",
+            modelo: _options.EmbeddingModel,
+            tokensEntrada: tokensTotais,
+            custoEstimadoUsd: OpenAiPricingCalculator.Calcular(_options.EmbeddingModel, tokensTotais));
 
         await _chunkRepository.DeletarPorVideoAsync(video.Id, ct);
         await _chunkRepository.InserirAsync(
@@ -215,9 +224,10 @@ public class DirectEmbeddingService : IEmbeddingService
         return around;
     }
 
-    private async Task<List<float[]>> GenerateEmbeddingsAsync(List<ReadOnlyMemory<char>> chunks, CancellationToken ct)
+    private async Task<(List<float[]> Embeddings, int TokensTotais)> GenerateEmbeddingsAsync(List<ReadOnlyMemory<char>> chunks, CancellationToken ct)
     {
         var all = new List<float[]>();
+        var tokensTotais = 0;
 
         for (int i = 0; i < chunks.Count; i += _options.EmbedBatchSize)
         {
@@ -237,10 +247,12 @@ public class DirectEmbeddingService : IEmbeddingService
 
             var result = JsonConvert.DeserializeAnonymousType(json, new
             {
-                data = new[] { new { index = 0, embedding = new float[0] } }
+                data = new[] { new { index = 0, embedding = new float[0] } },
+                usage = new { total_tokens = 0 }
             });
 
             all.AddRange(result!.data.OrderBy(d => d.index).Select(d => d.embedding));
+            tokensTotais += result.usage?.total_tokens ?? 0;
 
             if (i + _options.EmbedBatchSize < chunks.Count)
                 await Task.Delay(200, ct);
@@ -249,6 +261,6 @@ public class DirectEmbeddingService : IEmbeddingService
                 Math.Min(i + _options.EmbedBatchSize, chunks.Count), chunks.Count);
         }
 
-        return all;
+        return (all, tokensTotais);
     }
 }

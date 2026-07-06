@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
@@ -19,7 +20,8 @@ public static class ServiceCollectionExtensions
 
         services.AddHttpClient("supabase-functions").AddStandardResilienceHandler();
 
-        services.AddSingleton<IEmbeddingService, DirectEmbeddingService>();
+        services.AddContextoTelemetria();
+        services.AddSingleton<DirectEmbeddingService>();
         return services;
     }
 }

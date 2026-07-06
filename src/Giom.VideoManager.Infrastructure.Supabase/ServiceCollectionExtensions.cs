@@ -31,7 +31,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSupabaseEmbedding(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseEmbeddingOptions>(config.GetSection("Supabase"));
-        services.AddSingleton<IEmbeddingService, SupabaseEmbeddingService>();
+        services.AddSingleton<SupabaseEmbeddingService>();
         return services;
     }
 

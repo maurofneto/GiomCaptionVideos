@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Giom.VideoManager.Domain\Giom.VideoManager.Domain.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure\Giom.VideoManager.Infrastructure.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Supabase\Giom.VideoManager.Infrastructure.Supabase.csproj" />
   </ItemGroup>
 

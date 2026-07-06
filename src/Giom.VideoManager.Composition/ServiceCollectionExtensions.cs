@@ -61,14 +61,35 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCategorizacaoService(this IServiceCollection services, IConfiguration config)
         => services.AddClaudeCategorizacao(config);
 
-    /// <summary>Embedding:Provider — Direct (padrão), SupabaseEdgeFunction.</summary>
+    /// <summary>
+    /// Embedding:Provider — Direct (padrão), SupabaseEdgeFunction. IndexarAsync sai decorado
+    /// com telemetria (tempo/custo — custo só aparece com Direct, que chama a OpenAI aqui
+    /// mesmo; a Edge Function do Supabase chama a OpenAI do lado de lá, invisível pro .NET).
+    /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
         var provider = config["Embedding:Provider"] ?? "Direct";
 
-        return provider == "SupabaseEdgeFunction"
-            ? services.AddSupabaseEmbedding(config)
-            : services.AddDirectEmbedding(config);
+        if (provider == "SupabaseEdgeFunction")
+        {
+            services.AddSupabaseEmbedding(config);
+            services.AddSingleton<IEmbeddingService>(sp => new TelemetriaEmbeddingService(
+                sp.GetRequiredService<SupabaseEmbeddingService>(),
+                sp.GetRequiredService<ITelemetriaService>(),
+                sp.GetRequiredService<ContextoTelemetria>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaEmbeddingService>>()));
+        }
+        else
+        {
+            services.AddDirectEmbedding(config);
+            services.AddSingleton<IEmbeddingService>(sp => new TelemetriaEmbeddingService(
+                sp.GetRequiredService<DirectEmbeddingService>(),
+                sp.GetRequiredService<ITelemetriaService>(),
+                sp.GetRequiredService<ContextoTelemetria>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaEmbeddingService>>()));
+        }
+
+        return services;
     }
 
     /// <summary>Agent de perguntas e respostas (sempre Claude por enquanto).</summary>
