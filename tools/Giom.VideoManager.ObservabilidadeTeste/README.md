@@ -1,13 +1,13 @@
 # Giom.VideoManager.ObservabilidadeTeste
 
 Console app pra testar a observabilidade da pipeline (Sentry Performance/Logs/Metrics, Helicone
-Sessions, CorrelationId) **sem depender do YouTube** — usa `FakeVideoSourceService` no lugar do
-provider real, com 3 aulas teológicas inventadas (títulos/transcrições acentuados de propósito,
-pra também exercitar a sanitização ASCII do Helicone). Tudo o mais é real: `InstitutoVideoHandler`,
-Claude (resumo + categorização, via Helicone), embedding (OpenAI), e persistência no Supabase dev.
-
-Cada execução gera vídeos com Id/UploadedAt novos, então rodar de novo sempre reprocessa os 3
-vídeos (não é filtrado como "já processado").
+Sessions, CorrelationId) **sem depender do YouTube** — usa `SupabaseVideoSource`/
+`SupabaseCaptionService` no lugar dos providers reais, buscando vídeos e legendas que já existem
+no Supabase (dev). Cada vídeo é devolvido com um Id novo (`teste-{guid}`), então
+`InstitutoVideoHandler` nunca acha um "já processado" e sempre gera resumo/categorização/embedding
+de novo — o conteúdo é real (título/legenda de um vídeo existente), só o Id é emprestado/novo.
+Tudo o mais é real: `InstitutoVideoHandler`, Claude (resumo + categorização, via Helicone),
+embedding (OpenAI), e persistência no Supabase dev.
 
 ## Como rodar
 
@@ -23,13 +23,17 @@ DOTNET_ENVIRONMENT=Development dotnet Giom.VideoManager.ObservabilidadeTeste.dll
 
 Usa as mesmas secrets de dev do Instituto (`/giom/dev/instituto/` no SSM) — precisa de AWS
 autenticado (`aws sso login` ou equivalente) pra buscar Claude/Helicone/Sentry/Supabase/OpenAI keys.
+Precisa que já existam vídeos com transcrição no Supabase dev (qualquer execução anterior do
+Instituto — ou deste próprio tool — já deixa isso lá).
 
 ## Onde ver o resultado
 
-- **Sentry**: Performance (transactions `pipeline.pagina`/`pipeline.video`) e Logs, ambiente
-  `instituto-obs-teste`.
-- **Helicone**: Sessions — User = canal fake, Session-Path
+Ambiente **`teste`** (Sentry e Helicone) — escolhido especificamente pra ficar fácil de filtrar,
+sem se misturar com `dev`/`prod`.
+
+- **Sentry**: Performance (transactions `pipeline.pagina`/`pipeline.video`) e Logs, ambiente `teste`.
+- **Helicone**: Sessions — User = canal de teste, Session-Path
   `/pipeline-Development/Instituto Giom (Teste de Observabilidade)/pagina-primeira/{videoId}/resumo|categorizacao`.
 - **Supabase dev**: tabelas `video`/`transcricao`/`resumo`/`categoria_teologica`/`video_chunk`,
-  filtrando por `channel_id = 'fake-instituto-observabilidade'` — dá pra apagar essas linhas
-  manualmente quando quiser limpar.
+  filtrando por `channel_id = 'supabase-instituto-teste'` ou `id LIKE 'teste-%'` — dá pra apagar
+  essas linhas manualmente quando quiser limpar.

@@ -10,9 +10,10 @@ using Giom.VideoManager.ObservabilidadeTeste;
 using Serilog;
 
 // Mesma composição do Giom.VideoManager.Instituto.Worker (Program.cs) — só troca
-// AddVideoSourceService (YouTube real) pelo FakeVideoSourceService, e roda uma vez só.
+// AddVideoSourceService (YouTube real) pelo SupabaseVideoSource, e roda uma vez só.
 // Objetivo: exercitar o pipeline real (resumo/categorização/embedding, Sentry, Helicone,
-// CorrelationId) sem depender de vídeos reais do YouTube nem gastar cota de API.
+// CorrelationId) sem depender do YouTube — usando vídeos/legendas reais já existentes no
+// Supabase (dev), mas devolvidos com Id novo pra sempre reprocessar do zero.
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -35,9 +36,9 @@ var host = Host.CreateDefaultBuilder(args)
     {
         var config = ctx.Configuration;
 
-        services.AddSingleton<IVideoSourceService, FakeVideoSourceService>();
-        services.AddPersistence(config);           // Supabase dev — grava os vídeos fake de verdade, pra inspecionar depois
-        services.AddSingleton<ICaptionService, FakeCaptionService>(); // nunca chamado (Transcricao já vem preenchida no vídeo fake) — evita precisar de credencial OAuth do Google só pra satisfazer o DI
+        services.AddPersistence(config);           // Supabase dev — SupabaseVideoSource/SupabaseCaptionService leem daqui, e o vídeo de teste também é gravado aqui de verdade
+        services.AddSingleton<IVideoSourceService, SupabaseVideoSource>();
+        services.AddSingleton<ICaptionService, SupabaseCaptionService>();
         services.AddSummaryService(config);        // Claude real — via Helicone
         services.AddCategorizacaoService(config);  // Claude real — via Helicone
         services.AddEmbeddingService(config);      // OpenAI real
@@ -50,13 +51,13 @@ var host = Host.CreateDefaultBuilder(args)
     })
     .Build();
 
-var canaisFake = new[]
+var canalDeTeste = new[]
 {
-    new ChannelConfig("fake-instituto-observabilidade", null, "Instituto Giom (Teste de Observabilidade)", Mine: true),
+    new ChannelConfig("supabase-instituto-teste", null, "Instituto Giom (Teste de Observabilidade)", Mine: true),
 };
 
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
-await processor.RunAsync(canaisFake);
+await processor.RunAsync(canalDeTeste);
 
 Log.Information("Execução de teste concluída — confira Sentry (Performance/Logs) e Helicone (Sessions) pra ver o resultado.");
 await Log.CloseAndFlushAsync();
