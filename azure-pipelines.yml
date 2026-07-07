@@ -2,6 +2,7 @@ trigger:
   branches:
     include:
       - master
+      - dev
 
 pool:
   vmImage: ubuntu-latest
@@ -12,6 +13,16 @@ variables:
   # AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY são variáveis secretas do pipeline
   # (Pipelines > Edit > Variables), NÃO ficam neste arquivo. User: giom-ci-deploy,
   # permissão só de push nos repositórios giom-instituto/giom-ministerio.
+  #
+  # branch dev publica recursos -dev (imagem :dev, service giom-agenteinstituto-dev-service);
+  # master publica prod (imagem :latest, service giom-agenteinstituto-service) e só recebe
+  # commits via PR aprovado (branch policy no Azure Repos).
+  ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+    IMAGE_TAG: dev
+    AGENTEINSTITUTO_SERVICE: giom-agenteinstituto-dev-service
+  ${{ if ne(variables['Build.SourceBranchName'], 'dev') }}:
+    IMAGE_TAG: latest
+    AGENTEINSTITUTO_SERVICE: giom-agenteinstituto-service
 
 steps:
   - script: |
@@ -30,31 +41,31 @@ steps:
       docker build -f src/Giom.VideoManager.Instituto.Worker/Dockerfile \
         --build-arg BUILD_ID=$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-instituto:latest .
+        -t $(ECR_REGISTRY)/giom-instituto:$(IMAGE_TAG) .
       docker push $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId)
-      docker push $(ECR_REGISTRY)/giom-instituto:latest
+      docker push $(ECR_REGISTRY)/giom-instituto:$(IMAGE_TAG)
     displayName: 'Build e push — GiomInstituto'
 
   - script: |
       docker build -f src/Giom.VideoManager.Ministerio.Worker/Dockerfile \
         --build-arg BUILD_ID=$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-ministerio:latest .
+        -t $(ECR_REGISTRY)/giom-ministerio:$(IMAGE_TAG) .
       docker push $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId)
-      docker push $(ECR_REGISTRY)/giom-ministerio:latest
+      docker push $(ECR_REGISTRY)/giom-ministerio:$(IMAGE_TAG)
     displayName: 'Build e push — GiomMinisterio'
 
   - script: |
       docker build -f src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile \
         --build-arg BUILD_ID=$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-agenteinstituto:latest .
+        -t $(ECR_REGISTRY)/giom-agenteinstituto:$(IMAGE_TAG) .
       docker push $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId)
-      docker push $(ECR_REGISTRY)/giom-agenteinstituto:latest
+      docker push $(ECR_REGISTRY)/giom-agenteinstituto:$(IMAGE_TAG)
     displayName: 'Build e push — GiomAgenteInstituto'
 
   - script: |
-      aws ecs update-service --cluster giom-cluster --service giom-agenteinstituto-service --force-new-deployment --region $(AWS_REGION)
+      aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)
     displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
     env:
       AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
