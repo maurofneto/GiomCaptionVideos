@@ -28,6 +28,8 @@ public class SentryTracingService : ITracingService
             _finalizado = true;
         }
 
+        public void DefinirTag(string chave, string valor) => transacao.SetTag(chave, valor);
+
         public void Dispose()
         {
             if (!_finalizado) transacao.Finish();

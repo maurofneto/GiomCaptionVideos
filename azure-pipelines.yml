@@ -28,6 +28,7 @@ steps:
 
   - script: |
       docker build -f src/Giom.VideoManager.Instituto.Worker/Dockerfile \
+        --build-arg BUILD_ID=$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-instituto:latest .
       docker push $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId)
@@ -36,6 +37,7 @@ steps:
 
   - script: |
       docker build -f src/Giom.VideoManager.Ministerio.Worker/Dockerfile \
+        --build-arg BUILD_ID=$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-ministerio:latest .
       docker push $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId)
@@ -44,6 +46,7 @@ steps:
 
   - script: |
       docker build -f src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile \
+        --build-arg BUILD_ID=$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId) \
         -t $(ECR_REGISTRY)/giom-agenteinstituto:latest .
       docker push $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId)

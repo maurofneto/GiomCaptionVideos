@@ -19,4 +19,7 @@ public interface ITrace : IDisposable
 
     /// <summary>Marca o trace como falho — chamar em vez de deixar o Dispose finalizar normalmente.</summary>
     void MarcarErro(Exception ex);
+
+    /// <summary>Anexa uma tag pra diferenciar este trace de outros do mesmo nome (ex.: video.id, pagina.token) — pesquisável no provider concreto.</summary>
+    void DefinirTag(string chave, string valor);
 }

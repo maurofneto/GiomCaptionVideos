@@ -174,6 +174,66 @@ public class ChannelProcessorTests
     }
 
     [Fact]
+    public async Task RunAsync_AbreUmaTransacaoDeVideoPorVideo_NaoUmaSoParaAPaginaInteira()
+    {
+        // Bug de observabilidade real: quando a transação cobria a página inteira, cada
+        // RegistrarAsync (resumo/categorização/embedding) sobrescrevia a measurement do vídeo
+        // anterior com a mesma chave — o dashboard acabava mostrando o tempo do ÚLTIMO vídeo
+        // processado pra "todas as etapas". Uma transação "pipeline.video" por vídeo elimina
+        // esse compartilhamento.
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        var tracesDeVideo = ambiente.Tracing.Traces.Where(t => t.Nome == "pipeline.video").ToList();
+        Assert.Equal(2, tracesDeVideo.Count); // uma transação PRÓPRIA por vídeo, não uma reaproveitada
+    }
+
+    [Fact]
+    public async Task RunAsync_TagueiaCadaTraceDeVideoComOIdDoVideoEOTokenDaPagina()
+    {
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        var traceDeVideo = ambiente.Tracing.Traces.Single(t => t.Nome == "pipeline.video").Trace;
+        Assert.Equal("v1", traceDeVideo.Tags["video.id"]);
+        Assert.Equal("primeira", traceDeVideo.Tags["pagina.token"]); // primeira página = sem pageToken ainda
+    }
+
+    [Fact]
+    public async Task RunAsync_TagueiaOTraceDaPaginaComOTokenAtual()
+    {
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.Progresso.Setup(p => p.GetLastPageTokenAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("token-retomada");
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), "token-retomada", It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        var tracePagina = ambiente.Tracing.Traces.Single(t => t.Nome == "pipeline.pagina").Trace;
+        Assert.Equal("token-retomada", tracePagina.Tags["pagina.token"]);
+    }
+
+    [Fact]
+    public async Task RunAsync_QuandoVideoFalha_MarcaErroNoTraceDoVideo()
+    {
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+        ambiente.Handler.Setup(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).ThrowsAsync(new Exception("falha ao transcrever"));
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        var traceDeVideo = ambiente.Tracing.Traces.Single(t => t.Nome == "pipeline.video").Trace;
+        Assert.True(traceDeVideo.Erro);
+    }
+
+    [Fact]
     public async Task RunAsync_SalvaProgressoComOPageTokenEADataMaisRecenteProcessados()
     {
         var ambiente = new Ambiente();

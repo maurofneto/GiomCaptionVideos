@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Configuration;
 using Serilog;
 using Serilog.Events;
@@ -22,13 +23,24 @@ public static class LoggerConfigurationSentryExtensions
         if (string.IsNullOrWhiteSpace(dsn))
             return loggerConfiguration;
 
+        // BUILD_ID vem do Dockerfile (ARG/ENV, preenchido pelo pipeline com $(Build.BuildId)) —
+        // sem isso, o SDK só tinha a versão do assembly (que não muda a cada deploy) pra montar
+        // o Release, e todo deploy aparecia como a mesma Release no Sentry.
+        var buildId = config["BUILD_ID"];
+        var nomeApp = Assembly.GetEntryAssembly()?.GetName().Name ?? "giom";
+
         return loggerConfiguration.WriteTo.Sentry(o =>
         {
             o.Dsn = dsn;
             o.Environment = config["Sentry:Environment"];
+            o.Release = string.IsNullOrWhiteSpace(buildId) ? null : $"{nomeApp}@{buildId}";
             o.MinimumBreadcrumbLevel = config.GetValue("Sentry:MinimumBreadcrumbLevel", LogEventLevel.Information);
             o.MinimumEventLevel = config.GetValue("Sentry:MinimumEventLevel", LogEventLevel.Error);
             o.TracesSampleRate = config.GetValue<double?>("Sentry:TracesSampleRate");
+            // Warnings/Errors passam a aparecer em Sentry > Logs (não só como Issue/Evento) —
+            // e habilita SentrySdk.Metrics (série temporal agregável, usado em SentryTelemetriaService).
+            o.EnableLogs = config.GetValue("Sentry:EnableLogs", true);
+            o.EnableMetrics = config.GetValue("Sentry:EnableMetrics", true);
         });
     }
 }

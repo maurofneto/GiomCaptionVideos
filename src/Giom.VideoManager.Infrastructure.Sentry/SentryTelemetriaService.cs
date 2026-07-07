@@ -9,13 +9,20 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 /// acontecer depois na mesma operação e for capturado pelo Sentry, o relatório já vem com o
 /// histórico de operações de IA que aconteceram antes (ex: "esse resumo gastou 1200 tokens
 /// antes de falhar na categorização").
-/// Além do breadcrumb, anexa tempo/tokens/custo como measurement na TRANSAÇÃO raiz (não na
-/// span/etapa filha mais recente) — confirmado por inspeção direta do payload de um evento real
-/// que measurements anexadas a uma span filha (via SentrySdk.GetSpan()) chegam no Sentry mas não
-/// ficam pesquisáveis no Discover/Dashboards (os widgets filtram por "transaction:nome", e essa
-/// busca só enxerga measurements da transação raiz). Nome prefixado com o Tipo (ex.:
-/// "resumo.custo_usd") pra não colidir quando mais de um tipo de operação contribui pra mesma
-/// transação (ex.: um vídeo com resumo + categorização).
+/// Além do breadcrumb, anexa tempo/tokens/custo como measurement na TRANSAÇÃO ATUAL (não na
+/// span/etapa filha) — confirmado por inspeção direta do payload de um evento real que
+/// measurements anexadas a uma span filha (via SentrySdk.GetSpan()) chegam no Sentry mas não
+/// ficam pesquisáveis no Discover/Dashboards. Como cada vídeo/interação agora abre sua PRÓPRIA
+/// transação (ver ChannelProcessor/ChatBotProcessor), essa medição não se mistura mais com a de
+/// outro vídeo/interação da mesma página/run — antes, quando a transação cobria a página
+/// inteira, cada SetMeasurement sobrescrevia o valor do vídeo anterior com a mesma chave, e o
+/// dashboard acabava mostrando só o último vídeo processado (parecendo "tempo igual pra tudo").
+/// Nome prefixado com o Tipo (ex.: "resumo.custo_usd") pra não colidir quando mais de um tipo de
+/// operação contribui pra mesma transação.
+/// Também emite Sentry Metrics (distribution) com o mesmo dado, tagueado por tipo/provedor/
+/// modelo/sucesso — diferente da measurement (presa a UMA transação), a métrica agrega em série
+/// temporal entre transações/execuções diferentes (ex.: "tempo médio de resumo nos últimos 7
+/// dias", sem precisar abrir uma transação específica pra consultar).
 /// Seguro mesmo se o Sentry não estiver inicializado nesse worker (Sentry:Dsn vazio) —
 /// SentrySdk vira no-op nesse caso.
 /// </summary>
@@ -54,6 +61,22 @@ public class SentryTelemetriaService : ITelemetriaSink
             if (registro.Provedor is not null) transacao.SetTag($"{registro.Tipo}.provedor", registro.Provedor);
             if (registro.Modelo is not null) transacao.SetTag($"{registro.Tipo}.modelo", registro.Modelo);
         }
+
+        IEnumerable<KeyValuePair<string, object>> atributos =
+        [
+            new("tipo", registro.Tipo),
+            new("sucesso", registro.Sucesso),
+            new("provedor", registro.Provedor ?? "n/d"),
+            new("modelo", registro.Modelo ?? "n/d"),
+        ];
+
+        SentrySdk.Metrics.EmitDistribution("giom.tempo_ms", registro.TempoMs, MeasurementUnit.Duration.Millisecond, atributos);
+        if (registro.CustoEstimadoUsd is not null)
+            SentrySdk.Metrics.EmitDistribution("giom.custo_usd", (double)registro.CustoEstimadoUsd.Value, MeasurementUnit.Custom("usd"), atributos);
+        if (registro.TokensEntrada is not null)
+            SentrySdk.Metrics.EmitDistribution("giom.tokens_entrada", registro.TokensEntrada.Value, MeasurementUnit.Custom("tokens"), atributos);
+        if (registro.TokensSaida is not null)
+            SentrySdk.Metrics.EmitDistribution("giom.tokens_saida", registro.TokensSaida.Value, MeasurementUnit.Custom("tokens"), atributos);
 
         return Task.CompletedTask;
     }

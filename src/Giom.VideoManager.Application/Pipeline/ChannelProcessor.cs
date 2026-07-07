@@ -67,16 +67,17 @@ public class ChannelProcessor(
         while (processedIds.Count < _options.MaxVideosPerRun && !ct.IsCancellationRequested)
         {
             logger.LogInformation($"Canal {config.Name} — processando página (já processados: {processedIds.Count})", config.Name);
-            var page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, _options.MaxVideosPerRun), pageToken, ct);
+
+            PlaylistPage page;
+            using (var tracePagina = tracingService.IniciarTrace("pipeline.pagina", "video_pipeline"))
+            {
+                // Tag do token — sem isso, toda página de todo canal aparecia igual no Sentry,
+                // sem jeito de saber qual delas era qual numa lista de traces.
+                tracePagina.DefinirTag("pagina.token", pageToken ?? "primeira");
+                page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, _options.MaxVideosPerRun), pageToken, ct);
+            }
 
             if (page.Videos.Count == 0) break;
-
-            // Uma transação por página — cada vídeo vira uma etapa dela, e a telemetria de
-            // transcrição/resumo/categorização/embedding (RegistrarAsync) gravada durante o
-            // processamento do vídeo se anexa automaticamente à etapa "video" ainda aberta
-            // (Sentry resolve pra span ativa mais recente), sem o Handler precisar conhecer
-            // ITracingService.
-            using var trace = tracingService.IniciarTrace("pipeline.pagina", "video_pipeline");
 
             foreach (var video in page.Videos)
             {
@@ -90,19 +91,30 @@ public class ChannelProcessor(
 
                 logger.LogInformation("Canal {Name} — processando vídeo {Id} — {Title}", config.Name, video.Id, video.Title);
 
+                // Uma transação POR VÍDEO (não mais por página inteira) — é o que faz a
+                // telemetria de transcrição/resumo/categorização/embedding (RegistrarAsync,
+                // que anexa measurement na transação atual) parar de se sobrescrever entre
+                // vídeos diferentes da mesma página. Tag de video.id/pagina.token deixa cada
+                // trace identificável isoladamente no Sentry.
+                var traceVideo = tracingService.IniciarTrace("pipeline.video", "video_pipeline");
+                traceVideo.DefinirTag("video.id", video.Id);
+                traceVideo.DefinirTag("pagina.token", pageToken ?? "primeira");
+
                 try
                 {
-                    using (trace.IniciarEtapa("video"))
-                    {
-                        await videoHandler.HandleAsync(video, ct);
-                    }
+                    await videoHandler.HandleAsync(video, ct);
 
                     if ((video.UploadedAt ?? DateTime.MinValue) > (lastProcessedDate ?? DateTime.MinValue))
                         lastProcessedDate = video.UploadedAt;
                 }
                 catch (Exception ex)
                 {
+                    traceVideo.MarcarErro(ex);
                     logger.LogError(ex, "Erro ao processar vídeo {Id} — {Title}", video.Id, video.Title);
+                }
+                finally
+                {
+                    traceVideo.Dispose();
                 }
 
                 await Task.Delay(_options.DelayBetweenVideosMs, ct);

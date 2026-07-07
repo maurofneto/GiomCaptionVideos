@@ -6,6 +6,7 @@ namespace Giom.VideoManager.Testes.Comuns;
 public class FakeTrace : ITrace
 {
     public List<string> Etapas { get; } = [];
+    public Dictionary<string, string> Tags { get; } = [];
     public bool Erro { get; private set; }
     public Exception? ExcecaoMarcada { get; private set; }
 
@@ -20,6 +21,8 @@ public class FakeTrace : ITrace
         Erro = true;
         ExcecaoMarcada = ex;
     }
+
+    public void DefinirTag(string chave, string valor) => Tags[chave] = valor;
 
     public void Dispose() { }
 

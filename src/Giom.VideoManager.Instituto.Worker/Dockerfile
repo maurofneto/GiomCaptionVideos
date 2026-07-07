@@ -12,4 +12,10 @@ RUN dotnet publish "src/Giom.VideoManager.Instituto.Worker/Giom.VideoManager.Ins
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
+
+# Preenchido pelo pipeline (--build-arg BUILD_ID=$(Build.BuildId)) — vira a Release do Sentry
+# (ver LoggerConfigurationSentryExtensions), pra cada deploy aparecer distinto lá.
+ARG BUILD_ID=local
+ENV BUILD_ID=$BUILD_ID
+
 ENTRYPOINT ["dotnet", "Giom.VideoManager.Instituto.Worker.dll"]
