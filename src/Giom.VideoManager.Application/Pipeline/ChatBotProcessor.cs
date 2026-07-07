@@ -62,7 +62,8 @@ public class ChatBotProcessor(
         }
     }
 
-    private async Task ProcessarMensagemAsync(IncomingMessage mensagem, CancellationToken ct)
+    /// <summary>Internal (não private) só pra ser testável diretamente — ver Giom.VideoManager.Application.Tests.</summary>
+    internal async Task ProcessarMensagemAsync(IncomingMessage mensagem, CancellationToken ct)
     {
         // CorrelationId + ChatId via BeginScope (abstração padrão do .NET, não Serilog
         // direto) — o provider de log (Serilog) injeta esses valores em TODAS as linhas

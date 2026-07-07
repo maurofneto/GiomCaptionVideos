@@ -16,8 +16,11 @@ public class RateLimitOptions
 /// deslizante em memória, por instância — reinicia se o processo reiniciar, o que é aceitável
 /// pra esse tipo de limite (não é contador de faturamento, que já é feito à parte).
 /// </summary>
-public class RateLimitGuardRail(IOptions<RateLimitOptions> options) : IGuardRail
+public class RateLimitGuardRail(IOptions<RateLimitOptions> options, TimeProvider? timeProvider = null) : IGuardRail
 {
+    // TimeProvider (não DateTime.UtcNow direto) — permite testar a janela deslizante
+    // deterministicamente (avançar o relógio sem Thread.Sleep de verdade).
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly ConcurrentDictionary<string, Queue<DateTime>> _historico = new();
 
     public string Nome => "RateLimit";
@@ -27,7 +30,7 @@ public class RateLimitGuardRail(IOptions<RateLimitOptions> options) : IGuardRail
     {
         var opcoes = options.Value;
         var janela = TimeSpan.FromMinutes(opcoes.JanelaMinutos);
-        var agora = DateTime.UtcNow;
+        var agora = _timeProvider.GetUtcNow().UtcDateTime;
         var fila = _historico.GetOrAdd(contexto.ChatId, _ => new Queue<DateTime>());
 
         lock (fila)

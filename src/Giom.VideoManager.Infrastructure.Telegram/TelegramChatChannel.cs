@@ -45,13 +45,16 @@ public class TelegramChatChannel : IChatChannel
     private readonly IConversaHistoricoService _historicoService;
     private readonly ILogger<TelegramChatChannel> _logger;
 
+    // ITelegramBotClient injetado (não construído aqui) — a Composition registra a instância
+    // concreta a partir de TelegramChatChannelOptions:BotToken (ver ServiceCollectionExtensions).
+    // Isso é o que permite testar esta classe com um bot fake, sem token nem rede de verdade.
     public TelegramChatChannel(
-        IOptions<TelegramChatChannelOptions> options,
+        ITelegramBotClient bot,
         IBotComandosService comandos,
         IConversaHistoricoService historicoService,
         ILogger<TelegramChatChannel> logger)
     {
-        _bot = new TelegramBotClient(options.Value.BotToken);
+        _bot = bot;
         _comandos = comandos;
         _historicoService = historicoService;
         _logger = logger;
@@ -121,7 +124,7 @@ public class TelegramChatChannel : IChatChannel
     /// "texto começa com /") — usamos essa marcação nativa do canal pra decidir o que é
     /// comando, e delegamos a ação ao IBotComandosService (Domain), que não sabe nada de Telegram.
     /// </summary>
-    private async Task<bool> TratarComandoAsync(Message mensagem, string chatId, string texto, CancellationToken ct)
+    internal async Task<bool> TratarComandoAsync(Message mensagem, string chatId, string texto, CancellationToken ct)
     {
         var entidade = mensagem.Entities?.FirstOrDefault(e => e.Type == MessageEntityType.BotCommand && e.Offset == 0);
         if (entidade is null) return false;
@@ -207,7 +210,7 @@ public class TelegramChatChannel : IChatChannel
     /// Trata o clique nos botões de feedback (👍/👎). Sempre responde ao callback (mesmo em
     /// erro) para o Telegram parar de mostrar o "relógio girando" no botão do usuário.
     /// </summary>
-    private async Task TratarCallbackFeedbackAsync(CallbackQuery callback, CancellationToken ct)
+    internal async Task TratarCallbackFeedbackAsync(CallbackQuery callback, CancellationToken ct)
     {
         var data = callback.Data!;
         if (!data.StartsWith(PrefixoCallbackFeedback, StringComparison.Ordinal))
@@ -249,7 +252,7 @@ public class TelegramChatChannel : IChatChannel
     /// em quebra de parágrafo (linha em branco) — só corta no meio de um parágrafo se ele
     /// sozinho já for maior que o limite.
     /// </summary>
-    private static List<string> DividirEmPartes(string texto, int limite)
+    internal static List<string> DividirEmPartes(string texto, int limite)
     {
         if (texto.Length <= limite) return [texto];
 
