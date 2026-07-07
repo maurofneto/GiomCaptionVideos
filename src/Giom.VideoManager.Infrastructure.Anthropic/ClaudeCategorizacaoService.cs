@@ -52,10 +52,15 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         var resumo = video.Resumo?.Descricao ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resumo)) return [];
 
+        // Ver ClaudeResumoService: estende a sessão de canal/página/vídeo já aberta pelo
+        // ChannelProcessor em vez de recomeçar uma nova, pra formar a hierarquia
+        // canal->página->vídeo->categorização na plataforma de observabilidade externa.
+        var sessaoCanal = _sessionContext.Atual;
         _sessionContext.Definir(new SessaoObservabilidade(
-            SessionId: video.Id,
-            SessionName: video.Title,
-            SessionPath: "/pipeline/categorizacao",
+            SessionId: sessaoCanal?.SessionId ?? video.Id,
+            SessionName: sessaoCanal?.SessionName ?? video.Title,
+            SessionPath: $"{sessaoCanal?.SessionPath ?? "/pipeline"}/categorizacao",
+            UserId: sessaoCanal?.UserId,
             Propriedades: new Dictionary<string, string> { ["Tipo"] = "categorizacao", ["Canal"] = video.ChannelTitle }));
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters

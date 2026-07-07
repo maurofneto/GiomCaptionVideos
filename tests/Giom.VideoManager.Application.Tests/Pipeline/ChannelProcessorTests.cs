@@ -35,6 +35,7 @@ public class ChannelProcessorTests
         public Mock<IProgressoRepository> Progresso { get; } = new();
         public Mock<IVideoHandler> Handler { get; } = new();
         public FakeTracingService Tracing { get; } = new();
+        public FakeSessionContext SessionContext { get; } = new();
         public FakeLogger<ChannelProcessor> Logger { get; } = new();
         public ProcessingOptions Opcoes { get; set; } = new() { DelayBetweenPagesMs = 0, DelayBetweenVideosMs = 0, MaxVideosPerRun = 100 };
 
@@ -49,7 +50,7 @@ public class ChannelProcessorTests
         }
 
         public ChannelProcessor CriarProcessor() => new(
-            VideoSource.Object, Progresso.Object, Handler.Object, Tracing, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
+            VideoSource.Object, Progresso.Object, Handler.Object, Tracing, SessionContext, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
     }
 
     [Fact]
@@ -217,6 +218,42 @@ public class ChannelProcessorTests
 
         var tracePagina = ambiente.Tracing.Traces.Single(t => t.Nome == "pipeline.pagina").Trace;
         Assert.Equal("token-retomada", tracePagina.Tags["pagina.token"]);
+    }
+
+    [Fact]
+    public async Task RunAsync_DefineSessaoComUserESessionNameIguaisAoCanal()
+    {
+        // Board #82: durante a pipeline, o User do Helicone deve ser o nome do canal (não um
+        // valor genérico) — permite ver custo/uso agrupado por canal na plataforma externa.
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        var sessao = ambiente.SessionContext.Definidas.Single();
+        Assert.Equal(Canal.Name, sessao.UserId);
+        Assert.Equal(Canal.Name, sessao.SessionName);
+    }
+
+    [Fact]
+    public async Task RunAsync_DefineSessionPathComPaginaEVideo_MesmoSessionIdEntreVideosDaMesmaRun()
+    {
+        // Board #82: hierarquia canal->página->vídeo->etapa no Helicone. O SessionId (que agrupa
+        // tudo como UMA árvore) é o mesmo pra toda a run do canal; o SessionPath diferencia
+        // página/vídeo. As etapas (resumo/categorização) acrescentam seu próprio segmento por
+        // cima disso (ver ClaudeResumoService/ClaudeCategorizacaoService).
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        Assert.Equal(2, ambiente.SessionContext.Definidas.Count);
+        var (sessaoV1, sessaoV2) = (ambiente.SessionContext.Definidas[0], ambiente.SessionContext.Definidas[1]);
+        Assert.Equal(sessaoV1.SessionId, sessaoV2.SessionId); // mesma árvore/sessão pra run inteira
+        Assert.Equal("/pagina-1/v1", sessaoV1.SessionPath);
+        Assert.Equal("/pagina-1/v2", sessaoV2.SessionPath);
     }
 
     [Fact]

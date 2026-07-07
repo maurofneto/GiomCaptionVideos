@@ -12,6 +12,7 @@ public class ChannelProcessor(
     IProgressoRepository progressoRepository,
     IVideoHandler videoHandler,
     ITracingService tracingService,
+    ISessionContext sessionContext,
     ILogger<ChannelProcessor> logger,
     IOptions<ProcessingOptions> options)
 {
@@ -48,6 +49,14 @@ public class ChannelProcessor(
         var pageToken        = await progressoRepository.GetLastPageTokenAsync(channelKey, playlistId, ct);
         var lastProcessedDate = await progressoRepository.GetLastProcessedDateAsync(channelKey, playlistId, ct);
 
+        // Um Session-Id por execução do canal agrupa, numa plataforma externa de observabilidade
+        // de LLM (ex.: Helicone), todas as páginas/vídeos/etapas dessa run como UMA árvore só —
+        // o Session-Path (canal já é o Session-Name/User) marca a posição de cada chamada dentro
+        // dela: /pagina-N/{videoId}, e cada etapa (resumo/categorização) acrescenta seu próprio
+        // segmento por cima disso (ver ClaudeResumoService/ClaudeCategorizacaoService).
+        var sessaoCanalId = Guid.NewGuid().ToString();
+        var numeroPagina = 0;
+
         bool applyDateFilter = pageToken == null;
 
         // Congela o corte de data usado só pra decidir o que pular — a playlist do YouTube
@@ -66,6 +75,7 @@ public class ChannelProcessor(
 
         while (processedIds.Count < _options.MaxVideosPerRun && !ct.IsCancellationRequested)
         {
+            numeroPagina++;
             logger.LogInformation($"Canal {config.Name} — processando página (já processados: {processedIds.Count})", config.Name);
 
             PlaylistPage page;
@@ -90,6 +100,16 @@ public class ChannelProcessor(
                 if (!processedIds.Add(video.Id)) continue;
 
                 logger.LogInformation("Canal {Name} — processando vídeo {Id} — {Title}", config.Name, video.Id, video.Title);
+
+                // User = nome do canal (não um valor genérico) — permite ver custo/uso por
+                // canal na plataforma de observabilidade de LLM. SessionName também é o canal;
+                // SessionPath marca onde esse vídeo cai dentro da run (página N).
+                sessionContext.Definir(new SessaoObservabilidade(
+                    SessionId: sessaoCanalId,
+                    SessionName: config.Name,
+                    SessionPath: $"/pagina-{numeroPagina}/{video.Id}",
+                    UserId: config.Name,
+                    Propriedades: new Dictionary<string, string> { ["Canal"] = config.Name }));
 
                 // Uma transação POR VÍDEO (não mais por página inteira) — é o que faz a
                 // telemetria de transcrição/resumo/categorização/embedding (RegistrarAsync,
