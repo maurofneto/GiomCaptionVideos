@@ -9,12 +9,13 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 /// acontecer depois na mesma operação e for capturado pelo Sentry, o relatório já vem com o
 /// histórico de operações de IA que aconteceram antes (ex: "esse resumo gastou 1200 tokens
 /// antes de falhar na categorização").
-/// Além do breadcrumb, anexa tempo/tokens/custo como measurement na span ativa no momento
-/// (SentrySdk.GetSpan — resolve pra span/etapa mais recente ainda aberta, ou a transação como
-/// fallback) — measurements de uma transação são consultáveis via Discover/Dashboards no
-/// Sentry, diferente de breadcrumb (que só aparece atrelado a um evento de erro especifico).
-/// Nome prefixado com o Tipo (ex.: "resumo.custo_usd") pra não colidir quando mais de um tipo
-/// de operação contribui pra mesma span/transação (ex.: um vídeo com resumo + categorização).
+/// Além do breadcrumb, anexa tempo/tokens/custo como measurement na TRANSAÇÃO raiz (não na
+/// span/etapa filha mais recente) — confirmado por inspeção direta do payload de um evento real
+/// que measurements anexadas a uma span filha (via SentrySdk.GetSpan()) chegam no Sentry mas não
+/// ficam pesquisáveis no Discover/Dashboards (os widgets filtram por "transaction:nome", e essa
+/// busca só enxerga measurements da transação raiz). Nome prefixado com o Tipo (ex.:
+/// "resumo.custo_usd") pra não colidir quando mais de um tipo de operação contribui pra mesma
+/// transação (ex.: um vídeo com resumo + categorização).
 /// Seguro mesmo se o Sentry não estiver inicializado nesse worker (Sentry:Dsn vazio) —
 /// SentrySdk vira no-op nesse caso.
 /// </summary>
@@ -36,20 +37,22 @@ public class SentryTelemetriaService : ITelemetriaService
             data: dados,
             level: registro.Sucesso ? BreadcrumbLevel.Info : BreadcrumbLevel.Warning);
 
-        var span = SentrySdk.GetSpan();
-        if (span is not null)
-        {
-            span.SetMeasurement($"{registro.Tipo}.tempo_ms", registro.TempoMs, MeasurementUnit.Duration.Millisecond);
-            if (registro.TokensEntrada is not null)
-                span.SetMeasurement($"{registro.Tipo}.tokens_entrada", registro.TokensEntrada.Value, MeasurementUnit.Custom("tokens"));
-            if (registro.TokensSaida is not null)
-                span.SetMeasurement($"{registro.Tipo}.tokens_saida", registro.TokensSaida.Value, MeasurementUnit.Custom("tokens"));
-            if (registro.CustoEstimadoUsd is not null)
-                span.SetMeasurement($"{registro.Tipo}.custo_usd", (double)registro.CustoEstimadoUsd.Value, MeasurementUnit.Custom("usd"));
+        ITransactionTracer? transacao = null;
+        SentrySdk.ConfigureScope(scope => transacao = scope.Transaction);
 
-            span.SetTag($"{registro.Tipo}.sucesso", registro.Sucesso.ToString());
-            if (registro.Provedor is not null) span.SetTag($"{registro.Tipo}.provedor", registro.Provedor);
-            if (registro.Modelo is not null) span.SetTag($"{registro.Tipo}.modelo", registro.Modelo);
+        if (transacao is not null)
+        {
+            transacao.SetMeasurement($"{registro.Tipo}.tempo_ms", registro.TempoMs, MeasurementUnit.Duration.Millisecond);
+            if (registro.TokensEntrada is not null)
+                transacao.SetMeasurement($"{registro.Tipo}.tokens_entrada", registro.TokensEntrada.Value, MeasurementUnit.Custom("tokens"));
+            if (registro.TokensSaida is not null)
+                transacao.SetMeasurement($"{registro.Tipo}.tokens_saida", registro.TokensSaida.Value, MeasurementUnit.Custom("tokens"));
+            if (registro.CustoEstimadoUsd is not null)
+                transacao.SetMeasurement($"{registro.Tipo}.custo_usd", (double)registro.CustoEstimadoUsd.Value, MeasurementUnit.Custom("usd"));
+
+            transacao.SetTag($"{registro.Tipo}.sucesso", registro.Sucesso.ToString());
+            if (registro.Provedor is not null) transacao.SetTag($"{registro.Tipo}.provedor", registro.Provedor);
+            if (registro.Modelo is not null) transacao.SetTag($"{registro.Tipo}.modelo", registro.Modelo);
         }
 
         return Task.CompletedTask;
