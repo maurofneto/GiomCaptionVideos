@@ -51,7 +51,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddInMemoryConversaHistorico(this IServiceCollection services)
     {
-        services.AddSingleton<InMemoryConversaHistoricoService>();
+        services.AddSingleton<IConversaHistoricoService, InMemoryConversaHistoricoService>();
         return services;
     }
 }

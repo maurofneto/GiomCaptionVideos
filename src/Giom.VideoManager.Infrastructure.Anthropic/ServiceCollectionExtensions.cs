@@ -36,10 +36,11 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // Cada Add* registra a implementação concreta e envolve com o decorator genérico de
-    // telemetria (Giom.VideoManager.Infrastructure.Telemetria) — qualquer IAgentService/
-    // IResumoService/ICategorizacaoService passa a registrar telemetria automaticamente,
-    // sem precisar chamar ITelemetriaService na mão.
+    // Cada Add* registra a implementação concreta na interface e decora com o decorator
+    // genérico de telemetria via Scrutor (services.Decorate) — qualquer IAgentService/
+    // IResumoService/ICategorizacaoService passa a registrar telemetria automaticamente, sem
+    // "new" nenhum montando a decoração à mão (Scrutor resolve o "inner" como a implementação
+    // já registrada antes do Decorate).
 
     public static IServiceCollection AddClaudeAgent(this IServiceCollection services, IConfiguration config)
     {
@@ -48,11 +49,8 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeAgentOptions>(config.GetSection("ClaudeAgent"));
-        services.AddSingleton<ClaudeAgentService>();
-        services.AddSingleton<IAgentService>(sp => new TelemetriaAgentService(
-            sp.GetRequiredService<ClaudeAgentService>(),
-            sp.GetRequiredService<ITelemetriaService>(),
-            sp.GetRequiredService<ContextoTelemetria>()));
+        services.AddSingleton<IAgentService, ClaudeAgentService>();
+        services.Decorate<IAgentService, TelemetriaAgentService>();
         return services;
     }
 
@@ -63,12 +61,8 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeResumoOptions>(config.GetSection("ClaudeResumo"));
-        services.AddSingleton<ClaudeResumoService>();
-        services.AddSingleton<IResumoService>(sp => new TelemetriaResumoService(
-            sp.GetRequiredService<ClaudeResumoService>(),
-            sp.GetRequiredService<ITelemetriaService>(),
-            sp.GetRequiredService<ContextoTelemetria>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaResumoService>>()));
+        services.AddSingleton<IResumoService, ClaudeResumoService>();
+        services.Decorate<IResumoService, TelemetriaResumoService>();
         return services;
     }
 
@@ -79,12 +73,8 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeCategorizacaoOptions>(config.GetSection("ClaudeCategorizacao"));
-        services.AddSingleton<ClaudeCategorizacaoService>();
-        services.AddSingleton<ICategorizacaoService>(sp => new TelemetriaCategorizacaoService(
-            sp.GetRequiredService<ClaudeCategorizacaoService>(),
-            sp.GetRequiredService<ITelemetriaService>(),
-            sp.GetRequiredService<ContextoTelemetria>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaCategorizacaoService>>()));
+        services.AddSingleton<ICategorizacaoService, ClaudeCategorizacaoService>();
+        services.Decorate<ICategorizacaoService, TelemetriaCategorizacaoService>();
         return services;
     }
 

@@ -31,7 +31,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSupabaseEmbedding(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseEmbeddingOptions>(config.GetSection("Supabase"));
-        services.AddSingleton<SupabaseEmbeddingService>();
+        services.AddSingleton<IEmbeddingService, SupabaseEmbeddingService>();
         return services;
     }
 
@@ -40,22 +40,20 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
         services.AddSupabaseHttpClient();
-        services.AddSingleton<SupabaseConversaHistoricoService>();
+        services.AddSingleton<IConversaHistoricoService, SupabaseConversaHistoricoService>();
         return services;
     }
 
     /// <summary>
     /// Auditoria genérica de operações de IA (resumo, categorização, bot) — tabela interacao_log.
-    /// Registra só o tipo concreto (não o ITelemetriaService diretamente) — quem decide como
-    /// isso vira o ITelemetriaService de fato injetado no app é a composição raiz (ver
-    /// Composition.AddTelemetriaService), que combina esse sink com outros (ex: Sentry) via
-    /// CompositeTelemetriaService.
+    /// Registrado como ITelemetriaSink (não ITelemetriaService) — CompositeTelemetriaService
+    /// agrega todo ITelemetriaSink automaticamente via DI (ver Composition.AddTelemetriaService).
     /// </summary>
     public static IServiceCollection AddSupabaseTelemetria(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
         services.AddSupabaseHttpClient();
-        services.AddSingleton<SupabaseTelemetriaService>();
+        services.AddSingleton<ITelemetriaSink, SupabaseTelemetriaService>();
         return services;
     }
 }

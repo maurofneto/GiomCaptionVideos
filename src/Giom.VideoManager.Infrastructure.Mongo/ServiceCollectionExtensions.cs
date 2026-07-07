@@ -18,7 +18,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddMongoConversaHistorico(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<MongoOptions>(config.GetSection("MongoDB"));
-        services.AddSingleton<MongoConversaHistoricoService>();
+        services.AddSingleton<IConversaHistoricoService, MongoConversaHistoricoService>();
         return services;
     }
 }

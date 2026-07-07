@@ -19,7 +19,7 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 /// Seguro mesmo se o Sentry não estiver inicializado nesse worker (Sentry:Dsn vazio) —
 /// SentrySdk vira no-op nesse caso.
 /// </summary>
-public class SentryTelemetriaService : ITelemetriaService
+public class SentryTelemetriaService : ITelemetriaSink
 {
     public Task RegistrarAsync(RegistroTelemetria registro, CancellationToken ct = default)
     {

@@ -21,7 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient("supabase-functions").AddStandardResilienceHandler();
 
         services.AddContextoTelemetria();
-        services.AddSingleton<DirectEmbeddingService>();
+        services.AddSingleton<IEmbeddingService, DirectEmbeddingService>();
         return services;
     }
 }

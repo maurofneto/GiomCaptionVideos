@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Giom.VideoManager.Infrastructure.Tests.Telemetria;
 
-file sealed class SinkQueSempreFalha : ITelemetriaService
+file sealed class SinkQueSempreFalha : ITelemetriaSink
 {
     public Task RegistrarAsync(RegistroTelemetria registro, CancellationToken ct = default) =>
         throw new InvalidOperationException("Sink indisponível");

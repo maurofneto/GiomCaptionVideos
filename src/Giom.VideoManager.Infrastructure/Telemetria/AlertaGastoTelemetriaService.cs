@@ -19,7 +19,7 @@ public class AlertaGastoOptions
 /// Um disparo por dia (UTC) é suficiente — não faz sentido reenviar o mesmo alerta a cada chamada
 /// de IA subsequente.
 /// </summary>
-public class AlertaGastoTelemetriaService(IOptions<AlertaGastoOptions> options, ILogger<AlertaGastoTelemetriaService> logger, TimeProvider? timeProvider = null) : ITelemetriaService
+public class AlertaGastoTelemetriaService(IOptions<AlertaGastoOptions> options, ILogger<AlertaGastoTelemetriaService> logger, TimeProvider? timeProvider = null) : ITelemetriaSink
 {
     // TimeProvider (não DateTime.UtcNow direto) — permite testar a virada de dia/reset do
     // alerta deterministicamente (ver FakeTimeProvider nos testes), sem depender do relógio

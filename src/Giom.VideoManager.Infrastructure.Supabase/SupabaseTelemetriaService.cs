@@ -14,7 +14,7 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 /// derrubar a operação de negócio (resumo/categorização/bot) que está sendo instrumentada —
 /// por isso RegistrarAsync nunca lança, apenas loga um warning e segue.
 /// </summary>
-public class SupabaseTelemetriaService : ITelemetriaService
+public class SupabaseTelemetriaService : ITelemetriaSink
 {
     private readonly HttpClient _http;
     private readonly ILogger<SupabaseTelemetriaService> _logger;

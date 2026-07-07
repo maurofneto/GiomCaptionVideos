@@ -5,10 +5,10 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Registra só o tipo concreto — Composition monta o ITelemetriaService (composite com outros sinks).</summary>
+    /// <summary>Registrado como ITelemetriaSink (não ITelemetriaService) — CompositeTelemetriaService agrega todo ITelemetriaSink automaticamente via DI.</summary>
     public static IServiceCollection AddSentryTelemetria(this IServiceCollection services)
     {
-        services.AddSingleton<SentryTelemetriaService>();
+        services.AddSingleton<ITelemetriaSink, SentryTelemetriaService>();
         return services;
     }
 

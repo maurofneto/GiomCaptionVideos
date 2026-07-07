@@ -13,6 +13,9 @@ namespace Giom.VideoManager.Infrastructure.Telemetria;
 /// Custo (CustoEstimadoUsd) só aparece com a implementação Direct (chama a OpenAI e reporta via
 /// IContextoTelemetria) — a implementação via Edge Function do Supabase não expõe o custo do
 /// lado do .NET, porque a chamada à OpenAI acontece dentro da própria function.
+/// Registrado via Scrutor (services.Decorate&lt;IEmbeddingService, TelemetriaEmbeddingService&gt;()
+/// na Composition) — Scrutor resolve "inner" como a implementação JÁ registrada antes do
+/// Decorate, sem precisar de generics nem de "new" montando a decoração à mão.
 /// </summary>
 public class TelemetriaEmbeddingService(IEmbeddingService inner, ITelemetriaService telemetria, ContextoTelemetria contextoTelemetria, ILogger<TelemetriaEmbeddingService> logger) : IEmbeddingService
 {

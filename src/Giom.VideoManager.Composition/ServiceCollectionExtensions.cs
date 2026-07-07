@@ -79,24 +79,11 @@ public static class ServiceCollectionExtensions
         var provider = config["Embedding:Provider"] ?? "Direct";
 
         if (provider == "SupabaseEdgeFunction")
-        {
             services.AddSupabaseEmbedding(config);
-            services.AddSingleton<IEmbeddingService>(sp => new TelemetriaEmbeddingService(
-                sp.GetRequiredService<SupabaseEmbeddingService>(),
-                sp.GetRequiredService<ITelemetriaService>(),
-                sp.GetRequiredService<ContextoTelemetria>(),
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaEmbeddingService>>()));
-        }
         else
-        {
             services.AddDirectEmbedding(config);
-            services.AddSingleton<IEmbeddingService>(sp => new TelemetriaEmbeddingService(
-                sp.GetRequiredService<DirectEmbeddingService>(),
-                sp.GetRequiredService<ITelemetriaService>(),
-                sp.GetRequiredService<ContextoTelemetria>(),
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaEmbeddingService>>()));
-        }
 
+        services.Decorate<IEmbeddingService, TelemetriaEmbeddingService>();
         return services;
     }
 
@@ -125,24 +112,16 @@ public static class ServiceCollectionExtensions
         {
             case "Supabase":
                 services.AddSupabaseConversaHistorico(config);
-                services.AddSingleton<IConversaHistoricoService>(sp => new FeedbackExternoConversaHistoricoService(
-                    sp.GetRequiredService<SupabaseConversaHistoricoService>(),
-                    sp.GetRequiredService<IFeedbackExternoService>()));
                 break;
             case "MongoDB":
                 services.AddMongoConversaHistorico(config);
-                services.AddSingleton<IConversaHistoricoService>(sp => new FeedbackExternoConversaHistoricoService(
-                    sp.GetRequiredService<MongoConversaHistoricoService>(),
-                    sp.GetRequiredService<IFeedbackExternoService>()));
                 break;
             default:
                 services.AddInMemoryConversaHistorico();
-                services.AddSingleton<IConversaHistoricoService>(sp => new FeedbackExternoConversaHistoricoService(
-                    sp.GetRequiredService<InMemoryConversaHistoricoService>(),
-                    sp.GetRequiredService<IFeedbackExternoService>()));
                 break;
         }
 
+        services.Decorate<IConversaHistoricoService, FeedbackExternoConversaHistoricoService>();
         return services;
     }
 
@@ -165,10 +144,12 @@ public static class ServiceCollectionExtensions
         services.AddSupabaseTelemetria(config);
         services.AddSentryTelemetria();
         services.Configure<AlertaGastoOptions>(config.GetSection("AlertaGasto"));
-        services.AddSingleton<AlertaGastoTelemetriaService>();
-        services.AddSingleton<ITelemetriaService>(sp => new CompositeTelemetriaService(
-            [sp.GetRequiredService<SupabaseTelemetriaService>(), sp.GetRequiredService<SentryTelemetriaService>(), sp.GetRequiredService<AlertaGastoTelemetriaService>()],
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CompositeTelemetriaService>>()));
+        services.AddSingleton<ITelemetriaSink, AlertaGastoTelemetriaService>();
+
+        // CompositeTelemetriaService recebe todo ITelemetriaSink registrado via
+        // IEnumerable<ITelemetriaSink> — adicionar um sink novo no futuro é só implementar
+        // ITelemetriaSink e registrar aqui, nada muda no Composite.
+        services.AddSingleton<ITelemetriaService, CompositeTelemetriaService>();
         return services;
     }
 
