@@ -33,13 +33,15 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
     private readonly ClaudeCategorizacaoOptions _options;
     private readonly ILogger<ClaudeCategorizacaoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
+    private readonly HeliconeSessionContext _heliconeContext;
     private readonly string _systemPrompt;
 
-    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria)
+    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, HeliconeSessionContext heliconeContext)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
+        _heliconeContext = heliconeContext;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("categorizacao.md");
     }
@@ -48,6 +50,12 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
     {
         var resumo = video.Resumo?.Descricao ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resumo)) return [];
+
+        _heliconeContext.Definir(new HeliconeSessao(
+            SessionId: video.Id,
+            SessionName: video.Title,
+            SessionPath: "/pipeline/categorizacao",
+            Propriedades: new Dictionary<string, string> { ["Tipo"] = "categorizacao", ["Canal"] = video.ChannelTitle }));
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {

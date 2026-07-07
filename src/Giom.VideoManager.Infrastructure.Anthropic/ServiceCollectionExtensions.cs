@@ -20,13 +20,17 @@ public static class ServiceCollectionExtensions
         // Helicone:ApiKey é compartilhada — cada Claude*Service decide individualmente se
         // usa (via sua própria opção UseHelicone), ver AnthropicClientFactory.
         services.Configure<HeliconeOptions>(config.GetSection("Helicone"));
+        services.AddSingleton<HeliconeSessionContext>();
+        services.AddTransient<HeliconeHeadersHandler>();
 
-        services.AddHttpClient("anthropic").AddStandardResilienceHandler(options =>
-        {
-            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
-            options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(200);
-            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
-        });
+        services.AddHttpClient("anthropic")
+            .AddHttpMessageHandler<HeliconeHeadersHandler>()
+            .AddStandardResilienceHandler(options =>
+            {
+                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(200);
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+            });
 
         return services;
     }

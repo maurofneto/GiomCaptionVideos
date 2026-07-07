@@ -35,13 +35,15 @@ public class ClaudeResumoService : IResumoService
     private readonly ClaudeResumoOptions _options;
     private readonly ILogger<ClaudeResumoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
+    private readonly HeliconeSessionContext _heliconeContext;
     private readonly string _systemPrompt;
 
-    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria)
+    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria, HeliconeSessionContext heliconeContext)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
+        _heliconeContext = heliconeContext;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("resumo.md");
     }
@@ -51,6 +53,14 @@ public class ClaudeResumoService : IResumoService
         var textoLimpo = video.Transcricao?.ConteudoLimpo;
         if (string.IsNullOrWhiteSpace(textoLimpo))
             return null;
+
+        // VideoId como Session-Id agrupa resumo + categorização do mesmo vídeo na visão
+        // "Sessions" do Helicone.
+        _heliconeContext.Definir(new HeliconeSessao(
+            SessionId: video.Id,
+            SessionName: video.Title,
+            SessionPath: "/pipeline/resumo",
+            Propriedades: new Dictionary<string, string> { ["Tipo"] = "resumo", ["Canal"] = video.ChannelTitle }));
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {

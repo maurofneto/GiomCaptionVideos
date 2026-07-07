@@ -29,6 +29,7 @@ public class ClaudeAgentService : IAgentService
     private readonly ILogger<ClaudeAgentService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly IIncertezaDetectorService _incertezaDetector;
+    private readonly HeliconeSessionContext _heliconeContext;
     private readonly string _systemPrompt;
 
     public ClaudeAgentService(
@@ -38,18 +39,29 @@ public class ClaudeAgentService : IAgentService
         IHttpClientFactory httpClientFactory,
         ILogger<ClaudeAgentService> logger,
         IContextoTelemetria contextoTelemetria,
-        IIncertezaDetectorService incertezaDetector)
+        IIncertezaDetectorService incertezaDetector,
+        HeliconeSessionContext heliconeContext)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _incertezaDetector = incertezaDetector;
+        _heliconeContext = heliconeContext;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("agent.md");
     }
 
     public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
+        // ChatId como Session-Id — agrupa toda a conversa (todas as perguntas de um mesmo chat)
+        // na visão "Sessions" do Helicone; User-Id igual, pra métricas "Users".
+        _heliconeContext.Definir(new HeliconeSessao(
+            SessionId: chatId,
+            SessionName: "Bot Instituto Giom",
+            SessionPath: "/bot/pergunta",
+            UserId: chatId,
+            Propriedades: new Dictionary<string, string> { ["Tipo"] = "bot_resposta" }));
+
         var mensagens = new List<Message>();
 
         foreach (var turno in historico)
