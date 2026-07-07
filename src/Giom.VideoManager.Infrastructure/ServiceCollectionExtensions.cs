@@ -1,5 +1,6 @@
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Incerteza;
+using Giom.VideoManager.Infrastructure.Observabilidade;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,6 +34,21 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ContextoTelemetria>();
         services.AddSingleton<IContextoTelemetria>(sp => sp.GetRequiredService<ContextoTelemetria>());
+        return services;
+    }
+
+    /// <summary>
+    /// Canal (AsyncLocal) de metadados de sessão/usuário pra plataformas externas de
+    /// observabilidade de LLM — genérico, sem conhecer qual plataforma (ver ISessionContext).
+    /// Idempotente, mesmo padrão de AddContextoTelemetria.
+    /// </summary>
+    public static IServiceCollection AddSessionContext(this IServiceCollection services)
+    {
+        if (services.Any(d => d.ServiceType == typeof(SessionContext)))
+            return services;
+
+        services.AddSingleton<SessionContext>();
+        services.AddSingleton<ISessionContext>(sp => sp.GetRequiredService<SessionContext>());
         return services;
     }
 }

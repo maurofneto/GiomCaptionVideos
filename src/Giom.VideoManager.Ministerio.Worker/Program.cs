@@ -37,6 +37,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSummaryService(config);        // Claude por padrão
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService();              // Sentry Performance — quebra de tempo por página/vídeo
+        services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo)
         services.AddChannelProcessor(config);
 
         // Handler específico do Ministério

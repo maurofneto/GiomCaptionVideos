@@ -1,13 +1,15 @@
-namespace Giom.VideoManager.Infrastructure.Anthropic;
+using Giom.VideoManager.Domain.Interfaces;
+
+namespace Giom.VideoManager.Infrastructure.Helicone;
 
 /// <summary>
-/// Injeta os headers de Sessions/Users/Properties do Helicone em cada requisição, lendo o
-/// HeliconeSessao anunciado via HeliconeSessionContext logo antes da chamada. Fica na pipeline
-/// do HttpClient "anthropic" (via AddHttpMessageHandler) — roda em toda chamada, mas só adiciona
-/// headers se algum Claude*Service realmente definiu um contexto (senão seria uma chamada sem
-/// Helicone habilitado, e os headers ficariam soltos sem sentido).
+/// Traduz o SessaoObservabilidade genérico (ISessionContext) — anunciado por quem chama a API,
+/// sem saber que é o Helicone quem está do outro lado — em headers HTTP específicos do
+/// Helicone, em cada requisição. Fica na pipeline do HttpClient "anthropic" (via
+/// AddHttpMessageHandler) — roda em toda chamada, mas só adiciona headers se algum contexto de
+/// sessão realmente foi definido.
 /// </summary>
-public class HeliconeHeadersHandler(HeliconeSessionContext contexto) : DelegatingHandler
+public class HeliconeHeadersHandler(ISessionContext contexto) : DelegatingHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
@@ -21,7 +23,7 @@ public class HeliconeHeadersHandler(HeliconeSessionContext contexto) : Delegatin
             if (sessao.UserId is not null)
                 request.Headers.Add("Helicone-User-Id", sessao.UserId);
 
-            // Id gerado por nós (não pelo Helicone) — permite reportar feedback depois via
+            // Id gerado por quem chamou (não pelo Helicone) — permite reportar feedback depois via
             // POST /v1/request/{id}/feedback sem depender de capturar algo da resposta.
             if (sessao.RequestId is not null)
                 request.Headers.Add("Helicone-Request-Id", sessao.RequestId);

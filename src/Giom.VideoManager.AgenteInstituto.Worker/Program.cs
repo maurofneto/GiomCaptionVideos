@@ -38,6 +38,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddBotComandos(config);           // ajuda/sobre/limpar — cada canal decide como invocar
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService();              // Sentry Performance — quebra de tempo por etapa
+        services.AddObservabilidadeExterna(config); // Helicone — Sessions/Users/Properties/Feedback
         services.AddChatBotProcessor(config);
     })
     .Build();

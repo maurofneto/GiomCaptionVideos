@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Giom.VideoManager.Domain\Giom.VideoManager.Domain.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure\Giom.VideoManager.Infrastructure.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Helicone\Giom.VideoManager.Infrastructure.Helicone.csproj" />
   </ItemGroup>
 
   <ItemGroup>

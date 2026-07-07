@@ -3,6 +3,7 @@ using Anthropic.SDK.Messaging;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Infrastructure.Helicone;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -35,15 +36,15 @@ public class ClaudeResumoService : IResumoService
     private readonly ClaudeResumoOptions _options;
     private readonly ILogger<ClaudeResumoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
-    private readonly HeliconeSessionContext _heliconeContext;
+    private readonly ISessionContext _sessionContext;
     private readonly string _systemPrompt;
 
-    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria, HeliconeSessionContext heliconeContext)
+    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _heliconeContext = heliconeContext;
+        _sessionContext = sessionContext;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("resumo.md");
     }
@@ -54,9 +55,9 @@ public class ClaudeResumoService : IResumoService
         if (string.IsNullOrWhiteSpace(textoLimpo))
             return null;
 
-        // VideoId como Session-Id agrupa resumo + categorização do mesmo vídeo na visão
-        // "Sessions" do Helicone.
-        _heliconeContext.Definir(new HeliconeSessao(
+        // VideoId como Session-Id agrupa resumo + categorização do mesmo vídeo numa eventual
+        // plataforma de observabilidade externa.
+        _sessionContext.Definir(new SessaoObservabilidade(
             SessionId: video.Id,
             SessionName: video.Title,
             SessionPath: "/pipeline/resumo",

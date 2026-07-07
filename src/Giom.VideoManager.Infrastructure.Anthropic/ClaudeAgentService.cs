@@ -2,6 +2,7 @@ using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Infrastructure.Helicone;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -29,8 +30,7 @@ public class ClaudeAgentService : IAgentService
     private readonly ILogger<ClaudeAgentService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly IIncertezaDetectorService _incertezaDetector;
-    private readonly HeliconeSessionContext _heliconeContext;
-    private readonly bool _heliconeAtivo;
+    private readonly ISessionContext _sessionContext;
     private readonly string _systemPrompt;
 
     public ClaudeAgentService(
@@ -41,33 +41,32 @@ public class ClaudeAgentService : IAgentService
         ILogger<ClaudeAgentService> logger,
         IContextoTelemetria contextoTelemetria,
         IIncertezaDetectorService incertezaDetector,
-        HeliconeSessionContext heliconeContext)
+        ISessionContext sessionContext)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _incertezaDetector = incertezaDetector;
-        _heliconeContext = heliconeContext;
-        _heliconeAtivo = _options.UseHelicone && !string.IsNullOrWhiteSpace(heliconeOptions.Value?.ApiKey);
+        _sessionContext = sessionContext;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("agent.md");
     }
 
     public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
-        // Só gera um RequestId (pra permitir reportar feedback depois) se o Helicone estiver
-        // realmente ativo — sem isso, ninguém nunca vai consumir esse id.
-        var heliconeRequestId = _heliconeAtivo ? Guid.NewGuid().ToString() : null;
+        // RequestId sempre gerado — quem decide se algo realmente consome isso (ex.: reportar
+        // feedback via Helicone) é a plataforma externa de observabilidade, não esta classe.
+        var requestId = Guid.NewGuid().ToString();
 
         // ChatId como Session-Id — agrupa toda a conversa (todas as perguntas de um mesmo chat)
-        // na visão "Sessions" do Helicone; User-Id igual, pra métricas "Users".
-        _heliconeContext.Definir(new HeliconeSessao(
+        // numa eventual plataforma de observabilidade externa; User-Id igual, pra métricas "Users".
+        _sessionContext.Definir(new SessaoObservabilidade(
             SessionId: chatId,
             SessionName: "Bot Instituto Giom",
             SessionPath: "/bot/pergunta",
             UserId: chatId,
             Propriedades: new Dictionary<string, string> { ["Tipo"] = "bot_resposta" },
-            RequestId: heliconeRequestId));
+            RequestId: requestId));
 
         var mensagens = new List<Message>();
 
@@ -110,7 +109,7 @@ public class ClaudeAgentService : IAgentService
             tokensSaida: response.Usage?.OutputTokens,
             custoEstimadoUsd: AnthropicPricingCalculator.Calcular(_options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens),
             detalhes: new { stopReason = response.StopReason, incerteza = _incertezaDetector.ContemIncerteza(texto) },
-            requestIdExterno: heliconeRequestId);
+            requestIdExterno: requestId);
 
         if (string.IsNullOrWhiteSpace(texto))
         {

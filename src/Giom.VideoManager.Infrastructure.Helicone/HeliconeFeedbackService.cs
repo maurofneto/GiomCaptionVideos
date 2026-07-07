@@ -5,14 +5,14 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 
-namespace Giom.VideoManager.Infrastructure.Anthropic;
+namespace Giom.VideoManager.Infrastructure.Helicone;
 
 /// <summary>
 /// POST /v1/request/{id}/feedback — API de feedback do Helicone (não o gateway de proxy de LLM,
 /// é a API de management: https://api.helicone.ai). O {id} é o mesmo valor enviado como header
-/// Helicone-Request-Id na chamada original (ver HeliconeSessionContext/HeliconeHeadersHandler) —
-/// gerado por nós, não pelo Helicone, exatamente pra poder reportar o voto depois sem precisar
-/// ter capturado nada da resposta da Anthropic API.
+/// Helicone-Request-Id na chamada original (ver SessaoObservabilidade.RequestId/HeliconeHeadersHandler) —
+/// gerado por quem chamou a API de IA, não pelo Helicone, exatamente pra poder reportar o voto
+/// depois sem precisar ter capturado nada da resposta da Anthropic API.
 /// </summary>
 public class HeliconeFeedbackService(IOptions<HeliconeOptions> heliconeOptions, IHttpClientFactory httpClientFactory, ILogger<HeliconeFeedbackService> logger) : IFeedbackExternoService
 {

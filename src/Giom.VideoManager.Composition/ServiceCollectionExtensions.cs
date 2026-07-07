@@ -4,6 +4,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Feedback;
+using Giom.VideoManager.Infrastructure.Helicone;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Mongo;
@@ -137,9 +138,17 @@ public static class ServiceCollectionExtensions
                 break;
         }
 
-        services.AddHeliconeFeedback(config);
         return services;
     }
+
+    /// <summary>
+    /// Observabilidade externa de sessões/usuários/propriedades e feedback (hoje via Helicone,
+    /// mas plugável — Claude*Service e o histórico de conversa só conhecem ISessionContext e
+    /// IFeedbackExternoService, nunca o provedor concreto). Chamado explicitamente por cada
+    /// worker que usa Claude (Agent/Resumo/Categorização) ou feedback (bot).
+    /// </summary>
+    public static IServiceCollection AddObservabilidadeExterna(this IServiceCollection services, IConfiguration config)
+        => services.AddHelicone(config);
 
     /// <summary>
     /// Sinks de telemetria — hoje Supabase (interacao_log) + Sentry (breadcrumb). Cada

@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Infrastructure.Helicone;
 using Giom.VideoManager.Infrastructure.Telemetria;
 
 namespace Giom.VideoManager.Infrastructure.Anthropic;
@@ -18,13 +19,13 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<AnthropicHttpClientMarker>();
         // Helicone:ApiKey é compartilhada — cada Claude*Service decide individualmente se
-        // usa (via sua própria opção UseHelicone), ver AnthropicClientFactory.
+        // usa (via sua própria opção UseHelicone), ver AnthropicClientFactory. Só o roteamento
+        // (URL/auth do gateway) mora aqui — Sessions/Users/Feedback são genéricos (ver
+        // ISessionContext) e ficam no projeto Infrastructure.Helicone, que anexa seu próprio
+        // handler a este mesmo HttpClient "anthropic" quando registrado pela Composition.
         services.Configure<HeliconeOptions>(config.GetSection("Helicone"));
-        services.AddSingleton<HeliconeSessionContext>();
-        services.AddTransient<HeliconeHeadersHandler>();
 
         services.AddHttpClient("anthropic")
-            .AddHttpMessageHandler<HeliconeHeadersHandler>()
             .AddStandardResilienceHandler(options =>
             {
                 options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
@@ -45,6 +46,7 @@ public static class ServiceCollectionExtensions
         services.AddPromptLoader();
         services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
+        services.AddSessionContext();
         services.Configure<ClaudeAgentOptions>(config.GetSection("ClaudeAgent"));
         services.AddSingleton<ClaudeAgentService>();
         services.AddSingleton<IAgentService>(sp => new TelemetriaAgentService(
@@ -59,6 +61,7 @@ public static class ServiceCollectionExtensions
         services.AddPromptLoader();
         services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
+        services.AddSessionContext();
         services.Configure<ClaudeResumoOptions>(config.GetSection("ClaudeResumo"));
         services.AddSingleton<ClaudeResumoService>();
         services.AddSingleton<IResumoService>(sp => new TelemetriaResumoService(
@@ -74,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.AddPromptLoader();
         services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
+        services.AddSessionContext();
         services.Configure<ClaudeCategorizacaoOptions>(config.GetSection("ClaudeCategorizacao"));
         services.AddSingleton<ClaudeCategorizacaoService>();
         services.AddSingleton<ICategorizacaoService>(sp => new TelemetriaCategorizacaoService(
@@ -81,15 +85,6 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ITelemetriaService>(),
             sp.GetRequiredService<ContextoTelemetria>(),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaCategorizacaoService>>()));
-        return services;
-    }
-
-    /// <summary>Reenvia o voto de utilidade (👍/👎) do usuário pro Helicone — ver HeliconeFeedbackService.</summary>
-    public static IServiceCollection AddHeliconeFeedback(this IServiceCollection services, IConfiguration config)
-    {
-        services.Configure<HeliconeOptions>(config.GetSection("Helicone"));
-        services.AddHttpClient("helicone-api", client => client.BaseAddress = new Uri("https://api.helicone.ai/"));
-        services.AddSingleton<IFeedbackExternoService, HeliconeFeedbackService>();
         return services;
     }
 }

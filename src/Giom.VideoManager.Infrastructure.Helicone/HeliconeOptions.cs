@@ -1,4 +1,4 @@
-namespace Giom.VideoManager.Infrastructure.Anthropic;
+namespace Giom.VideoManager.Infrastructure.Helicone;
 
 /// <summary>
 /// Helicone é um proxy de observabilidade para chamadas de LLM — quando ApiKey está

@@ -4,6 +4,7 @@ using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Infrastructure.Helicone;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -33,15 +34,15 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
     private readonly ClaudeCategorizacaoOptions _options;
     private readonly ILogger<ClaudeCategorizacaoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
-    private readonly HeliconeSessionContext _heliconeContext;
+    private readonly ISessionContext _sessionContext;
     private readonly string _systemPrompt;
 
-    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, HeliconeSessionContext heliconeContext)
+    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _heliconeContext = heliconeContext;
+        _sessionContext = sessionContext;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("categorizacao.md");
     }
@@ -51,7 +52,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         var resumo = video.Resumo?.Descricao ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resumo)) return [];
 
-        _heliconeContext.Definir(new HeliconeSessao(
+        _sessionContext.Definir(new SessaoObservabilidade(
             SessionId: video.Id,
             SessionName: video.Title,
             SessionPath: "/pipeline/categorizacao",
