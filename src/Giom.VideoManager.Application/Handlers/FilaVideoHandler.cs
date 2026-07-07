@@ -10,13 +10,24 @@ namespace Giom.VideoManager.Application.Handlers;
 /// (Instituto/Ministério) — o filtro de relevância continua o mesmo, só quem "processa" muda.
 /// ChannelProcessor não sabe (nem precisa saber) que isso está acontecendo — é só mais um
 /// IVideoHandler, igual sempre foi (Open/Closed: zero mudança em ChannelProcessor).
+/// Captura a sessão (ISessionContext.Atual, já definida por ChannelProcessor.DefinirSessaoAtual)
+/// e o traceparent do Span "pipeline.video" corrente (ITracingService.CapturarContextoAtual) e
+/// leva os dois junto na mensagem — sem isso, o consumidor do outro lado da fila perderia
+/// atributos de sessão (Sentry/Helicone) e o Span de lá viraria uma trace isolada.
 /// Quem de fato chama IVideoProcessador.HandleAsync é o VideoQueueConsumer, do outro lado da
 /// fila (mesma execução — ver decisão de topologia da US #39/#40).
 /// </summary>
-public class FilaVideoHandler(IFilaPublisher<VideoParaProcessar> filaPublisher, IVideoProcessador processadorReal) : IVideoHandler
+public class FilaVideoHandler(
+    IFilaPublisher<VideoParaProcessar> filaPublisher,
+    IVideoProcessador processadorReal,
+    ISessionContext sessionContext,
+    ITracingService tracingService) : IVideoHandler
 {
     public bool IsRelevant(Video video) => processadorReal.IsRelevant(video);
 
-    public Task HandleAsync(Video video, CancellationToken ct = default) =>
-        filaPublisher.PublicarAsync(new VideoParaProcessar(video), ct);
+    public Task HandleAsync(Video video, CancellationToken ct = default)
+    {
+        var mensagem = new VideoParaProcessar(video, sessionContext.Atual, tracingService.CapturarContextoAtual());
+        return filaPublisher.PublicarAsync(mensagem, ct);
+    }
 }

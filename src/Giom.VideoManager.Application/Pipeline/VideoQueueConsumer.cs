@@ -12,12 +12,15 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// ChannelProcessor.RunAsync, na mesma execução (ver decisão de topologia da US #39/#40): zero
 /// mudança de deploy agora, mas a Feature #33 (workers separados por etapa) pode rodar isso num
 /// processo de longa duração depois sem tocar em interface nenhuma.
-/// Span "pipeline.video" aberto aqui (não mais em ChannelProcessor) — é aqui que HandleAsync de
-/// fato roda. Se handler lançar, relança pro IFilaConsumer decidir a retentativa (visibility
-/// timeout no SQS, nack+requeue no RabbitMQ) — não precisa de Dead-Letter Queue dedicada pra
-/// "não perder trabalho por falha transitória" funcionar.
-/// Reaproveita o CorrelationId (SessionId) que já estiver ambient — na topologia "mesma
-/// execução", é o mesmo Guid que ChannelProcessor usou pra correlacionar toda a run.
+/// Reaplica a MESMA SessaoObservabilidade que estava ativa em ChannelProcessor no momento da
+/// publicação (mensagem.Sessao) — sem isso, os atributos de Sentry/Helicone (Environment/Canal/
+/// Playlist/Pagina) se perdiam, e o consumidor reconstruía uma sessão pobre. E abre o Span
+/// "pipeline.video" com o traceparent capturado na publicação (mensagem.TraceParent) — sem
+/// isso, o Span pai ("pipeline.pagina") já fechou pelo tempo que este código roda, e o novo Span
+/// viraria uma Transaction raiz isolada em vez de filho, quebrando a árvore única no Sentry.
+/// Se handler lançar, relança pro IFilaConsumer decidir a retentativa (visibility timeout no
+/// SQS, nack+requeue no RabbitMQ) — não precisa de Dead-Letter Queue dedicada pra "não perder
+/// trabalho por falha transitória" funcionar.
 /// </summary>
 public class VideoQueueConsumer(
     IFilaConsumer<VideoParaProcessar> filaConsumer,
@@ -31,14 +34,9 @@ public class VideoQueueConsumer(
         {
             var video = mensagem.Video;
 
-            using var traceVideo = tracingService.IniciarTrace("pipeline.video", "video_pipeline");
-
-            var correlationId = sessionContext.Atual?.SessionId ?? Guid.NewGuid().ToString();
-            var horaExecucao = sessionContext.Atual?.SessionName ?? DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
-
-            sessionContext.Definir(new SessaoObservabilidade(
-                SessionId: correlationId,
-                SessionName: horaExecucao,
+            sessionContext.Definir(mensagem.Sessao ?? new SessaoObservabilidade(
+                SessionId: Guid.NewGuid().ToString(),
+                SessionName: DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"),
                 SessionPath: $"/pipeline-consumer/{video.ChannelTitle}/{video.Id}",
                 UserId: video.ChannelTitle,
                 Propriedades: new Dictionary<string, string>
@@ -47,6 +45,11 @@ public class VideoQueueConsumer(
                     ["VideoId"] = video.Id,
                     ["VideoTitle"] = video.Title
                 }));
+
+            // "video.processamento", não "pipeline.video" de novo — evita duas transactions com o
+            // mesmo nome aninhadas (ChannelProcessor já abriu "pipeline.video" pro enfileiramento;
+            // este é o processamento de fato, filho daquele).
+            using var traceVideo = tracingService.IniciarTrace("video.processamento", "video_pipeline", mensagem.TraceParent);
 
             logger.LogInformation("Consumindo vídeo {Id} — {Title} (canal {Canal})", video.Id, video.Title, video.ChannelTitle);
 
