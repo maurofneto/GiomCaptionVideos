@@ -185,8 +185,15 @@ public class ChatBotProcessor(
             Tokens: {tokensEntrada} entrada + {tokensSaida} saída = {tokensTotal}
             Tempo: {tempoMs}ms
             Custo estimado: {(meta.CustoEstimadoUsd is { } custo ? $"${custo:F6}" : "n/d")}
-            Janela de contexto: {tokensTotal:N0} / {opcoes.ContextWindowTokens:N0} ({pctJanela:P2})
+            Janela de contexto: {FormatarBarraProgresso(pctJanela)} {pctJanela:P1} ({tokensTotal:N0} / {opcoes.ContextWindowTokens:N0})
             """;
+    }
+
+    /// <summary>Barra de progresso em texto (Telegram não tem elemento visual nativo pra isso).</summary>
+    private static string FormatarBarraProgresso(double percentual, int largura = 20)
+    {
+        var preenchido = Math.Clamp((int)Math.Round(percentual * largura), 0, largura);
+        return $"[{new string('█', preenchido)}{new string('░', largura - preenchido)}]";
     }
 
     /// <summary>
