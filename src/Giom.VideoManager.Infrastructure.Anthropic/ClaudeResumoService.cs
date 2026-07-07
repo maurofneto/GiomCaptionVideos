@@ -55,18 +55,7 @@ public class ClaudeResumoService : IResumoService
         if (string.IsNullOrWhiteSpace(textoLimpo))
             return null;
 
-        // Estende a sessão de canal/página/vídeo já aberta pelo ChannelProcessor (Session-Id,
-        // Session-Name=canal e User=canal preservados), só acrescentando "/resumo" ao caminho —
-        // é isso que dá a hierarquia canal->página->vídeo->resumo/categorização na plataforma de
-        // observabilidade externa. Se não houver sessão de canal aberta (ex.: chamada avulsa em
-        // teste), cai de volta pra uma sessão isolada por vídeo.
-        var sessaoCanal = _sessionContext.Atual;
-        _sessionContext.Definir(new SessaoObservabilidade(
-            SessionId: sessaoCanal?.SessionId ?? video.Id,
-            SessionName: sessaoCanal?.SessionName ?? video.Title,
-            SessionPath: $"{sessaoCanal?.SessionPath ?? "/pipeline"}/resumo",
-            UserId: sessaoCanal?.UserId,
-            Propriedades: new Dictionary<string, string> { ["Tipo"] = "resumo", ["Canal"] = video.ChannelTitle }));
+        _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("resumo", video));
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {

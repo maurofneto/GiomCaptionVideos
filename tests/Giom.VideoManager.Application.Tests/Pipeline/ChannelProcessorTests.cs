@@ -5,6 +5,7 @@ using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Testes.Comuns;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -36,6 +37,7 @@ public class ChannelProcessorTests
         public Mock<IVideoHandler> Handler { get; } = new();
         public FakeTracingService Tracing { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
+        public Mock<IHostEnvironment> HostEnvironment { get; } = new();
         public FakeLogger<ChannelProcessor> Logger { get; } = new();
         public ProcessingOptions Opcoes { get; set; } = new() { DelayBetweenPagesMs = 0, DelayBetweenVideosMs = 0, MaxVideosPerRun = 100 };
 
@@ -47,10 +49,11 @@ public class ChannelProcessorTests
             Progresso.Setup(p => p.SaveProgressoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             Handler.Setup(h => h.IsRelevant(It.IsAny<Video>())).Returns(true);
             Handler.Setup(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            HostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
         }
 
         public ChannelProcessor CriarProcessor() => new(
-            VideoSource.Object, Progresso.Object, Handler.Object, Tracing, SessionContext, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
+            VideoSource.Object, Progresso.Object, Handler.Object, Tracing, SessionContext, HostEnvironment.Object, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
     }
 
     [Fact]
@@ -221,7 +224,7 @@ public class ChannelProcessorTests
     }
 
     [Fact]
-    public async Task RunAsync_DefineSessaoComUserESessionNameIguaisAoCanal()
+    public async Task RunAsync_DefineSessaoComUserIgualAoCanal()
     {
         // Board #82: durante a pipeline, o User do Helicone deve ser o nome do canal (não um
         // valor genérico) — permite ver custo/uso agrupado por canal na plataforma externa.
@@ -233,16 +236,16 @@ public class ChannelProcessorTests
 
         var sessao = ambiente.SessionContext.Definidas.Single();
         Assert.Equal(Canal.Name, sessao.UserId);
-        Assert.Equal(Canal.Name, sessao.SessionName);
     }
 
     [Fact]
-    public async Task RunAsync_DefineSessionPathComPaginaEVideo_MesmoSessionIdEntreVideosDaMesmaRun()
+    public async Task RunAsync_DefineSessionPathComAmbienteCanalPaginaEVideo_MesmoSessionIdEntreVideosDaMesmaRun()
     {
         // Board #82: hierarquia canal->página->vídeo->etapa no Helicone. O SessionId (que agrupa
-        // tudo como UMA árvore) é o mesmo pra toda a run do canal; o SessionPath diferencia
-        // página/vídeo. As etapas (resumo/categorização) acrescentam seu próprio segmento por
-        // cima disso (ver ClaudeResumoService/ClaudeCategorizacaoService).
+        // tudo como UMA árvore, e é o CorrelationId de tudo — ver testes de CorrelationId abaixo)
+        // é o mesmo pra toda a run do canal; o SessionPath diferencia ambiente/canal/página/vídeo.
+        // As etapas (resumo/categorização) acrescentam seu próprio segmento por cima disso (ver
+        // ClaudeResumoService/ClaudeCategorizacaoService).
         var ambiente = new Ambiente();
         var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow)], NextPageToken: null);
         ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
@@ -252,8 +255,43 @@ public class ChannelProcessorTests
         Assert.Equal(2, ambiente.SessionContext.Definidas.Count);
         var (sessaoV1, sessaoV2) = (ambiente.SessionContext.Definidas[0], ambiente.SessionContext.Definidas[1]);
         Assert.Equal(sessaoV1.SessionId, sessaoV2.SessionId); // mesma árvore/sessão pra run inteira
-        Assert.Equal("/pagina-1/v1", sessaoV1.SessionPath);
-        Assert.Equal("/pagina-1/v2", sessaoV2.SessionPath);
+        Assert.Equal($"/pipeline-Testing/{Canal.Name}/pagina-primeira/v1", sessaoV1.SessionPath);
+        Assert.Equal($"/pipeline-Testing/{Canal.Name}/pagina-primeira/v2", sessaoV2.SessionPath);
+    }
+
+    [Fact]
+    public async Task RunAsync_PropriedadesDaSessaoTrazemEnvironmentCanalPaginaEVideo()
+    {
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        var propriedades = ambiente.SessionContext.Definidas.Single().Propriedades!;
+        Assert.Equal("Testing", propriedades["Environment"]);
+        Assert.Equal(Canal.Name, propriedades["Canal"]);
+        Assert.Equal("primeira", propriedades["Pagina"]);
+        Assert.Equal("v1", propriedades["VideoId"]);
+        Assert.Equal("Vídeo v1", propriedades["VideoTitle"]);
+    }
+
+    [Fact]
+    public async Task RunAsync_UsaOMesmoCorrelationIdComoSessionIdETagDoTraceEmTodaARun()
+    {
+        // Board #82: o Guid da run é o CorrelationId de tudo — logs (BeginScope), Sentry
+        // (tag correlation.id) e Helicone (Session-Id) precisam apontar pro MESMO valor pra dar
+        // pra achar a mesma execução nas três plataformas.
+        var ambiente = new Ambiente();
+        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow)], NextPageToken: null);
+        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        var correlationId = ambiente.SessionContext.Definidas.First().SessionId;
+        var tracesDeVideo = ambiente.Tracing.Traces.Where(t => t.Nome == "pipeline.video").ToList();
+        Assert.Equal(2, tracesDeVideo.Count);
+        Assert.All(tracesDeVideo, t => Assert.Equal(correlationId, t.Trace.Tags["correlation.id"]));
     }
 
     [Fact]
