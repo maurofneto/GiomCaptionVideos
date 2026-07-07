@@ -87,4 +87,18 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaCategorizacaoService>>()));
         return services;
     }
+
+    /// <summary>
+    /// Única implementação de IAvaliadorIAService hoje — usada pelo GuardRailIA (ver
+    /// Infrastructure.GuardRails). Registra sua própria telemetria direto em ITelemetriaService
+    /// (Tipo "guardrail_ia"), sem passar pelo par IContextoTelemetria/decorator Telemetria*.
+    /// </summary>
+    public static IServiceCollection AddClaudeAvaliadorIA(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddAnthropicHttpClient(config);
+        services.AddSessionContext();
+        services.Configure<ClaudeAvaliadorIAOptions>(config.GetSection("ClaudeAvaliadorIA"));
+        services.AddSingleton<IAvaliadorIAService, ClaudeAvaliadorIAService>();
+        return services;
+    }
 }

@@ -65,6 +65,10 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCategorizacaoService(this IServiceCollection services, IConfiguration config)
         => services.AddClaudeCategorizacao(config);
 
+    /// <summary>Avaliador de conteúdo via IA (sempre Claude por enquanto) — usado pelo guardrail AvaliacaoIA.</summary>
+    public static IServiceCollection AddAvaliadorIAService(this IServiceCollection services, IConfiguration config)
+        => services.AddClaudeAvaliadorIA(config);
+
     /// <summary>
     /// Embedding:Provider — Direct (padrão), SupabaseEdgeFunction. IndexarAsync sai decorado
     /// com telemetria (tempo/custo — custo só aparece com Direct, que chama a OpenAI aqui
@@ -191,8 +195,9 @@ public static class ServiceCollectionExtensions
     /// GuardRails:Habilitados — lista de nomes do catálogo abaixo que roda em toda interação do
     /// bot (Segurança e Confiabilidade). Adicionar/remover um guardrail em produção é só editar
     /// essa lista no appsettings, sem mudar nem reimplantar código. Catálogo atual:
-    /// PalavrasBloqueadas, PromptInjection, LimiteTamanhoMensagem, RateLimit (fase Entrada) e
-    /// RespostaVazia (fase Saida).
+    /// PalavrasBloqueadas, PromptInjection, LimiteTamanhoMensagem, RateLimit (fase Entrada),
+    /// RespostaVazia (fase Saida) e AvaliacaoIA (fase configurável — usa IA em vez de regra
+    /// fixa, ver GuardRailIAOptions:Instrucao).
     /// </summary>
     public static IServiceCollection AddGuardRails(this IServiceCollection services, IConfiguration config)
     {
@@ -221,6 +226,11 @@ public static class ServiceCollectionExtensions
                     break;
                 case "RespostaVazia":
                     services.AddSingleton<IGuardRail, RespostaVaziaGuardRail>();
+                    break;
+                case "AvaliacaoIA":
+                    services.AddAvaliadorIAService(config);
+                    services.Configure<GuardRailIAOptions>(config.GetSection("GuardRails:AvaliacaoIA"));
+                    services.AddSingleton<IGuardRail, GuardRailIA>();
                     break;
             }
         }
