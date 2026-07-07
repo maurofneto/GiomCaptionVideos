@@ -177,8 +177,9 @@ public static class ServiceCollectionExtensions
     /// bot (Segurança e Confiabilidade). Adicionar/remover um guardrail em produção é só editar
     /// essa lista no appsettings, sem mudar nem reimplantar código. Catálogo atual:
     /// PalavrasBloqueadas, PromptInjection, LimiteTamanhoMensagem, RateLimit (fase Entrada),
-    /// RespostaVazia (fase Saida) e AvaliacaoIA (fase configurável — usa IA em vez de regra
-    /// fixa, ver GuardRailIAOptions:Instrucao).
+    /// RespostaVazia (fase Saida), AvaliacaoIA (fase configurável — usa IA em vez de regra fixa,
+    /// ver GuardRailIAOptions:Instrucao) e AcessoRestrito (Board #22 — allowlist de chatIds;
+    /// fica de fora de Habilitados por padrão, é opt-in do Mauro quando quiser restringir).
     /// </summary>
     public static IServiceCollection AddGuardRails(this IServiceCollection services, IConfiguration config)
     {
@@ -212,6 +213,12 @@ public static class ServiceCollectionExtensions
                     services.AddAvaliadorIAService(config);
                     services.Configure<GuardRailIAOptions>(config.GetSection("GuardRails:AvaliacaoIA"));
                     services.AddSingleton<IGuardRail, GuardRailIA>();
+                    break;
+                case "AcessoRestrito":
+                    services.Configure<AllowlistControleAcessoOptions>(config.GetSection("GuardRails:AcessoRestrito"));
+                    services.Configure<AcessoRestritoOptions>(config.GetSection("GuardRails:AcessoRestrito"));
+                    services.AddSingleton<IControleAcessoService, AllowlistControleAcessoService>();
+                    services.AddSingleton<IGuardRail, AcessoRestritoGuardRail>();
                     break;
             }
         }
