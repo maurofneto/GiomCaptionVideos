@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.Extensions.Configuration;
+using Sentry.OpenTelemetry;
 using Serilog;
 using Serilog.Events;
 
@@ -41,6 +42,11 @@ public static class LoggerConfigurationSentryExtensions
             // e habilita SentrySdk.Metrics (série temporal agregável, usado em SentryTelemetriaService).
             o.EnableLogs = config.GetValue("Sentry:EnableLogs", true);
             o.EnableMetrics = config.GetValue("Sentry:EnableMetrics", true);
+
+            // Desliga a instrumentação nativa do Sentry (SentrySdk.StartTransaction) em favor do
+            // Activity do OpenTelemetry — GiomActivitySource + Sentry.OpenTelemetry.SentrySpanProcessor
+            // (ligado em AddSentryTracing) é quem gera Transaction/Span a partir de agora.
+            o.UseOpenTelemetry();
         });
     }
 }
