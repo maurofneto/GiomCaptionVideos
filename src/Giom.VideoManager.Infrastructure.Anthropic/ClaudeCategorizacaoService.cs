@@ -35,14 +35,16 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
     private readonly ILogger<ClaudeCategorizacaoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
+    private readonly ITracingService _tracingService;
     private readonly string _systemPrompt;
 
-    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext)
+    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _sessionContext = sessionContext;
+        _tracingService = tracingService;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("categorizacao.md");
     }
@@ -53,6 +55,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         if (string.IsNullOrWhiteSpace(resumo)) return [];
 
         _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("categorizacao", video));
+        using var span = _tracingService.IniciarEtapaAtual("categorizacao");
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {

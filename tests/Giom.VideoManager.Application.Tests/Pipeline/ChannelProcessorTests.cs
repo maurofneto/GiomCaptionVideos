@@ -196,35 +196,22 @@ public class ChannelProcessorTests
     }
 
     [Fact]
-    public async Task RunAsync_TagueiaCadaTraceDeVideoComOIdDoVideoEOTokenDaPagina()
+    public async Task RunAsync_AbreAHierarquiaCompletaDeTracesAninhados()
     {
+        // Board #88: run -> canal -> playlist -> página -> vídeo, todos aninhados (Activity.Current
+        // ambient) — não mais só página/vídeo como transações independentes.
         var ambiente = new Ambiente();
         var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
         ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
 
         await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
 
-        var traceDeVideo = ambiente.Tracing.Traces.Single(t => t.Nome == "pipeline.video").Trace;
-        Assert.Equal("v1", traceDeVideo.Tags["video.id"]);
-        Assert.Equal("primeira", traceDeVideo.Tags["pagina.token"]); // primeira página = sem pageToken ainda
+        var nomes = ambiente.Tracing.Traces.Select(t => t.Nome).ToList();
+        Assert.Equal(["pipeline.run", "pipeline.canal", "pipeline.playlist", "pipeline.pagina", "pipeline.video"], nomes);
     }
 
     [Fact]
-    public async Task RunAsync_TagueiaOTraceDaPaginaComOTokenAtual()
-    {
-        var ambiente = new Ambiente();
-        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
-        ambiente.Progresso.Setup(p => p.GetLastPageTokenAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("token-retomada");
-        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), "token-retomada", It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
-
-        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
-
-        var tracePagina = ambiente.Tracing.Traces.Single(t => t.Nome == "pipeline.pagina").Trace;
-        Assert.Equal("token-retomada", tracePagina.Tags["pagina.token"]);
-    }
-
-    [Fact]
-    public async Task RunAsync_DefineSessaoComUserIgualAoCanal()
+    public async Task RunAsync_DefineSessaoComUserIgualAoCanalEmTodosOsNiveis()
     {
         // Board #82: durante a pipeline, o User do Helicone deve ser o nome do canal (não um
         // valor genérico) — permite ver custo/uso agrupado por canal na plataforma externa.
@@ -234,17 +221,16 @@ public class ChannelProcessorTests
 
         await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
 
-        var sessao = ambiente.SessionContext.Definidas.Single();
-        Assert.Equal(Canal.Name, sessao.UserId);
+        Assert.All(ambiente.SessionContext.Definidas, sessao => Assert.Equal(Canal.Name, sessao.UserId));
     }
 
     [Fact]
-    public async Task RunAsync_DefineSessionPathComAmbienteCanalPaginaEVideo_MesmoSessionIdEntreVideosDaMesmaRun()
+    public async Task RunAsync_DefineSessionPathComPlaylistPaginaEVideo_MesmoSessionIdEntreVideosDaMesmaRun()
     {
-        // Board #82: hierarquia canal->página->vídeo->etapa no Helicone. O SessionId (que agrupa
-        // tudo como UMA árvore, e é o CorrelationId de tudo — ver testes de CorrelationId abaixo)
-        // é o mesmo pra toda a run do canal; o SessionPath diferencia ambiente/canal/página/vídeo.
-        // As etapas (resumo/categorização) acrescentam seu próprio segmento por cima disso (ver
+        // Board #82/#88: hierarquia canal->playlist->página->vídeo->etapa no Helicone. O SessionId
+        // (que agrupa tudo como UMA árvore, e é o CorrelationId de tudo) é o mesmo do início ao
+        // fim da run; o SessionPath diferencia ambiente/canal/playlist/página/vídeo. As etapas
+        // (resumo/categorização) acrescentam seu próprio segmento por cima disso (ver
         // ClaudeResumoService/ClaudeCategorizacaoService).
         var ambiente = new Ambiente();
         var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow)], NextPageToken: null);
@@ -252,15 +238,18 @@ public class ChannelProcessorTests
 
         await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
 
-        Assert.Equal(2, ambiente.SessionContext.Definidas.Count);
-        var (sessaoV1, sessaoV2) = (ambiente.SessionContext.Definidas[0], ambiente.SessionContext.Definidas[1]);
-        Assert.Equal(sessaoV1.SessionId, sessaoV2.SessionId); // mesma árvore/sessão pra run inteira
-        Assert.Equal($"/pipeline-Testing/{Canal.Name}/pagina-primeira/v1", sessaoV1.SessionPath);
-        Assert.Equal($"/pipeline-Testing/{Canal.Name}/pagina-primeira/v2", sessaoV2.SessionPath);
+        var sessoesDeVideo = ambiente.SessionContext.Definidas.Where(s => s.Propriedades!.ContainsKey("VideoId")).ToList();
+        Assert.Equal(2, sessoesDeVideo.Count);
+        Assert.Equal(sessoesDeVideo[0].SessionId, sessoesDeVideo[1].SessionId); // mesma árvore/sessão pra run inteira
+        Assert.Equal($"/pipeline-Testing/{Canal.Name}/playlist-playlist-1/pagina-primeira/v1", sessoesDeVideo[0].SessionPath);
+        Assert.Equal($"/pipeline-Testing/{Canal.Name}/playlist-playlist-1/pagina-primeira/v2", sessoesDeVideo[1].SessionPath);
+
+        // Todos os níveis (canal/playlist/página/vídeo) compartilham o mesmo CorrelationId (SessionId)
+        Assert.Single(ambiente.SessionContext.Definidas.Select(s => s.SessionId).Distinct());
     }
 
     [Fact]
-    public async Task RunAsync_PropriedadesDaSessaoTrazemEnvironmentCanalPaginaEVideo()
+    public async Task RunAsync_PropriedadesDaSessaoTrazemEnvironmentCanalPlaylistPaginaEVideo()
     {
         var ambiente = new Ambiente();
         var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null);
@@ -268,30 +257,13 @@ public class ChannelProcessorTests
 
         await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
 
-        var propriedades = ambiente.SessionContext.Definidas.Single().Propriedades!;
+        var propriedades = ambiente.SessionContext.Definidas.Last().Propriedades!;
         Assert.Equal("Testing", propriedades["Environment"]);
         Assert.Equal(Canal.Name, propriedades["Canal"]);
+        Assert.Equal("playlist-1", propriedades["Playlist"]);
         Assert.Equal("primeira", propriedades["Pagina"]);
         Assert.Equal("v1", propriedades["VideoId"]);
         Assert.Equal("Vídeo v1", propriedades["VideoTitle"]);
-    }
-
-    [Fact]
-    public async Task RunAsync_UsaOMesmoCorrelationIdComoSessionIdETagDoTraceEmTodaARun()
-    {
-        // Board #82: o Guid da run é o CorrelationId de tudo — logs (BeginScope), Sentry
-        // (tag correlation.id) e Helicone (Session-Id) precisam apontar pro MESMO valor pra dar
-        // pra achar a mesma execução nas três plataformas.
-        var ambiente = new Ambiente();
-        var pagina = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow)], NextPageToken: null);
-        ambiente.VideoSource.Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(pagina);
-
-        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
-
-        var correlationId = ambiente.SessionContext.Definidas.First().SessionId;
-        var tracesDeVideo = ambiente.Tracing.Traces.Where(t => t.Nome == "pipeline.video").ToList();
-        Assert.Equal(2, tracesDeVideo.Count);
-        Assert.All(tracesDeVideo, t => Assert.Equal(correlationId, t.Trace.Tags["correlation.id"]));
     }
 
     [Fact]

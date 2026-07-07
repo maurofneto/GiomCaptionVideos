@@ -17,10 +17,11 @@ namespace Giom.VideoManager.Infrastructure.Telemetria;
 /// na Composition) — Scrutor resolve "inner" como a implementação JÁ registrada antes do
 /// Decorate, sem precisar de generics nem de "new" montando a decoração à mão.
 /// </summary>
-public class TelemetriaEmbeddingService(IEmbeddingService inner, ITelemetriaService telemetria, ContextoTelemetria contextoTelemetria, ILogger<TelemetriaEmbeddingService> logger) : IEmbeddingService
+public class TelemetriaEmbeddingService(IEmbeddingService inner, ITelemetriaService telemetria, ContextoTelemetria contextoTelemetria, ITracingService tracingService, ILogger<TelemetriaEmbeddingService> logger) : IEmbeddingService
 {
     public async Task IndexarAsync(Video video, CancellationToken ct = default)
     {
+        using var span = tracingService.IniciarEtapaAtual("embedding");
         var stopwatch = Stopwatch.StartNew();
         var meta = contextoTelemetria.IniciarEscopo();
         try

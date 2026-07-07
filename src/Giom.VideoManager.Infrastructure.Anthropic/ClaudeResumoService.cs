@@ -37,14 +37,16 @@ public class ClaudeResumoService : IResumoService
     private readonly ILogger<ClaudeResumoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
+    private readonly ITracingService _tracingService;
     private readonly string _systemPrompt;
 
-    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext)
+    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _sessionContext = sessionContext;
+        _tracingService = tracingService;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("resumo.md");
     }
@@ -56,6 +58,7 @@ public class ClaudeResumoService : IResumoService
             return null;
 
         _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("resumo", video));
+        using var span = _tracingService.IniciarEtapaAtual("resumo");
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {

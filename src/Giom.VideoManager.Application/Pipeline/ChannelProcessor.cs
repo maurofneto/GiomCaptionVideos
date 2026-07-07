@@ -1,5 +1,6 @@
 using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Options;
+using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Microsoft.Extensions.Hosting;
@@ -8,6 +9,17 @@ using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Application.Pipeline;
 
+/// <summary>
+/// Hierarquia de Spans (Sentry Performance): run (Transaction) -> canal -> playlist -> página ->
+/// vídeo -> etapas (transcrição/resumo/categorização/embedding, abertas de dentro de cada
+/// serviço via ITracingService.IniciarEtapaAtual). Cada nível é aninhado dentro do anterior
+/// (Activity.Current ambient) — a duração de "canal" no Sentry já é a soma de tudo que
+/// aconteceu dentro dele, sem precisar agregar nada manualmente.
+/// Não tagueia mais Sentry/log manualmente nível por nível — SentryTracingService tagueia todo
+/// Span automaticamente a partir do que estiver em ISessionContext.Atual (ver DefinirSessaoAtual),
+/// e o SessionContextEnricher faz o mesmo pros logs. Um lugar só define os atributos; os três
+/// destinos (Sentry, Helicone, logs) leem dali.
+/// </summary>
 public class ChannelProcessor(
     IVideoSourceService videoSource,
     IProgressoRepository progressoRepository,
@@ -22,12 +34,20 @@ public class ChannelProcessor(
 
     public async Task RunAsync(IEnumerable<ChannelConfig> channels, CancellationToken ct = default)
     {
+        // Um único CorrelationId pra execução inteira (todos os canais processados nesta run) —
+        // é o mesmo Guid usado como Session-Id no Helicone e como tag correlation.id em todo Span
+        // do Sentry, permitindo achar a mesma execução nas duas plataformas (e nos logs).
+        var correlationId = Guid.NewGuid().ToString();
+        var horaExecucao = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+
+        using var traceRun = tracingService.IniciarTrace("pipeline.run", "video_pipeline");
+
         foreach (var config in channels)
         {
             logger.LogInformation("Iniciando canal: {Name}", config.Name);
             try
             {
-                await ProcessChannelAsync(config, ct);
+                await ProcessChannelAsync(config, correlationId, horaExecucao, ct);
             }
             catch (Exception ex)
             {
@@ -38,21 +58,10 @@ public class ChannelProcessor(
         logger.LogInformation("Processamento concluído.");
     }
 
-    private async Task ProcessChannelAsync(ChannelConfig config, CancellationToken ct)
+    private async Task ProcessChannelAsync(ChannelConfig config, string correlationId, string horaExecucao, CancellationToken ct)
     {
-        // Um único Guid por execução do canal é o CorrelationId de TUDO que essa run gera —
-        // logs (via BeginScope, chega no Console/CloudWatch), traces do Sentry (DefinirTag
-        // "correlation.id") e a Session-Id do Helicone. É o que permite pegar um erro em
-        // qualquer uma dessas três plataformas e encontrar exatamente a mesma execução nas
-        // outras duas, sem precisar casar timestamps na mão.
-        var correlationId = Guid.NewGuid().ToString();
-        var horaExecucao = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
-
-        using var escopoDeLog = logger.BeginScope(new Dictionary<string, object>
-        {
-            ["CorrelationId"] = correlationId,
-            ["Canal"] = config.Name
-        });
+        using var traceCanal = tracingService.IniciarTrace("pipeline.canal", "video_pipeline");
+        DefinirSessaoAtual(correlationId, horaExecucao, config);
 
         var playlistId = await videoSource.GetUploadPlaylistIdAsync(config, ct);
         if (string.IsNullOrEmpty(playlistId))
@@ -60,6 +69,9 @@ public class ChannelProcessor(
             logger.LogWarning("Playlist não encontrada para canal {Name}", config.Name);
             return;
         }
+
+        using var tracePlaylist = tracingService.IniciarTrace("pipeline.playlist", "video_pipeline");
+        DefinirSessaoAtual(correlationId, horaExecucao, config, playlistId);
 
         var channelKey       = config.ChannelId ?? "mine";
         var pageToken        = await progressoRepository.GetLastPageTokenAsync(channelKey, playlistId, ct);
@@ -85,16 +97,10 @@ public class ChannelProcessor(
         {
             logger.LogInformation($"Canal {config.Name} — processando página (já processados: {processedIds.Count})", config.Name);
 
-            PlaylistPage page;
-            using (var tracePagina = tracingService.IniciarTrace("pipeline.pagina", "video_pipeline"))
-            {
-                // Tag do token — sem isso, toda página de todo canal aparecia igual no Sentry,
-                // sem jeito de saber qual delas era qual numa lista de traces.
-                tracePagina.DefinirTag("pagina.token", pageToken ?? "primeira");
-                tracePagina.DefinirTag("correlation.id", correlationId);
-                page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, _options.MaxVideosPerRun), pageToken, ct);
-            }
+            using var tracePagina = tracingService.IniciarTrace("pipeline.pagina", "video_pipeline");
+            DefinirSessaoAtual(correlationId, horaExecucao, config, playlistId, pageToken ?? "primeira");
 
+            var page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, _options.MaxVideosPerRun), pageToken, ct);
             if (page.Videos.Count == 0) break;
 
             foreach (var video in page.Videos)
@@ -109,37 +115,8 @@ public class ChannelProcessor(
 
                 logger.LogInformation("Canal {Name} — processando vídeo {Id} — {Title}", config.Name, video.Id, video.Title);
 
-                // User = nome do canal (não um valor genérico) — permite ver custo/uso por
-                // canal na plataforma de observabilidade de LLM. SessionId é o CorrelationId
-                // desta run inteira; SessionName é o momento em que a run começou (não o
-                // canal — isso já é o User/parte do Path); SessionPath aninha
-                // ambiente/canal/página/vídeo, e cada etapa (resumo/categorização) acrescenta
-                // seu próprio segmento por cima disso (ver ClaudeResumoService/
-                // ClaudeCategorizacaoService).
-                sessionContext.Definir(new SessaoObservabilidade(
-                    SessionId: correlationId,
-                    SessionName: horaExecucao,
-                    SessionPath: $"/pipeline-{hostEnvironment.EnvironmentName}/{config.Name}/pagina-{pageToken ?? "primeira"}/{video.Id}",
-                    UserId: config.Name,
-                    Propriedades: new Dictionary<string, string>
-                    {
-                        ["Environment"] = hostEnvironment.EnvironmentName,
-                        ["Canal"] = config.Name,
-                        ["Pagina"] = pageToken ?? "primeira",
-                        ["VideoId"] = video.Id,
-                        ["VideoTitle"] = video.Title
-                    }));
-
-                // Uma transação POR VÍDEO (não mais por página inteira) — é o que faz a
-                // telemetria de transcrição/resumo/categorização/embedding (RegistrarAsync,
-                // que anexa measurement na transação atual) parar de se sobrescrever entre
-                // vídeos diferentes da mesma página. Tag de video.id/pagina.token/correlation.id
-                // deixa cada trace identificável isoladamente no Sentry E correlacionável com
-                // Helicone (mesmo Guid = Session-Id) e os logs (mesmo Guid = CorrelationId).
-                var traceVideo = tracingService.IniciarTrace("pipeline.video", "video_pipeline");
-                traceVideo.DefinirTag("video.id", video.Id);
-                traceVideo.DefinirTag("pagina.token", pageToken ?? "primeira");
-                traceVideo.DefinirTag("correlation.id", correlationId);
+                using var traceVideo = tracingService.IniciarTrace("pipeline.video", "video_pipeline");
+                DefinirSessaoAtual(correlationId, horaExecucao, config, playlistId, pageToken ?? "primeira", video);
 
                 try
                 {
@@ -152,10 +129,6 @@ public class ChannelProcessor(
                 {
                     traceVideo.MarcarErro(ex);
                     logger.LogError(ex, "Erro ao processar vídeo {Id} — {Title}", video.Id, video.Title);
-                }
-                finally
-                {
-                    traceVideo.Dispose();
                 }
 
                 await Task.Delay(_options.DelayBetweenVideosMs, ct);
@@ -177,5 +150,49 @@ public class ChannelProcessor(
 
             await Task.Delay(_options.DelayBetweenPagesMs, ct);
         }
+    }
+
+    /// <summary>
+    /// Único ponto que define o contexto de sessão/observabilidade — User/Session-Name/Path do
+    /// Helicone, tags automáticas de todo Span do Sentry (via SentryTracingService) e propriedades
+    /// de log (via SessionContextEnricher) vêm todos daqui. Cada nível da hierarquia (canal,
+    /// playlist, página, vídeo) chama de novo, só acrescentando o que sabe de novo — nunca perde o
+    /// que os níveis acima já definiram.
+    /// </summary>
+    private void DefinirSessaoAtual(string correlationId, string horaExecucao, ChannelConfig config,
+        string? playlistId = null, string? pagina = null, Video? video = null)
+    {
+        var path = $"/pipeline-{hostEnvironment.EnvironmentName}/{config.Name}";
+        var propriedades = new Dictionary<string, string>
+        {
+            ["Environment"] = hostEnvironment.EnvironmentName,
+            ["Canal"] = config.Name
+        };
+
+        if (playlistId is not null)
+        {
+            path += $"/playlist-{playlistId}";
+            propriedades["Playlist"] = playlistId;
+        }
+
+        if (pagina is not null)
+        {
+            path += $"/pagina-{pagina}";
+            propriedades["Pagina"] = pagina;
+        }
+
+        if (video is not null)
+        {
+            path += $"/{video.Id}";
+            propriedades["VideoId"] = video.Id;
+            propriedades["VideoTitle"] = video.Title;
+        }
+
+        sessionContext.Definir(new SessaoObservabilidade(
+            SessionId: correlationId,
+            SessionName: horaExecucao,
+            SessionPath: path,
+            UserId: config.Name,
+            Propriedades: propriedades));
     }
 }
