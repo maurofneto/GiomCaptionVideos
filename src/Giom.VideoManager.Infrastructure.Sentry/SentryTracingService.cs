@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Observabilidade;
+using Sentry;
 
 namespace Giom.VideoManager.Infrastructure.Sentry;
 
@@ -18,6 +19,14 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 /// atributos: define uma vez no SessionContext, aparece em todo Span daquele ponto em diante.
 /// Seguro mesmo sem listener registrado (Sentry:Dsn vazio) — ActivitySource.StartActivity só
 /// devolve null nesse caso, e todo método aqui já trata isso.
+/// Todo trace/etapa aberto via IniciarTrace/ITrace.IniciarEtapa também emite uma métrica
+/// "giom.tempo_ms" (mesmo nome que SentryTelemetriaService já usa pra resumo/categorização/
+/// transcrição/embedding) — assim os grupos da pipeline (canal/playlist/página/vídeo) e as
+/// etapas do bot (guardrail/busca_rag/agente/envio) entram na MESMA série temporal, filtrável
+/// por tag "tipo", em vez de precisar abrir uma transação específica no Sentry pra ver quanto
+/// tempo cada nível está levando. IniciarEtapaAtual NÃO ganha esse tratamento — resumo/
+/// categorização/transcrição/embedding já emitem essa métrica pelo caminho de
+/// ITelemetriaService/RegistroTelemetria, e duplicaria a série se emitíssemos aqui também.
 /// </summary>
 public class SentryTracingService(ISessionContext sessionContext) : ITracingService
 {
@@ -49,13 +58,35 @@ public class SentryTracingService(ISessionContext sessionContext) : ITracingServ
             activity.SetTag(chave, valor);
     }
 
+    private void EmitirMetricaDeDuracao(Activity? activity)
+    {
+        if (activity is null) return;
+
+        var atributos = new List<KeyValuePair<string, object>>
+        {
+            new("tipo", activity.OperationName),
+            new("sucesso", activity.Status != ActivityStatusCode.Error),
+        };
+
+        var sessao = sessionContext.Atual;
+        if (sessao is not null)
+        {
+            atributos.Add(new("correlation_id", sessao.SessionId));
+            if (sessao.Propriedades is not null)
+                foreach (var (chave, valor) in sessao.Propriedades)
+                    atributos.Add(new(chave, valor));
+        }
+
+        SentrySdk.Metrics.EmitDistribution("giom.tempo_ms", activity.Duration.TotalMilliseconds, MeasurementUnit.Duration.Millisecond, atributos);
+    }
+
     private sealed class SentryTrace(Activity? activity, SentryTracingService owner) : ITrace
     {
         public IDisposable IniciarEtapa(string nome)
         {
             var filho = GiomActivitySource.Instance.StartActivity(nome);
             owner.AplicarAtributosDaSessao(filho);
-            return (IDisposable?)filho ?? NoopDisposable.Instance;
+            return filho is null ? NoopDisposable.Instance : new EtapaComMetrica(filho, owner);
         }
 
         public void MarcarErro(Exception ex)
@@ -66,7 +97,20 @@ public class SentryTracingService(ISessionContext sessionContext) : ITracingServ
 
         public void DefinirTag(string chave, string valor) => activity?.SetTag(chave, valor);
 
-        public void Dispose() => activity?.Dispose();
+        public void Dispose()
+        {
+            activity?.Dispose();
+            owner.EmitirMetricaDeDuracao(activity);
+        }
+    }
+
+    private sealed class EtapaComMetrica(Activity activity, SentryTracingService owner) : IDisposable
+    {
+        public void Dispose()
+        {
+            activity.Dispose();
+            owner.EmitirMetricaDeDuracao(activity);
+        }
     }
 
     private sealed class NoopDisposable : IDisposable

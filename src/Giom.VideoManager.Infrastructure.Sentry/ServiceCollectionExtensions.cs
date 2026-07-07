@@ -1,8 +1,7 @@
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure.Observabilidade;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using OpenTelemetry.Trace;
-using Sentry.OpenTelemetry;
+using Microsoft.Extensions.Hosting;
 
 namespace Giom.VideoManager.Infrastructure.Sentry;
 
@@ -16,21 +15,20 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Único provider de tracing hoje — liga ITracingService direto, sem indireção na Composition.
-    /// Registra o SDK do OpenTelemetry escutando GiomActivitySource e encaminhando pro Sentry
-    /// (Sentry.OpenTelemetry.SentrySpanProcessor traduz Activity em Transaction/Span) — sem isso,
-    /// ActivitySource.StartActivity nunca teria um listener e sempre devolveria null. A outra
-    /// metade da ligação (SentryOptions.UseOpenTelemetry) fica em
-    /// LoggerConfigurationSentryExtensions.ConfigureSentry, onde o Sentry já é inicializado
-    /// (via Serilog). Precisa que o host seja efetivamente iniciado (host.StartAsync/RunAsync) —
-    /// o TracerProvider só sobe através do IHostedService que este pacote registra.
+    /// Único provider de tracing hoje — liga ITracingService, e inicializa o TracerProvider do
+    /// OpenTelemetry + o SentrySdk na ordem exigida (ver SentryBootstrap — TracerProvider
+    /// primeiro, SentrySdk.Init depois). Precisa de IConfiguration aqui (não só no Serilog)
+    /// porque essa é a única forma de garantir que a inicialização roda ANTES de qualquer
+    /// Activity ser criado (ChannelProcessor só chama IniciarTrace bem depois de
+    /// ConfigureServices terminar). Registrado como IHostedService (ver
+    /// SentryBootstrapHostedService) — StartAsync roda antes do código principal (garante a
+    /// ordem), StopAsync descarta e força o flush; precisa que a aplicação chame
+    /// host.StartAsync()/StopAsync() (todos os workers e a ferramenta de teste fazem isso).
     /// </summary>
-    public static IServiceCollection AddSentryTracing(this IServiceCollection services)
+    public static IServiceCollection AddSentryTracing(this IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton<ITracingService, SentryTracingService>();
-        services.AddOpenTelemetry().WithTracing(builder => builder
-            .AddSource(GiomActivitySource.Name)
-            .AddSentry());
+        services.AddHostedService(_ => new SentryBootstrapHostedService(config));
         return services;
     }
 }

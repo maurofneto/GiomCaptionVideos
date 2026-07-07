@@ -154,8 +154,8 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>Rastreamento de etapas de uma interação (ex: busca RAG / agente / envio) — hoje via Sentry Performance.</summary>
-    public static IServiceCollection AddTracingService(this IServiceCollection services)
-        => services.AddSentryTracing();
+    public static IServiceCollection AddTracingService(this IServiceCollection services, IConfiguration config)
+        => services.AddSentryTracing(config);
 
     /// <summary>
     /// IncertezaDetector:Provider — Heuristica (padrão). Deixado plugável (switch, não uma
