@@ -55,13 +55,7 @@ public class ClaudeResumoService : IResumoService
         if (string.IsNullOrWhiteSpace(textoLimpo))
             return null;
 
-        // VideoId como Session-Id agrupa resumo + categorização do mesmo vídeo numa eventual
-        // plataforma de observabilidade externa.
-        _sessionContext.Definir(new SessaoObservabilidade(
-            SessionId: video.Id,
-            SessionName: video.Title,
-            SessionPath: "/pipeline/resumo",
-            Propriedades: new Dictionary<string, string> { ["Tipo"] = "resumo", ["Canal"] = video.ChannelTitle }));
+        _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("resumo", video));
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {

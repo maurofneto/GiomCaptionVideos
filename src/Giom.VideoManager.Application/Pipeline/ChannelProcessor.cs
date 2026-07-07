@@ -2,6 +2,7 @@ using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -12,6 +13,8 @@ public class ChannelProcessor(
     IProgressoRepository progressoRepository,
     IVideoHandler videoHandler,
     ITracingService tracingService,
+    ISessionContext sessionContext,
+    IHostEnvironment hostEnvironment,
     ILogger<ChannelProcessor> logger,
     IOptions<ProcessingOptions> options)
 {
@@ -37,6 +40,20 @@ public class ChannelProcessor(
 
     private async Task ProcessChannelAsync(ChannelConfig config, CancellationToken ct)
     {
+        // Um único Guid por execução do canal é o CorrelationId de TUDO que essa run gera —
+        // logs (via BeginScope, chega no Console/CloudWatch), traces do Sentry (DefinirTag
+        // "correlation.id") e a Session-Id do Helicone. É o que permite pegar um erro em
+        // qualquer uma dessas três plataformas e encontrar exatamente a mesma execução nas
+        // outras duas, sem precisar casar timestamps na mão.
+        var correlationId = Guid.NewGuid().ToString();
+        var horaExecucao = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+
+        using var escopoDeLog = logger.BeginScope(new Dictionary<string, object>
+        {
+            ["CorrelationId"] = correlationId,
+            ["Canal"] = config.Name
+        });
+
         var playlistId = await videoSource.GetUploadPlaylistIdAsync(config, ct);
         if (string.IsNullOrEmpty(playlistId))
         {
@@ -74,6 +91,7 @@ public class ChannelProcessor(
                 // Tag do token — sem isso, toda página de todo canal aparecia igual no Sentry,
                 // sem jeito de saber qual delas era qual numa lista de traces.
                 tracePagina.DefinirTag("pagina.token", pageToken ?? "primeira");
+                tracePagina.DefinirTag("correlation.id", correlationId);
                 page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, _options.MaxVideosPerRun), pageToken, ct);
             }
 
@@ -91,14 +109,37 @@ public class ChannelProcessor(
 
                 logger.LogInformation("Canal {Name} — processando vídeo {Id} — {Title}", config.Name, video.Id, video.Title);
 
+                // User = nome do canal (não um valor genérico) — permite ver custo/uso por
+                // canal na plataforma de observabilidade de LLM. SessionId é o CorrelationId
+                // desta run inteira; SessionName é o momento em que a run começou (não o
+                // canal — isso já é o User/parte do Path); SessionPath aninha
+                // ambiente/canal/página/vídeo, e cada etapa (resumo/categorização) acrescenta
+                // seu próprio segmento por cima disso (ver ClaudeResumoService/
+                // ClaudeCategorizacaoService).
+                sessionContext.Definir(new SessaoObservabilidade(
+                    SessionId: correlationId,
+                    SessionName: horaExecucao,
+                    SessionPath: $"/pipeline-{hostEnvironment.EnvironmentName}/{config.Name}/pagina-{pageToken ?? "primeira"}/{video.Id}",
+                    UserId: config.Name,
+                    Propriedades: new Dictionary<string, string>
+                    {
+                        ["Environment"] = hostEnvironment.EnvironmentName,
+                        ["Canal"] = config.Name,
+                        ["Pagina"] = pageToken ?? "primeira",
+                        ["VideoId"] = video.Id,
+                        ["VideoTitle"] = video.Title
+                    }));
+
                 // Uma transação POR VÍDEO (não mais por página inteira) — é o que faz a
                 // telemetria de transcrição/resumo/categorização/embedding (RegistrarAsync,
                 // que anexa measurement na transação atual) parar de se sobrescrever entre
-                // vídeos diferentes da mesma página. Tag de video.id/pagina.token deixa cada
-                // trace identificável isoladamente no Sentry.
+                // vídeos diferentes da mesma página. Tag de video.id/pagina.token/correlation.id
+                // deixa cada trace identificável isoladamente no Sentry E correlacionável com
+                // Helicone (mesmo Guid = Session-Id) e os logs (mesmo Guid = CorrelationId).
                 var traceVideo = tracingService.IniciarTrace("pipeline.video", "video_pipeline");
                 traceVideo.DefinirTag("video.id", video.Id);
                 traceVideo.DefinirTag("pagina.token", pageToken ?? "primeira");
+                traceVideo.DefinirTag("correlation.id", correlationId);
 
                 try
                 {

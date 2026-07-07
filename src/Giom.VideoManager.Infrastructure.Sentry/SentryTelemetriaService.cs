@@ -26,11 +26,17 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 /// Seguro mesmo se o Sentry não estiver inicializado nesse worker (Sentry:Dsn vazio) —
 /// SentrySdk vira no-op nesse caso.
 /// </summary>
-public class SentryTelemetriaService : ITelemetriaSink
+public class SentryTelemetriaService(ISessionContext sessionContext) : ITelemetriaSink
 {
     public Task RegistrarAsync(RegistroTelemetria registro, CancellationToken ct = default)
     {
+        // Mesmo Guid usado como Session-Id no Helicone e como CorrelationId nos logs (ver
+        // ChannelProcessor) — lido daqui (em vez de recriado) pra garantir que os três
+        // continuam apontando pra exatamente a mesma execução.
+        var correlationId = sessionContext.Atual?.SessionId;
+
         var dados = new Dictionary<string, string> { ["entidadeId"] = registro.EntidadeId };
+        if (correlationId is not null) dados["correlationId"] = correlationId;
         if (registro.Provedor is not null) dados["provedor"] = registro.Provedor;
         if (registro.Modelo is not null) dados["modelo"] = registro.Modelo;
         if (registro.TokensEntrada is not null) dados["tokensEntrada"] = registro.TokensEntrada.Value.ToString();
@@ -68,6 +74,7 @@ public class SentryTelemetriaService : ITelemetriaSink
             new("sucesso", registro.Sucesso),
             new("provedor", registro.Provedor ?? "n/d"),
             new("modelo", registro.Modelo ?? "n/d"),
+            new("correlation_id", correlationId ?? "n/d"),
         ];
 
         SentrySdk.Metrics.EmitDistribution("giom.tempo_ms", registro.TempoMs, MeasurementUnit.Duration.Millisecond, atributos);

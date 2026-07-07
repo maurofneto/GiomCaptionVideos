@@ -52,11 +52,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         var resumo = video.Resumo?.Descricao ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resumo)) return [];
 
-        _sessionContext.Definir(new SessaoObservabilidade(
-            SessionId: video.Id,
-            SessionName: video.Title,
-            SessionPath: "/pipeline/categorizacao",
-            Propriedades: new Dictionary<string, string> { ["Tipo"] = "categorizacao", ["Canal"] = video.ChannelTitle }));
+        _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("categorizacao", video));
 
         var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
         {
