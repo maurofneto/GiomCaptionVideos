@@ -31,6 +31,7 @@ public class ChatBotProcessor(
     IContextoTelemetria contextoTelemetria,
     IOptions<RagOptions> ragOptions,
     IOptions<DebugMetricasOptions> debugOptions,
+    IOptions<HistoricoOptions> historicoOptions,
     ILogger<ChatBotProcessor> logger)
 {
     // Uma entrada por chat com processamento em andamento — permite cancelar a resposta
@@ -119,7 +120,7 @@ public class ChatBotProcessor(
             // da busca RAG abaixo.
             turno = await historicoService.AdicionarAsync(mensagem.ChatId, new TurnoConversa(null, mensagem.Texto, null), ct);
 
-            var historico = await historicoService.ObterAsync(mensagem.ChatId, ct);
+            var historico = AplicarLimiteFifo(await historicoService.ObterAsync(mensagem.ChatId, ct), historicoOptions.Value.LimiteCaracteres, mensagem.ChatId);
 
             var buscaStopwatch = System.Diagnostics.Stopwatch.StartNew();
             BuscaSemanticaResultado busca;
@@ -237,6 +238,38 @@ public class ChatBotProcessor(
             await indicadorTask;
             _processandoPorChat.TryRemove(mensagem.ChatId, out _);
         }
+    }
+
+    /// <summary>
+    /// Descarta os turnos mais ANTIGOS primeiro (FIFO) até o histórico caber no limite de
+    /// caracteres configurado — mesmo espírito do que o Claude.ai/Claude Code fazem quando a
+    /// conversa cresce demais, só que sem custo de uma chamada extra pra "compactar": aqui é
+    /// puro corte, sem resumir o que foi descartado. Sempre mantém pelo menos o turno mais
+    /// recente, mesmo que ele sozinho já ultrapasse o limite.
+    /// </summary>
+    private IReadOnlyList<TurnoConversa> AplicarLimiteFifo(IReadOnlyList<TurnoConversa> historico, int limiteCaracteres, string chatId)
+    {
+        var mantidos = new List<TurnoConversa>();
+        var total = 0;
+
+        for (var i = historico.Count - 1; i >= 0; i--)
+        {
+            var turno = historico[i];
+            var tamanho = turno.Pergunta.Length + (turno.Resposta?.Length ?? 0);
+            if (mantidos.Count > 0 && total + tamanho > limiteCaracteres)
+                break;
+
+            mantidos.Add(turno);
+            total += tamanho;
+        }
+
+        mantidos.Reverse();
+
+        var descartados = historico.Count - mantidos.Count;
+        if (descartados > 0)
+            logger.LogInformation("Histórico truncado (FIFO): {Descartados} turno(s) mais antigo(s) removido(s) do contexto de {ChatId}", descartados, chatId);
+
+        return mantidos;
     }
 
     /// <summary>

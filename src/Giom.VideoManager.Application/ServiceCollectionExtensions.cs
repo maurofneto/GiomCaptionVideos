@@ -29,6 +29,7 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<RagOptions>(config.GetSection("Rag"));
         services.Configure<DebugMetricasOptions>(config.GetSection("DebugMetricas"));
+        services.Configure<HistoricoOptions>(config.GetSection("ConversaHistorico"));
         services.AddSingleton<ChatBotProcessor>();
         return services;
     }
