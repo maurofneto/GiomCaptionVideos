@@ -28,6 +28,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddChatBotProcessor(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<RagOptions>(config.GetSection("Rag"));
+        services.Configure<DebugMetricasOptions>(config.GetSection("DebugMetricas"));
         services.AddSingleton<ChatBotProcessor>();
         return services;
     }

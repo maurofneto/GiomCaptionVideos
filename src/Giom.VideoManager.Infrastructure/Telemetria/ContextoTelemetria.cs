@@ -20,9 +20,10 @@ public class ContextoTelemetria : IContextoTelemetria
 {
     private static readonly AsyncLocal<MetadadosTelemetria?> _atual = new();
 
-    /// <summary>Chamado pelo decorator antes de invocar a implementação real.</summary>
-    public MetadadosTelemetria IniciarEscopo()
+    public MetadadosTelemetria IniciarEscopo(bool reaproveitarEscopoExistente = false)
     {
+        if (reaproveitarEscopoExistente && _atual.Value is { } existente) return existente;
+
         var novo = new MetadadosTelemetria();
         _atual.Value = novo;
         return novo;
@@ -40,14 +41,4 @@ public class ContextoTelemetria : IContextoTelemetria
         atual.CustoEstimadoUsd = custoEstimadoUsd;
         atual.Detalhes = detalhes;
     }
-}
-
-public class MetadadosTelemetria
-{
-    public string? Provedor { get; set; }
-    public string? Modelo { get; set; }
-    public int? TokensEntrada { get; set; }
-    public int? TokensSaida { get; set; }
-    public decimal? CustoEstimadoUsd { get; set; }
-    public object? Detalhes { get; set; }
 }

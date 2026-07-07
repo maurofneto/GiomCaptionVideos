@@ -26,7 +26,9 @@ public class ChatBotProcessor(
     IConversaHistoricoService historicoService,
     ITelemetriaService telemetriaService,
     ITracingService tracingService,
+    IContextoTelemetria contextoTelemetria,
     IOptions<RagOptions> ragOptions,
+    IOptions<DebugMetricasOptions> debugOptions,
     ILogger<ChatBotProcessor> logger)
 {
     public async Task RunAsync(CancellationToken ct = default)
@@ -107,6 +109,11 @@ public class ChatBotProcessor(
                     }
                 ), ct);
 
+                // Aberto ANTES de chamar o agente (não dentro dele) pra que o TelemetriaAgentService,
+                // decorator que envolve IAgentService, reaproveite este mesmo escopo em vez de abrir
+                // um novo — só assim os tokens/custo que ele coleta ficam visíveis aqui embaixo.
+                var metaAgente = contextoTelemetria.IniciarEscopo();
+
                 string respostaTexto;
                 using (trace.IniciarEtapa("agente"))
                 {
@@ -124,6 +131,11 @@ public class ChatBotProcessor(
                     await channel.ResponderAsync(mensagem.ChatId, respostaTexto, turno.Id.ToString(), ct);
                 }
                 logger.LogInformation("Respondido: {ChatId} — {Usuario} ({TempoMs}ms)", mensagem.ChatId, mensagem.UserName, stopwatch.ElapsedMilliseconds);
+
+                if (debugOptions.Value.Habilitado)
+                {
+                    await channel.ResponderAsync(mensagem.ChatId, FormatarDebugMetricas(metaAgente, stopwatch.ElapsedMilliseconds, debugOptions.Value), ct: ct);
+                }
 
                 // Tempo entre a pergunta e a resposta enviada, do ponto de vista do aluno —
                 // inclui busca RAG + geração + envio, não só a chamada ao Claude isoladamente
@@ -155,6 +167,26 @@ public class ChatBotProcessor(
                 await indicadorTask;
             }
         }
+    }
+
+    /// <summary>
+    /// Mensagem de acompanhamento só pra Dev (ver DebugMetricasOptions) — tokens/tempo/custo
+    /// coletados pelo TelemetriaAgentService via escopo reaproveitado (ver IniciarEscopo acima).
+    /// </summary>
+    private static string FormatarDebugMetricas(MetadadosTelemetria meta, long tempoMs, DebugMetricasOptions opcoes)
+    {
+        var tokensEntrada = meta.TokensEntrada ?? 0;
+        var tokensSaida = meta.TokensSaida ?? 0;
+        var tokensTotal = tokensEntrada + tokensSaida;
+        var pctJanela = opcoes.ContextWindowTokens > 0 ? (double)tokensTotal / opcoes.ContextWindowTokens : 0;
+
+        return $"""
+            🔧 Debug
+            Tokens: {tokensEntrada} entrada + {tokensSaida} saída = {tokensTotal}
+            Tempo: {tempoMs}ms
+            Custo estimado: {(meta.CustoEstimadoUsd is { } custo ? $"${custo:F6}" : "n/d")}
+            Janela de contexto: {tokensTotal:N0} / {opcoes.ContextWindowTokens:N0} ({pctJanela:P2})
+            """;
     }
 
     /// <summary>

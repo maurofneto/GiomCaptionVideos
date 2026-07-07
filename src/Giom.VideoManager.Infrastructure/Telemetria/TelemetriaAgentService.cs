@@ -9,7 +9,9 @@ public class TelemetriaAgentService(IAgentService inner, ITelemetriaService tele
     public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        var meta = contextoTelemetria.IniciarEscopo();
+        // reaproveita o escopo do ChatBotProcessor se ele já abriu um (pra expor tokens/custo de
+        // volta pro chamador, ex.: mensagem de debug em Dev) — senão abre um novo, como sempre.
+        var meta = contextoTelemetria.IniciarEscopo(reaproveitarEscopoExistente: true);
 
         // turnoAtual.Id já existe nesse ponto (quem orquestra grava a pergunta antes de chamar
         // o agente) — identifica a pergunta/resposta específica, não só o chat.
