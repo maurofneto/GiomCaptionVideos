@@ -32,6 +32,7 @@ var host = Host.CreateDefaultBuilder(args)
 
         services.AddEmbeddingService(config);      // SupabaseEdgeFunction — retrieval (RAG)
         services.AddIncertezaDetectorService(config); // Heuristica (padrão) — usado pelo agente pra marcar telemetria
+        services.AddGuardRails(config);            // GuardRails:Habilitados — segurança/confiabilidade sobre pergunta e resposta
         services.AddAgentService(config);          // Claude
         services.AddChatChannel(config);           // Telegram
         services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB

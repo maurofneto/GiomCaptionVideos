@@ -4,6 +4,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Feedback;
+using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Helicone;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Sentry;
@@ -151,16 +152,18 @@ public static class ServiceCollectionExtensions
         => services.AddHelicone(config);
 
     /// <summary>
-    /// Sinks de telemetria — hoje Supabase (interacao_log) + Sentry (breadcrumb). Cada
-    /// RegistrarAsync chega em TODOS via CompositeTelemetriaService; adicionar um novo sink no
-    /// futuro é só registrar o tipo concreto aqui e incluir na lista.
+    /// Sinks de telemetria — hoje Supabase (interacao_log) + Sentry (breadcrumb) + alerta de gasto
+    /// diário. Cada RegistrarAsync chega em TODOS via CompositeTelemetriaService; adicionar um novo
+    /// sink no futuro é só registrar o tipo concreto aqui e incluir na lista.
     /// </summary>
     public static IServiceCollection AddTelemetriaService(this IServiceCollection services, IConfiguration config)
     {
         services.AddSupabaseTelemetria(config);
         services.AddSentryTelemetria();
+        services.Configure<AlertaGastoOptions>(config.GetSection("AlertaGasto"));
+        services.AddSingleton<AlertaGastoTelemetriaService>();
         services.AddSingleton<ITelemetriaService>(sp => new CompositeTelemetriaService(
-            [sp.GetRequiredService<SupabaseTelemetriaService>(), sp.GetRequiredService<SentryTelemetriaService>()],
+            [sp.GetRequiredService<SupabaseTelemetriaService>(), sp.GetRequiredService<SentryTelemetriaService>(), sp.GetRequiredService<AlertaGastoTelemetriaService>()],
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CompositeTelemetriaService>>()));
         return services;
     }
@@ -182,5 +185,46 @@ public static class ServiceCollectionExtensions
         {
             _ => services.AddHeuristicaIncertezaDetector()
         };
+    }
+
+    /// <summary>
+    /// GuardRails:Habilitados — lista de nomes do catálogo abaixo que roda em toda interação do
+    /// bot (Segurança e Confiabilidade). Adicionar/remover um guardrail em produção é só editar
+    /// essa lista no appsettings, sem mudar nem reimplantar código. Catálogo atual:
+    /// PalavrasBloqueadas, PromptInjection, LimiteTamanhoMensagem, RateLimit (fase Entrada) e
+    /// RespostaVazia (fase Saida).
+    /// </summary>
+    public static IServiceCollection AddGuardRails(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddGuardRailPipeline();
+
+        var habilitados = config.GetSection("GuardRails:Habilitados").Get<string[]>() ?? [];
+
+        foreach (var nome in habilitados)
+        {
+            switch (nome)
+            {
+                case "PalavrasBloqueadas":
+                    services.Configure<PalavrasBloqueadasOptions>(config.GetSection("GuardRails:PalavrasBloqueadas"));
+                    services.AddSingleton<IGuardRail, PalavrasBloqueadasGuardRail>();
+                    break;
+                case "PromptInjection":
+                    services.AddSingleton<IGuardRail, PromptInjectionGuardRail>();
+                    break;
+                case "LimiteTamanhoMensagem":
+                    services.Configure<LimiteTamanhoMensagemOptions>(config.GetSection("GuardRails:LimiteTamanhoMensagem"));
+                    services.AddSingleton<IGuardRail, LimiteTamanhoMensagemGuardRail>();
+                    break;
+                case "RateLimit":
+                    services.Configure<RateLimitOptions>(config.GetSection("GuardRails:RateLimit"));
+                    services.AddSingleton<IGuardRail, RateLimitGuardRail>();
+                    break;
+                case "RespostaVazia":
+                    services.AddSingleton<IGuardRail, RespostaVaziaGuardRail>();
+                    break;
+            }
+        }
+
+        return services;
     }
 }

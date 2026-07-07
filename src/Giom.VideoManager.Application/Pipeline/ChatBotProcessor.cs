@@ -26,6 +26,7 @@ public class ChatBotProcessor(
     IConversaHistoricoService historicoService,
     ITelemetriaService telemetriaService,
     ITracingService tracingService,
+    IGuardRailPipeline guardRailPipeline,
     IContextoTelemetria contextoTelemetria,
     IOptions<RagOptions> ragOptions,
     IOptions<DebugMetricasOptions> debugOptions,
@@ -63,6 +64,29 @@ public class ChatBotProcessor(
             try
             {
                 logger.LogInformation("Pergunta recebida de {ChatId} ({Usuario}): {Pergunta}", mensagem.ChatId, mensagem.UserName, mensagem.Texto);
+
+                var contextoGuardRail = new GuardRailContexto(mensagem.ChatId, mensagem.Texto);
+                GuardRailResultado resultadoEntrada;
+                using (trace.IniciarEtapa("guardrail_entrada"))
+                {
+                    resultadoEntrada = await guardRailPipeline.AvaliarEntradaAsync(contextoGuardRail, ct);
+                }
+
+                if (!resultadoEntrada.Permitido)
+                {
+                    indicadorCts.Cancel();
+                    await channel.ResponderAsync(mensagem.ChatId, resultadoEntrada.RespostaSubstituta ?? "Não posso responder essa pergunta.", ct: ct);
+
+                    await telemetriaService.RegistrarAsync(new RegistroTelemetria(
+                        Tipo: "guardrail_bloqueio",
+                        EntidadeId: mensagem.ChatId,
+                        TempoMs: stopwatch.ElapsedMilliseconds,
+                        Sucesso: true,
+                        Detalhes: new { fase = "entrada", motivo = resultadoEntrada.Motivo }
+                    ), ct);
+
+                    continue;
+                }
 
                 // Grava a pergunta antes de qualquer outra coisa (mesmo antes da busca RAG) —
                 // se algo falhar logo em seguida, a pergunta já fica registrada. O turno (com
@@ -118,6 +142,13 @@ public class ChatBotProcessor(
                 using (trace.IniciarEtapa("agente"))
                 {
                     respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, turno, busca.ContextoFormatado, historico, ct);
+                }
+
+                using (trace.IniciarEtapa("guardrail_saida"))
+                {
+                    var resultadoSaida = await guardRailPipeline.AvaliarSaidaAsync(contextoGuardRail with { Resposta = respostaTexto }, ct);
+                    if (!resultadoSaida.Permitido)
+                        respostaTexto = resultadoSaida.RespostaSubstituta ?? respostaTexto;
                 }
 
                 turno = turno with { Resposta = respostaTexto };

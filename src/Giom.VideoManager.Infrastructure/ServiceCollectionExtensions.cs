@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Incerteza;
 using Giom.VideoManager.Infrastructure.Observabilidade;
 using Giom.VideoManager.Infrastructure.Telemetria;
@@ -49,6 +50,20 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<SessionContext>();
         services.AddSingleton<ISessionContext>(sp => sp.GetRequiredService<SessionContext>());
+        return services;
+    }
+
+    /// <summary>
+    /// Registra o orquestrador de guardrails — os IGuardRail individuais são registrados à
+    /// parte (ver AddGuardRails na Composition, guiado por GuardRails:Habilitados). Idempotente,
+    /// mesmo padrão de AddContextoTelemetria.
+    /// </summary>
+    public static IServiceCollection AddGuardRailPipeline(this IServiceCollection services)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IGuardRailPipeline)))
+            return services;
+
+        services.AddSingleton<IGuardRailPipeline, GuardRailPipeline>();
         return services;
     }
 }
