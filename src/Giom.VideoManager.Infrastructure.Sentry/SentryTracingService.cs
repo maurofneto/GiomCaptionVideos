@@ -1,38 +1,48 @@
+using System.Diagnostics;
 using Giom.VideoManager.Domain.Interfaces;
-using Sentry;
+using Giom.VideoManager.Infrastructure.Observabilidade;
 
 namespace Giom.VideoManager.Infrastructure.Sentry;
 
 /// <summary>
-/// Seguro mesmo se o Sentry não estiver inicializado nesse worker (Sentry:Dsn vazio ou
-/// tracesSampleRate não configurado) — a SentrySdk vira no-op nesse caso, sem lançar exceção.
+/// Abre Activity (System.Diagnostics — ver GiomActivitySource) em vez de chamar a API do Sentry
+/// diretamente; quem traduz Activity em Transaction/Span do Sentry é o
+/// Sentry.OpenTelemetry.SentrySpanProcessor, plugado via AddSentryTracing. ITracingService/ITrace
+/// continuam idênticos pra quem consome (ChannelProcessor/ChatBotProcessor) — só a implementação
+/// trocou de "SentrySdk.StartTransaction direto" pra "Activity nativo do .NET", o que também é o
+/// que permite qualquer etapa da pipeline (resumo/categorização/embedding) abrir seu próprio Span
+/// sem precisar receber o trace por parâmetro (Activity.Current é ambient).
+/// Seguro mesmo sem listener registrado (Sentry:Dsn vazio) — ActivitySource.StartActivity só
+/// devolve null nesse caso, e todo método aqui já trata isso.
 /// </summary>
 public class SentryTracingService : ITracingService
 {
     public ITrace IniciarTrace(string nome, string operacao)
     {
-        var transacao = SentrySdk.StartTransaction(nome, operacao);
-        SentrySdk.ConfigureScope(scope => scope.Transaction = transacao);
-        return new SentryTrace(transacao);
+        var activity = GiomActivitySource.Instance.StartActivity(nome);
+        activity?.SetTag("operacao", operacao);
+        return new SentryTrace(activity);
     }
 
-    private sealed class SentryTrace(ITransactionTracer transacao) : ITrace
+    private sealed class SentryTrace(Activity? activity) : ITrace
     {
-        private bool _finalizado;
-
-        public IDisposable IniciarEtapa(string nome) => transacao.StartChild(nome);
+        public IDisposable IniciarEtapa(string nome)
+            => (IDisposable?)GiomActivitySource.Instance.StartActivity(nome) ?? NoopDisposable.Instance;
 
         public void MarcarErro(Exception ex)
         {
-            transacao.Finish(ex);
-            _finalizado = true;
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.AddException(ex);
         }
 
-        public void DefinirTag(string chave, string valor) => transacao.SetTag(chave, valor);
+        public void DefinirTag(string chave, string valor) => activity?.SetTag(chave, valor);
 
-        public void Dispose()
+        public void Dispose() => activity?.Dispose();
+
+        private sealed class NoopDisposable : IDisposable
         {
-            if (!_finalizado) transacao.Finish();
+            public static readonly NoopDisposable Instance = new();
+            public void Dispose() { }
         }
     }
 }

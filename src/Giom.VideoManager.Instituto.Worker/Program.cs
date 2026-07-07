@@ -53,5 +53,12 @@ var channels = new[]
     new ChannelConfig("UCyyXFx2xHdzfavx6H6Q8zJw", null, "Instituto Giom", Mine: true),
 };
 
+// StartAsync/StopAsync (não só resolver os serviços direto) — sem isso o IHostedService que sobe
+// o TracerProvider do OpenTelemetry (registrado em AddSentryTracing) nunca roda, e todo Activity
+// vira no-op (ActivitySource.StartActivity sempre devolve null).
+await host.StartAsync();
+
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
 await processor.RunAsync(channels);
+
+await host.StopAsync();
