@@ -9,6 +9,15 @@ namespace Giom.VideoManager.Domain.Interfaces;
 public interface ITracingService
 {
     ITrace IniciarTrace(string nome, string operacao);
+
+    /// <summary>
+    /// Abre uma etapa dentro do trace ambiente atual (o que estiver "corrente" no momento —
+    /// ver ITrace), sem precisar receber o ITrace por parâmetro. Existe pra quem está deep numa
+    /// chamada (ex.: ClaudeResumoService, TelemetriaCaptionService) poder abrir seu próprio Span
+    /// sem que o chamador (ex.: ChannelProcessor) precise passar o trace adiante manualmente.
+    /// Sem trace ambiente aberto, vira só um objeto vazio (não lança, não gera efeito).
+    /// </summary>
+    IDisposable IniciarEtapaAtual(string nome);
 }
 
 /// <summary>Uma operação completa sendo rastreada — Dispose finaliza o trace inteiro.</summary>

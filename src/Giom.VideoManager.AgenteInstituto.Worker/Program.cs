@@ -24,6 +24,7 @@ var host = Host.CreateDefaultBuilder(args)
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
             .Enrich.With<ShortSourceContextEnricher>()
+            .Enrich.With<SessionContextEnricher>()
             .ConfigureSentry(context.Configuration);
     })
     .ConfigureServices((ctx, services) =>

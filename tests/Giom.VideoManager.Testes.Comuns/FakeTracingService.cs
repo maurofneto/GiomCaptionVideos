@@ -37,11 +37,24 @@ public class FakeTrace : ITrace
 public class FakeTracingService : ITracingService
 {
     public List<(string Nome, string Operacao, FakeTrace Trace)> Traces { get; } = [];
+    public List<string> EtapasAtuais { get; } = [];
 
     public ITrace IniciarTrace(string nome, string operacao)
     {
         var trace = new FakeTrace();
         Traces.Add((nome, operacao, trace));
         return trace;
+    }
+
+    public IDisposable IniciarEtapaAtual(string nome)
+    {
+        EtapasAtuais.Add(nome);
+        return NoopDisposableEtapaAtual.Instance;
+    }
+
+    private sealed class NoopDisposableEtapaAtual : IDisposable
+    {
+        public static readonly NoopDisposableEtapaAtual Instance = new();
+        public void Dispose() { }
     }
 }
