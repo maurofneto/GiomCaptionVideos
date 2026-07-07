@@ -3,7 +3,9 @@ using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Sentry;
 using Serilog;
 
 var host = Host.CreateDefaultBuilder(args)
@@ -39,6 +41,13 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddChatBotProcessor(config);
     })
     .Build();
+
+// Diagnóstico temporário — Sentry Performance parou de reportar (nem erro nem transação) desde
+// o deploy de 2026-07-06 18:25, e preciso confirmar se o Dsn está resolvendo em runtime, já que
+// não tenho ECS Exec habilitado pra inspecionar o container ao vivo. Remover depois de confirmar.
+var dsnConfigurado = host.Services.GetRequiredService<IConfiguration>()["Sentry:Dsn"];
+Log.Information("Diagnóstico Sentry — DsnLength={DsnLength} SentrySdk.IsEnabled={IsEnabled}",
+    dsnConfigurado?.Length ?? 0, SentrySdk.IsEnabled);
 
 await host.StartAsync();
 
