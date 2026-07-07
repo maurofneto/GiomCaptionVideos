@@ -10,7 +10,7 @@ namespace Giom.VideoManager.Domain.Interfaces;
 /// </summary>
 public interface IContextoTelemetria
 {
-    void Registrar(string? provedor = null, string? modelo = null, int? tokensEntrada = null, int? tokensSaida = null, decimal? custoEstimadoUsd = null, object? detalhes = null);
+    void Registrar(string? provedor = null, string? modelo = null, int? tokensEntrada = null, int? tokensSaida = null, decimal? custoEstimadoUsd = null, object? detalhes = null, string? requestIdExterno = null);
 
     /// <summary>
     /// Abre um escopo de metadados — chamado pelo decorator antes de invocar a implementação
@@ -34,4 +34,11 @@ public class MetadadosTelemetria
     public int? TokensSaida { get; set; }
     public decimal? CustoEstimadoUsd { get; set; }
     public object? Detalhes { get; set; }
+
+    /// <summary>
+    /// Id de rastreamento numa plataforma externa de observabilidade de LLM (ex.: Helicone) que
+    /// já conhece essa chamada — permite reportar feedback do usuário depois sem persistir nada
+    /// novo no banco (ver IFeedbackExternoService).
+    /// </summary>
+    public string? RequestIdExterno { get; set; }
 }

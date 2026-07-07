@@ -83,4 +83,13 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<TelemetriaCategorizacaoService>>()));
         return services;
     }
+
+    /// <summary>Reenvia o voto de utilidade (👍/👎) do usuário pro Helicone — ver HeliconeFeedbackService.</summary>
+    public static IServiceCollection AddHeliconeFeedback(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<HeliconeOptions>(config.GetSection("Helicone"));
+        services.AddHttpClient("helicone-api", client => client.BaseAddress = new Uri("https://api.helicone.ai/"));
+        services.AddSingleton<IFeedbackExternoService, HeliconeFeedbackService>();
+        return services;
+    }
 }

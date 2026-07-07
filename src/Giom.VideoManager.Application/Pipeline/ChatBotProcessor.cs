@@ -125,10 +125,16 @@ public class ChatBotProcessor(
 
                 indicadorCts.Cancel();
                 // O Id vira o "avaliacaoId" repassado ao canal — é o que liga o voto de 👍/👎
-                // do usuário de volta a esta pergunta/resposta específica.
+                // do usuário de volta a esta pergunta/resposta específica. Quando existe um
+                // RequestIdExterno (ex.: Helicone), vai embutido no mesmo avaliacaoId — evita
+                // persistir uma coluna nova só pra isso (o canal decompõe na hora do voto).
+                var avaliacaoId = metaAgente.RequestIdExterno is { } requestIdExterno
+                    ? $"{turno.Id}|{requestIdExterno}"
+                    : turno.Id.ToString();
+
                 using (trace.IniciarEtapa("envio"))
                 {
-                    await channel.ResponderAsync(mensagem.ChatId, respostaTexto, turno.Id.ToString(), ct);
+                    await channel.ResponderAsync(mensagem.ChatId, respostaTexto, avaliacaoId, ct);
                 }
                 logger.LogInformation("Respondido: {ChatId} — {Usuario} ({TempoMs}ms)", mensagem.ChatId, mensagem.UserName, stopwatch.ElapsedMilliseconds);
 

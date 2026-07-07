@@ -21,10 +21,13 @@ public class HeliconeSessionContext
 /// SessionId agrupa múltiplas chamadas relacionadas (ex.: todas as perguntas de um mesmo chat,
 /// ou resumo+categorização de um mesmo vídeo) na visão "Sessions" do Helicone. Propriedades
 /// vão além do Environment fixo — filtros adicionais no dashboard (canal, tipo de operação).
+/// RequestId é gerado por nós (não pelo Helicone) especificamente pra poder reportar feedback
+/// depois — ver HeliconeFeedbackService.
 /// </summary>
 public record HeliconeSessao(
     string SessionId,
     string SessionName,
     string SessionPath,
     string? UserId = null,
-    IReadOnlyDictionary<string, string>? Propriedades = null);
+    IReadOnlyDictionary<string, string>? Propriedades = null,
+    string? RequestId = null);

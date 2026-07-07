@@ -21,6 +21,11 @@ public class HeliconeHeadersHandler(HeliconeSessionContext contexto) : Delegatin
             if (sessao.UserId is not null)
                 request.Headers.Add("Helicone-User-Id", sessao.UserId);
 
+            // Id gerado por nós (não pelo Helicone) — permite reportar feedback depois via
+            // POST /v1/request/{id}/feedback sem depender de capturar algo da resposta.
+            if (sessao.RequestId is not null)
+                request.Headers.Add("Helicone-Request-Id", sessao.RequestId);
+
             if (sessao.Propriedades is not null)
                 foreach (var (chave, valor) in sessao.Propriedades)
                     request.Headers.Add($"Helicone-Property-{chave}", valor);

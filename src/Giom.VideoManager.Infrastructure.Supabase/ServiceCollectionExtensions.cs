@@ -40,7 +40,7 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
         services.AddSupabaseHttpClient();
-        services.AddSingleton<IConversaHistoricoService, SupabaseConversaHistoricoService>();
+        services.AddSingleton<SupabaseConversaHistoricoService>();
         return services;
     }
 

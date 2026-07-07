@@ -30,6 +30,7 @@ public class ClaudeAgentService : IAgentService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly IIncertezaDetectorService _incertezaDetector;
     private readonly HeliconeSessionContext _heliconeContext;
+    private readonly bool _heliconeAtivo;
     private readonly string _systemPrompt;
 
     public ClaudeAgentService(
@@ -47,12 +48,17 @@ public class ClaudeAgentService : IAgentService
         _contextoTelemetria = contextoTelemetria;
         _incertezaDetector = incertezaDetector;
         _heliconeContext = heliconeContext;
+        _heliconeAtivo = _options.UseHelicone && !string.IsNullOrWhiteSpace(heliconeOptions.Value?.ApiKey);
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("agent.md");
     }
 
     public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
+        // Só gera um RequestId (pra permitir reportar feedback depois) se o Helicone estiver
+        // realmente ativo — sem isso, ninguém nunca vai consumir esse id.
+        var heliconeRequestId = _heliconeAtivo ? Guid.NewGuid().ToString() : null;
+
         // ChatId como Session-Id — agrupa toda a conversa (todas as perguntas de um mesmo chat)
         // na visão "Sessions" do Helicone; User-Id igual, pra métricas "Users".
         _heliconeContext.Definir(new HeliconeSessao(
@@ -60,7 +66,8 @@ public class ClaudeAgentService : IAgentService
             SessionName: "Bot Instituto Giom",
             SessionPath: "/bot/pergunta",
             UserId: chatId,
-            Propriedades: new Dictionary<string, string> { ["Tipo"] = "bot_resposta" }));
+            Propriedades: new Dictionary<string, string> { ["Tipo"] = "bot_resposta" },
+            RequestId: heliconeRequestId));
 
         var mensagens = new List<Message>();
 
@@ -102,7 +109,8 @@ public class ClaudeAgentService : IAgentService
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
             custoEstimadoUsd: AnthropicPricingCalculator.Calcular(_options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens),
-            detalhes: new { stopReason = response.StopReason, incerteza = _incertezaDetector.ContemIncerteza(texto) });
+            detalhes: new { stopReason = response.StopReason, incerteza = _incertezaDetector.ContemIncerteza(texto) },
+            requestIdExterno: heliconeRequestId);
 
         if (string.IsNullOrWhiteSpace(texto))
         {

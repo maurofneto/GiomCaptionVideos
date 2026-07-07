@@ -225,6 +225,9 @@ public class TelegramChatChannel : IChatChannel
 
         try
         {
+            // conversaId pode vir composto (ex.: com um id de rastreamento externo embutido) —
+            // isso é decisão de quem persiste o histórico, não do canal. Ver
+            // FeedbackExternoConversaHistoricoService.
             await _historicoService.RegistrarFeedbackAsync(conversaId, util, ct);
             await _bot.AnswerCallbackQuery(callback.Id, "Valeu pelo feedback!", cancellationToken: ct);
 

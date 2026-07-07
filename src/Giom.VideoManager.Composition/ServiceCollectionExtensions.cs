@@ -1,7 +1,9 @@
 using Giom.VideoManager.Application;
+using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
+using Giom.VideoManager.Infrastructure.Feedback;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Mongo;
@@ -104,17 +106,39 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
         => services.AddYouTubeVideoSource(config);
 
-    /// <summary>ConversaHistorico:Provider — InMemory (padrão), Supabase, MongoDB.</summary>
+    /// <summary>
+    /// ConversaHistorico:Provider — InMemory (padrão), Supabase, MongoDB. Decorado com
+    /// FeedbackExternoConversaHistoricoService — reenvia o voto 👍/👎 pra um serviço de feedback
+    /// externo (Helicone) sem que o canal (Telegram, etc.) precise saber que isso existe.
+    /// </summary>
     public static IServiceCollection AddConversaHistorico(this IServiceCollection services, IConfiguration config)
     {
         var provider = config["ConversaHistorico:Provider"] ?? "InMemory";
 
-        return provider switch
+        switch (provider)
         {
-            "Supabase" => services.AddSupabaseConversaHistorico(config),
-            "MongoDB" => services.AddMongoConversaHistorico(config),
-            _ => services.AddInMemoryConversaHistorico()
-        };
+            case "Supabase":
+                services.AddSupabaseConversaHistorico(config);
+                services.AddSingleton<IConversaHistoricoService>(sp => new FeedbackExternoConversaHistoricoService(
+                    sp.GetRequiredService<SupabaseConversaHistoricoService>(),
+                    sp.GetRequiredService<IFeedbackExternoService>()));
+                break;
+            case "MongoDB":
+                services.AddMongoConversaHistorico(config);
+                services.AddSingleton<IConversaHistoricoService>(sp => new FeedbackExternoConversaHistoricoService(
+                    sp.GetRequiredService<MongoConversaHistoricoService>(),
+                    sp.GetRequiredService<IFeedbackExternoService>()));
+                break;
+            default:
+                services.AddInMemoryConversaHistorico();
+                services.AddSingleton<IConversaHistoricoService>(sp => new FeedbackExternoConversaHistoricoService(
+                    sp.GetRequiredService<InMemoryConversaHistoricoService>(),
+                    sp.GetRequiredService<IFeedbackExternoService>()));
+                break;
+        }
+
+        services.AddHeliconeFeedback(config);
+        return services;
     }
 
     /// <summary>
