@@ -69,6 +69,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastru
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Helicone.Tests", "tests\Giom.VideoManager.Infrastructure.Helicone.Tests\Giom.VideoManager.Infrastructure.Helicone.Tests.csproj", "{76709D85-530D-4406-BF29-96A6BB4C7158}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "5-Ferramentas", "5-Ferramentas", "{F0EDD5E9-982A-C3DF-2B25-01D2C15F2637}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.ObservabilidadeTeste", "tools\Giom.VideoManager.ObservabilidadeTeste\Giom.VideoManager.ObservabilidadeTeste.csproj", "{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -427,6 +431,18 @@ Global
 		{76709D85-530D-4406-BF29-96A6BB4C7158}.Release|x64.Build.0 = Release|Any CPU
 		{76709D85-530D-4406-BF29-96A6BB4C7158}.Release|x86.ActiveCfg = Release|Any CPU
 		{76709D85-530D-4406-BF29-96A6BB4C7158}.Release|x86.Build.0 = Release|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Debug|x64.Build.0 = Debug|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Debug|x86.Build.0 = Debug|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Release|x64.ActiveCfg = Release|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Release|x64.Build.0 = Release|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Release|x86.ActiveCfg = Release|Any CPU
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -461,6 +477,7 @@ Global
 		{68B51C3D-784F-4125-BD78-77B3ED388098} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
 		{50E1989D-7892-43D7-A789-35AE5538F713} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
 		{76709D85-530D-4406-BF29-96A6BB4C7158} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20} = {F0EDD5E9-982A-C3DF-2B25-01D2C15F2637}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C7A72C10-8571-4565-BE89-8679CD2F3695}
