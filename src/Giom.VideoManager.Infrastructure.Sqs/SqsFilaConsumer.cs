@@ -30,7 +30,7 @@ public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, IOptions<SqsOptions>
                 VisibilityTimeout = _options.VisibilityTimeout
             }, ct);
 
-            if (resposta.Messages.Count == 0) break;
+            if (resposta.Messages is not { Count: > 0 }) break;
 
             foreach (var mensagemSqs in resposta.Messages)
             {

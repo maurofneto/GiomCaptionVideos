@@ -20,7 +20,7 @@ public class InstitutoVideoHandler(
     ICategorizacaoService categorizacaoService,
     IEmbeddingService embeddingService,
     ILogger<InstitutoVideoHandler> logger,
-    IOptions<ProcessingOptions> options) : IVideoHandler
+    IOptions<ProcessingOptions> options) : IVideoProcessador
 {
     private readonly ProcessingOptions _options = options.Value;
 

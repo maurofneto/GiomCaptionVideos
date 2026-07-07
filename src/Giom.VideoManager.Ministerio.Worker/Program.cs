@@ -39,10 +39,12 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
         services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo)
+        services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        // Handler específico do Ministério
-        services.AddSingleton<IVideoHandler, MinisterioVideoHandler>();
+        // Processador real do Ministério — quem de fato roda dentro de VideoQueueConsumer
+        // (ChannelProcessor fala com FilaVideoHandler, registrado em AddChannelProcessor)
+        services.AddSingleton<IVideoProcessador, MinisterioVideoHandler>();
     })
     .Build();
 
@@ -59,5 +61,9 @@ await host.StartAsync();
 
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
 await processor.RunAsync(channels);
+
+// Drena a fila (US #39/#40) — mesma execução processa o que a descoberta acabou de publicar.
+var consumidor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.VideoQueueConsumer>();
+await consumidor.ConsumirAsync();
 
 await host.StopAsync();

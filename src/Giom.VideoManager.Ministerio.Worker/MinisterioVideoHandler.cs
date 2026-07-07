@@ -16,7 +16,7 @@ public class MinisterioVideoHandler(
     ICaptionService captionService,
     IResumoService resumoService,
     ILogger<MinisterioVideoHandler> logger,
-    IOptions<ProcessingOptions> options) : IVideoHandler
+    IOptions<ProcessingOptions> options) : IVideoProcessador
 {
     private readonly ProcessingOptions _options = options.Value;
 

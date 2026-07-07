@@ -19,6 +19,10 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// Span automaticamente a partir do que estiver em ISessionContext.Atual (ver DefinirSessaoAtual),
 /// e o SessionContextEnricher faz o mesmo pros logs. Um lugar só define os atributos; os três
 /// destinos (Sentry, Helicone, logs) leem dali.
+/// IVideoHandler aqui não é necessariamente quem processa de verdade (Instituto/Ministerio) —
+/// pode ser FilaVideoHandler (US #39/#40), que enfileira em vez de processar, delegando o
+/// processamento real pro VideoQueueConsumer. ChannelProcessor não sabe (nem precisa saber) qual
+/// dos dois está por trás — é só mais um IVideoHandler, igual sempre foi.
 /// </summary>
 public class ChannelProcessor(
     IVideoSourceService videoSource,
