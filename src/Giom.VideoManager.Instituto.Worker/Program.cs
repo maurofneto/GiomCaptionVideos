@@ -8,7 +8,7 @@ using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Instituto.Worker;
 using Serilog;
 
-var host = Host.CreateDefaultBuilder(args)
+using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
         config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
@@ -26,7 +26,7 @@ var host = Host.CreateDefaultBuilder(args)
             .Enrich.WithThreadId()
             .Enrich.With<ShortSourceContextEnricher>()
             .Enrich.With<SessionContextEnricher>()
-            .ConfigureSentry(context.Configuration);
+            .AddSentrySink(context.Configuration);
     })
     .ConfigureServices((ctx, services) =>
     {
@@ -39,7 +39,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddCategorizacaoService(config);  // Claude (Haiku)
         services.AddEmbeddingService(config);      // Supabase pgvector
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
-        services.AddTracingService();              // Sentry Performance — quebra de tempo por página/vídeo
+        services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
         services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo/categorização)
         services.AddChannelProcessor(config);
 
