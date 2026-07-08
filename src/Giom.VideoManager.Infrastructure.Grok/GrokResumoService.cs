@@ -21,7 +21,7 @@ public class GrokResumoOptions
 /// <summary>
 /// Gera resumo via xAI Grok — elo de fallback (Feature #101) atrás de Claude. API compatível com
 /// o formato de chat completions da OpenAI (sem SDK .NET oficial da xAI — HTTP cru, mesmo estilo
-/// de DirectEmbeddingService). Reaproveita o mesmo prompt de resumo.md via PromptLoader.
+/// de OpenAIEmbeddingService). Reaproveita o mesmo prompt de resumo.md via PromptLoader.
 /// </summary>
 public class GrokResumoService : IResumoService
 {

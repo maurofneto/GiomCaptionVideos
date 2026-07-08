@@ -1,4 +1,3 @@
-using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,6 +7,7 @@ namespace Giom.VideoManager.Infrastructure.Voyage;
 
 public static class ServiceCollectionExtensions
 {
+    /// <summary>Registra o tipo concreto (não a interface) — a Composition decide como este elo entra na cadeia de fallback (Feature #101).</summary>
     public static IServiceCollection AddVoyageEmbedding(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<VoyageEmbeddingOptions>(config.GetSection("VoyageEmbedding"));
@@ -19,7 +19,7 @@ public static class ServiceCollectionExtensions
         }).AddStandardResilienceHandler();
 
         services.AddContextoTelemetria();
-        services.AddSingleton<IEmbeddingService, VoyageEmbeddingService>();
+        services.AddSingleton<VoyageEmbeddingService>();
         return services;
     }
 }

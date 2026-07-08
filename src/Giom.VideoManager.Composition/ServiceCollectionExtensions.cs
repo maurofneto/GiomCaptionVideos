@@ -180,38 +180,79 @@ public static class ServiceCollectionExtensions
         => services.AddClaudeAvaliadorIA(config);
 
     /// <summary>
-    /// Embedding:Provider — Direct (padrão), SupabaseEdgeFunction, VoyageAI. IndexarAsync sai
-    /// decorado com telemetria (tempo/custo — custo só aparece com Direct/VoyageAI, que chamam a
-    /// API de embedding aqui mesmo; a Edge Function do Supabase chama a OpenAI do lado de lá,
-    /// invisível pro .NET). SEM cadeia de fallback (ao contrário de Transcrição/Resumo/
-    /// Categorização — Feature #101): vetores de provedores diferentes não são comparáveis por
-    /// similaridade de cosseno entre si, então alternar automaticamente entre eles corromperia
-    /// a busca semântica em vez de recuperar dela — ver VoyageEmbeddingService.
+    /// Embedding — cadeia de fallback (Feature #101), configurável via Embedding:FallbackChain
+    /// (default: só ["OpenAI"] por enquanto). Cada provider embeda a pergunta/os chunks do seu
+    /// próprio lado e marca a origem (VideoChunk.Origem) — o Supabase (Edge Function
+    /// buscar-similar) filtra por origem antes de comparar vetores, então adicionar um segundo
+    /// provider na cadeia (ex: "VoyageAI") não mistura espaços vetoriais incompatíveis, ao
+    /// contrário do que acontecia antes dessa mudança. Mesmo mecanismo de AddSummaryService.
     /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
-        var provider = config["Embedding:Provider"] ?? "Direct";
+        var cadeiaNomes = config.GetSection("Embedding:FallbackChain").Get<string[]>() ?? ["OpenAI"];
 
-        switch (provider)
+        foreach (var nome in cadeiaNomes)
         {
-            case "SupabaseEdgeFunction":
-                services.AddSupabaseEmbedding(config);
-                break;
-            case "VoyageAI":
-                services.AddVoyageEmbedding(config);
-                break;
-            default:
-                services.AddDirectEmbedding(config);
-                break;
+            switch (nome)
+            {
+                case "VoyageAI":
+                    services.AddVoyageEmbedding(config);
+                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<VoyageEmbeddingService>());
+                    break;
+                default: // OpenAI
+                    services.AddOpenAiEmbedding(config);
+                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<OpenAIEmbeddingService>());
+                    break;
+            }
         }
 
+        services.AddSingleton<IEmbeddingService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
+            return new FallbackEmbeddingService(cadeia, sp.GetRequiredService<ILogger<FallbackEmbeddingService>>());
+        });
         services.Decorate<IEmbeddingService, TelemetriaEmbeddingService>();
+
         return services;
     }
 
-    /// <summary>Agent de perguntas e respostas (sempre Claude por enquanto).</summary>
+    /// <summary>
+    /// Agent de perguntas e respostas — cadeia de fallback (Feature #101), configurável via
+    /// Agent:FallbackChain (default: Claude → Grok → OpenAI). Mesmo mecanismo de
+    /// AddSummaryService.
+    /// </summary>
     public static IServiceCollection AddAgentService(this IServiceCollection services, IConfiguration config)
-        => services.AddClaudeAgent(config);
+    {
+        var cadeiaNomes = config.GetSection("Agent:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
+
+        foreach (var nome in cadeiaNomes)
+        {
+            switch (nome)
+            {
+                case "Grok":
+                    services.AddGrokAgent(config);
+                    services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<GrokAgentService>());
+                    break;
+                case "OpenAI":
+                    services.AddOpenAiAgent(config);
+                    services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<OpenAiAgentService>());
+                    break;
+                default: // Claude
+                    services.AddClaudeAgent(config);
+                    services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<ClaudeAgentService>());
+                    break;
+            }
+        }
+
+        services.AddSingleton<IAgentService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IAgentService>(nome))).ToList();
+            return new FallbackAgentService(cadeia, sp.GetRequiredService<ILogger<FallbackAgentService>>());
+        });
+        services.Decorate<IAgentService, TelemetriaAgentService>();
+
+        return services;
+    }
 
     /// <summary>Channel:Provider — Telegram (único por enquanto; WhatsApp/Web futuramente).</summary>
     public static IServiceCollection AddChatChannel(this IServiceCollection services, IConfiguration config)

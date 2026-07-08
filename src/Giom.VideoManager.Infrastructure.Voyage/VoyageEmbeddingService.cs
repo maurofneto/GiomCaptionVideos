@@ -19,16 +19,15 @@ public class VoyageEmbeddingOptions
 }
 
 /// <summary>
-/// Provider de embedding selecionável via Embedding:Provider = "VoyageAI" (Feature #101) — NÃO
-/// entra na cadeia de fallback automática. Vetores de provedores diferentes (OpenAI vs Voyage)
-/// não são comparáveis entre si por similaridade de cosseno, mesmo com a mesma dimensão —
-/// misturar os dois no mesmo índice pgvector corromperia a busca semântica silenciosamente. Por
-/// isso BuscarAsync não é suportado aqui: a Edge Function buscar-similar embeda a pergunta via
-/// OpenAI do lado do servidor, então trocar só a indexação não resolveria a mistura de espaços
-/// na hora da busca — precisaria reescrever a Edge Function, fora de escopo desta entrega.
+/// Provider de embedding pra cadeia de fallback (Embedding:FallbackChain, Feature #101) — fora
+/// da cadeia padrão por enquanto ("mantenha somente OpenAI"). Cada chunk é gravado com
+/// Origem = "VoyageAI", e o Supabase filtra por origem na busca — vetores Voyage nunca são
+/// comparados com vetores OpenAI (espaços vetoriais incompatíveis).
 /// </summary>
 public class VoyageEmbeddingService : IEmbeddingService
 {
+    private const string Origem = "VoyageAI";
+
     private readonly VoyageEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
     private readonly ILogger<VoyageEmbeddingService> _logger;
@@ -85,15 +84,21 @@ public class VoyageEmbeddingService : IEmbeddingService
                 Titulo     = video.Title,
                 ChunkIndex = i,
                 Conteudo   = mem.ToString(),
-                Embedding  = embeddings[i]
+                Embedding  = embeddings[i],
+                Origem     = Origem
             }), ct);
 
         _logger.LogInformation("{VideoId} — {Chunks} chunks indexados com sucesso (Voyage)", video.Id, chunks.Count);
     }
 
+    // Desde a Feature #101 a Edge Function filtra por origem (não embeda mais server-side) —
+    // misturar embeddings Voyage/OpenAI deixou de ser um problema arquitetural. BuscarAsync só
+    // não está implementado ainda porque Voyage fica fora da cadeia de fallback por enquanto
+    // ("mantenha somente OpenAI") — sem uso real hoje. Seguiria o mesmo padrão de
+    // OpenAIEmbeddingService.BuscarAsync quando for necessário: gerar o embedding da pergunta
+    // aqui, enviar {pergunta, embedding, origem: "VoyageAI", ...} pra buscar-similar.
     public Task<BuscaSemanticaResultado> BuscarAsync(string pergunta, string? area = null, string? canalId = null, int limite = 6, double threshold = 0.35, CancellationToken ct = default)
-        => throw new NotSupportedException(
-            "VoyageEmbeddingService só indexa — a busca semântica (buscar-similar) embeda a pergunta via OpenAI do lado do servidor, então misturar com embeddings Voyage corromperia a comparação de vetores. Reescrever a Edge Function pra suportar múltiplos embedders é um esforço separado (ver Feature #101).");
+        => throw new NotSupportedException("VoyageEmbeddingService.BuscarAsync ainda não implementado — Voyage está fora da cadeia de fallback nesta entrega (ver Feature #101).");
 
     private async Task<(List<float[]> Embeddings, int TokensTotais)> GerarEmbeddingsAsync(List<ReadOnlyMemory<char>> chunks, CancellationToken ct)
     {

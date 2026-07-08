@@ -1,4 +1,3 @@
-using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,17 +29,34 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddDirectEmbedding(this IServiceCollection services, IConfiguration config)
+    /// <summary>
+    /// Registra o tipo concreto (não a interface) — a Composition decide como este elo entra na
+    /// cadeia de fallback (Feature #101). A seção de config continua "DirectEmbedding" (não foi
+    /// renomeada junto com a classe) — o SSM já tem /giom/{env}/{app}/DirectEmbedding/OpenAiApiKey
+    /// provisionado, e renomear a seção quebraria esses secrets.
+    /// </summary>
+    public static IServiceCollection AddOpenAiEmbedding(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<DirectEmbeddingOptions>(config.GetSection("DirectEmbedding"));
         services.AddOpenAiHttpClient();
         services.AddHttpClient("supabase-functions").AddStandardResilienceHandler();
         services.AddContextoTelemetria();
-        services.AddSingleton<IEmbeddingService, DirectEmbeddingService>();
+        services.AddSingleton<OpenAIEmbeddingService>();
         return services;
     }
 
     /// <summary>Registra o tipo concreto (não a interface) — a Composition decide como este elo entra na cadeia de fallback (Feature #101).</summary>
+    public static IServiceCollection AddOpenAiAgent(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddPromptLoader();
+        services.AddOpenAiHttpClient();
+        services.AddContextoTelemetria();
+        services.AddSessionContext();
+        services.Configure<OpenAiAgentOptions>(config.GetSection("OpenAiAgent"));
+        services.AddSingleton<OpenAiAgentService>();
+        return services;
+    }
+
     public static IServiceCollection AddOpenAiSummary(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();

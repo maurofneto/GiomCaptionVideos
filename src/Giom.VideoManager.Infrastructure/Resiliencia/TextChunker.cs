@@ -3,7 +3,7 @@ namespace Giom.VideoManager.Infrastructure.Resiliencia;
 /// <summary>
 /// Corta um texto longo em pedaços de ~ChunkSize chars, preferindo quebrar em fronteira de
 /// parágrafo/linha/frase (nunca no meio de uma palavra), com sobreposição (ChunkOverlap) entre
-/// pedaços consecutivos — extraído de DirectEmbeddingService (OpenAI) pra ser reaproveitado por
+/// pedaços consecutivos — extraído de OpenAIEmbeddingService (OpenAI) pra ser reaproveitado por
 /// qualquer provider de embedding (Feature #101, ver VoyageEmbeddingService). Zero alocação
 /// intermediária: os pedaços são ReadOnlyMemory&lt;char&gt; (ponteiro+offset+length) sobre o texto
 /// original, não substrings.

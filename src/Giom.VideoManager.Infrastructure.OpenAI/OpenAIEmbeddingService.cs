@@ -28,21 +28,28 @@ public class DirectEmbeddingOptions
 ///
 /// Busca semântica delega à Edge Function buscar-similar (leve — 1 embedding + 1 query).
 /// </summary>
-public class DirectEmbeddingService : IEmbeddingService
+public class OpenAIEmbeddingService : IEmbeddingService
 {
+    /// <summary>
+    /// Tag gravada em cada chunk e enviada em toda busca — o Supabase só compara embeddings da
+    /// MESMA origem (Feature #101), já que vetores de provedores diferentes não são comparáveis
+    /// por similaridade de cosseno entre si.
+    /// </summary>
+    private const string Origem = "OpenAI";
+
     private readonly DirectEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
-    private readonly ILogger<DirectEmbeddingService> _logger;
+    private readonly ILogger<OpenAIEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly HttpClient _openAi;
     private readonly HttpClient _supabaseFunctions;
 
-    public DirectEmbeddingService(
+    public OpenAIEmbeddingService(
         IOptions<DirectEmbeddingOptions> options,
         IOptions<SupabaseOptions> supabaseOptions,
         IVideoChunkRepository chunkRepository,
         IHttpClientFactory httpClientFactory,
-        ILogger<DirectEmbeddingService> logger,
+        ILogger<OpenAIEmbeddingService> logger,
         IContextoTelemetria contextoTelemetria)
     {
         _options         = options.Value;
@@ -108,14 +115,17 @@ public class DirectEmbeddingService : IEmbeddingService
                 Titulo     = video.Title,
                 ChunkIndex = i,
                 Conteudo   = mem.ToString(),
-                Embedding  = embeddings[i]
+                Embedding  = embeddings[i],
+                Origem     = Origem
             }), ct);
 
         _logger.LogInformation("{VideoId} — {Chunks} chunks indexados com sucesso", video.Id, chunks.Count);
     }
 
     // =========================================================
-    // Busca — delega para a Edge Function buscar-similar
+    // Busca — embeda a pergunta aqui mesmo (client-side) e delega o resto (RRF híbrido,
+    // diversidade por aula) pra Edge Function buscar-similar, passando embedding+origem
+    // (Feature #101) — o Supabase filtra por origem antes de comparar vetores.
     // =========================================================
 
     public async Task<BuscaSemanticaResultado> BuscarAsync(
@@ -126,7 +136,10 @@ public class DirectEmbeddingService : IEmbeddingService
         double threshold = 0.35,
         CancellationToken ct = default)
     {
-        var payload = new { pergunta, area, limite, threshold, canal_id = canalId };
+        var (embeddings, _) = await GenerateEmbeddingsAsync([pergunta.AsMemory()], ct);
+        var embedding = embeddings[0];
+
+        var payload = new { pergunta, embedding, origem = Origem, area, limite, threshold, canal_id = canalId };
         var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
 
         var response = await _supabaseFunctions.PostAsync("functions/v1/buscar-similar", content, ct);

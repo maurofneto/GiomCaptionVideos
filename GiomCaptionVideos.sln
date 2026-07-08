@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.5.33627.172
+# Visual Studio Version 18
+VisualStudioVersion = 18.7.11925.98 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "1-Presentation", "1-Presentation", "{8B445307-26AA-4784-A14B-E507FD5DEFD6}"
 EndProject
@@ -76,8 +76,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Sqs", "src\Giom.VideoManager.Infrastructure.Sqs\Giom.VideoManager.Infrastructure.Sqs.csproj", "{977E5969-9D9C-4E8B-BF8D-5528E9124E20}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.RabbitMq", "src\Giom.VideoManager.Infrastructure.RabbitMq\Giom.VideoManager.Infrastructure.RabbitMq.csproj", "{D92DD32F-0B3C-4600-869E-7BFF9A39690D}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Grok", "src\Giom.VideoManager.Infrastructure.Grok\Giom.VideoManager.Infrastructure.Grok.csproj", "{1BF97D25-174C-45EC-8B7C-7A5EC3A30A9F}"
 EndProject
@@ -538,8 +536,8 @@ Global
 		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20} = {F0EDD5E9-982A-C3DF-2B25-01D2C15F2637}
 		{977E5969-9D9C-4E8B-BF8D-5528E9124E20} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{D92DD32F-0B3C-4600-869E-7BFF9A39690D} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
-		{1BF97D25-174C-45EC-8B7C-7A5EC3A30A9F} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
-		{316FBF58-76E1-408B-879B-807CC7A77772} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{1BF97D25-174C-45EC-8B7C-7A5EC3A30A9F} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
+		{316FBF58-76E1-408B-879B-807CC7A77772} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C7A72C10-8571-4565-BE89-8679CD2F3695}

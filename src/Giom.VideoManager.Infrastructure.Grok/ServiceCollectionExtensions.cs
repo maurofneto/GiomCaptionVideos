@@ -31,6 +31,17 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>Registra o tipo concreto (não a interface) — a Composition decide como este elo entra na cadeia de fallback (Feature #101).</summary>
+    public static IServiceCollection AddGrokAgent(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddPromptLoader();
+        services.AddGrokHttpClient();
+        services.AddContextoTelemetria();
+        services.AddSessionContext();
+        services.Configure<GrokAgentOptions>(config.GetSection("GrokAgent"));
+        services.AddSingleton<GrokAgentService>();
+        return services;
+    }
+
     public static IServiceCollection AddGrokSummary(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();

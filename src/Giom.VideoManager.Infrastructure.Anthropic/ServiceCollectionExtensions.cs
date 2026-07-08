@@ -4,7 +4,6 @@ using Microsoft.Extensions.Http.Resilience;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Helicone;
-using Giom.VideoManager.Infrastructure.Telemetria;
 
 namespace Giom.VideoManager.Infrastructure.Anthropic;
 
@@ -42,6 +41,7 @@ public static class ServiceCollectionExtensions
     // "new" nenhum montando a decoração à mão (Scrutor resolve o "inner" como a implementação
     // já registrada antes do Decorate).
 
+    /// <summary>Registra o tipo concreto (não a interface) — desde a Feature #101, a Composition decide como este elo entra na cadeia de fallback (Claude → Grok → OpenAI), decorando telemetria uma vez só sobre o resultado final.</summary>
     public static IServiceCollection AddClaudeAgent(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
@@ -49,8 +49,7 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeAgentOptions>(config.GetSection("ClaudeAgent"));
-        services.AddSingleton<IAgentService, ClaudeAgentService>();
-        services.Decorate<IAgentService, TelemetriaAgentService>();
+        services.AddSingleton<ClaudeAgentService>();
         return services;
     }
 
