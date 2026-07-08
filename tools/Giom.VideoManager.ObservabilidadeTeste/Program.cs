@@ -65,7 +65,7 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
 
         // Filas + consumers de etapa (Feature #33) — mesma composição do Instituto.Worker/Program.cs
-        services.AddFilaVideoEtapa("transcricao", config, "Fila");
+        services.AddFilaVideoEtapa("transcricao", config, "FilaTranscricao");
         services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
 
         services.AddFilaVideoEtapa("resumo", config, "FilaResumo");

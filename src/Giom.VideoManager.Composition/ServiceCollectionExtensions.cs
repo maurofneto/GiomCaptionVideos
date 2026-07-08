@@ -163,7 +163,7 @@ public static class ServiceCollectionExtensions
     /// Fila de etapa (Feature #33 — Transcrição/Resumo/Categorização/Embedding, todas tratadas
     /// igual, sem caso especial) — registrada como Keyed Service (<paramref name="chave"/>, ex:
     /// "transcricao"/"resumo"), provider decidido dentro da própria seção raiz
-    /// (<paramref name="secaoRaiz"/>:Provider, ex: "Fila:Provider"/"FilaResumo:Provider"). Cada
+    /// (<paramref name="secaoRaiz"/>:Provider, ex: "FilaTranscricao:Provider"/"FilaResumo:Provider"). Cada
     /// canal chama isso só pras etapas que usa — Ministério não chama pra
     /// "categorizacao"/"embedding".
     /// </summary>

@@ -50,9 +50,9 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
 
         // Filas + consumers de etapa (Feature #33 — US #41/#42/#43): Transcrição não é caso
-        // especial, usa o mesmo mecanismo das demais — "Fila" é só o nome da seção raiz (US #39/
-        // #40). Ministério só tem Transcrição+Resumo, não implementa Categorização/Embedding (ISP).
-        services.AddFilaVideoEtapa("transcricao", config, "Fila");
+        // especial, usa o mesmo mecanismo das demais. Ministério só tem Transcrição+Resumo, não
+        // implementa Categorização/Embedding (ISP).
+        services.AddFilaVideoEtapa("transcricao", config, "FilaTranscricao");
         services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
 
         services.AddFilaVideoEtapa("resumo", config, "FilaResumo");

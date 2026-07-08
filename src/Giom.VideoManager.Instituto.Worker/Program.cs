@@ -55,11 +55,10 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
 
         // Filas + consumers de etapa (Feature #33 — US #41/#42/#43): Transcrição não é caso
-        // especial, usa o mesmo mecanismo das demais — "Fila" é só o nome da seção raiz (US #39/
-        // #40). Resumo e Embedding dependem só de Transcrição (fan-out), Categorização depende de
-        // Resumo. AddEtapaConsumer registra o EtapaQueueConsumer pronto (keyed), sem montar a
-        // classe na mão no fim do arquivo.
-        services.AddFilaVideoEtapa("transcricao", config, "Fila");
+        // especial, usa o mesmo mecanismo das demais. Resumo e Embedding dependem só de
+        // Transcrição (fan-out), Categorização depende de Resumo. AddEtapaConsumer registra o
+        // EtapaQueueConsumer pronto (keyed), sem montar a classe na mão no fim do arquivo.
+        services.AddFilaVideoEtapa("transcricao", config, "FilaTranscricao");
         services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
 
         services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
