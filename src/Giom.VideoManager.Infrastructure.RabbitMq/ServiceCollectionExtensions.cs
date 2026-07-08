@@ -9,13 +9,13 @@ namespace Giom.VideoManager.Infrastructure.RabbitMq;
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Fila:RabbitMq — ConnectionString (CloudAMQP/LavinMQ, mesmo protocolo AMQP 0-9-1)/QueueName.</summary>
+    /// <summary>Fila:RabbitMq — ConnectionString (CloudAMQP/LavinMQ, mesmo protocolo AMQP 0-9-1)/QueueName. Fila de descoberta/Transcrição (Feature #33 trata Transcrição como só mais uma etapa).</summary>
     public static IServiceCollection AddRabbitMqFila(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<RabbitMqOptions>(config.GetSection("Fila:RabbitMq"));
 
-        services.AddSingleton<IFilaPublisher<VideoParaProcessar>, RabbitMqFilaPublisher<VideoParaProcessar>>();
-        services.AddSingleton<IFilaConsumer<VideoParaProcessar>, RabbitMqFilaConsumer<VideoParaProcessar>>();
+        services.AddSingleton<IFilaPublisher<VideoEtapaMensagem>, RabbitMqFilaPublisher<VideoEtapaMensagem>>();
+        services.AddSingleton<IFilaConsumer<VideoEtapaMensagem>, RabbitMqFilaConsumer<VideoEtapaMensagem>>();
 
         return services;
     }

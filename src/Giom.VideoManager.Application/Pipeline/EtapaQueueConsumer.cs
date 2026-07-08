@@ -5,12 +5,13 @@ using Microsoft.Extensions.Logging;
 namespace Giom.VideoManager.Application.Pipeline;
 
 /// <summary>
-/// Consumer genérico reaproveitado pelas etapas de Resumo/Categorização/Embedding (Feature #33)
-/// — uma classe só em vez de 3 quase-idênticas, cada instância registrada via Keyed Services
-/// (ver Infrastructure.Sqs/RabbitMq ServiceCollectionExtensions) com sua própria fila e seu
-/// próprio delegate apontando pro método da etapa certa. Reaplica sessão + traceparent do mesmo
-/// jeito que VideoQueueConsumer já faz — sem isso a árvore de spans no Sentry e as propriedades
-/// do Helicone se perderiam entre uma etapa e a próxima.
+/// Consumer genérico reaproveitado por TODAS as 4 etapas do pipeline (Feature #33) — Transcrição
+/// não é caso especial, é só mais uma instância deste mesmo consumer, drenando a fila de
+/// descoberta (não-keyed) em vez de uma fila de etapa (keyed). Uma classe só em vez de 4
+/// quase-idênticas, cada instância com sua própria fila e seu próprio delegate apontando pro
+/// método da etapa certa. Reaplica sessão + traceparent capturados na publicação — sem isso a
+/// árvore de spans no Sentry e as propriedades do Helicone se perderiam entre uma etapa e a
+/// próxima.
 /// </summary>
 public class EtapaQueueConsumer(
     IFilaConsumer<VideoEtapaMensagem> filaConsumer,

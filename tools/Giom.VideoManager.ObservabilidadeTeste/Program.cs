@@ -58,7 +58,19 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
+        // Só usado por FilaVideoHandler pra IsRelevant — quem processa de verdade é
+        // InstitutoPipelineHandler (Feature #33), mesma composição do Instituto.Worker
         services.AddSingleton<IVideoProcessador, InstitutoVideoHandler>();
+
+        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
+        services.AddFilaVideoEtapa("categorizacao", config, "FilaCategorizacao");
+        services.AddFilaVideoEtapa("embedding", config, "FilaEmbedding");
+
+        services.AddSingleton<InstitutoPipelineHandler>();
+        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaCategorizacaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
     })
     .Build();
 
@@ -75,9 +87,46 @@ await host.StartAsync();
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
 await processor.RunAsync(canalDeTeste);
 
-// Drena a fila (US #39/#40) — mesma execução processa o que a descoberta acabou de publicar.
-var consumidor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.VideoQueueConsumer>();
-await consumidor.ConsumirAsync();
+// Feature #33 — 4 consumers (Transcrição/Resumo/Categorização/Embedding) concorrentes, mesma
+// composição do Instituto.Worker/Program.cs — Transcrição drena a MESMA fila de descoberta da
+// US #39/#40 via EtapaQueueConsumer genérico (não é caso especial).
+var transcricaoConsumer = new Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer(
+    host.Services.GetRequiredService<IFilaConsumer<VideoEtapaMensagem>>(),
+    (video, ct) => host.Services.GetRequiredService<IEtapaTranscricaoHandler>().ProcessarAsync(video, ct),
+    "video.transcricao",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>>());
+
+var resumoConsumer = new Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer(
+    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("resumo"),
+    (video, ct) => host.Services.GetRequiredService<IEtapaResumoHandler>().ProcessarAsync(video, ct),
+    "video.resumo",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>>());
+
+var categorizacaoConsumer = new Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer(
+    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("categorizacao"),
+    (video, ct) => host.Services.GetRequiredService<IEtapaCategorizacaoHandler>().ProcessarAsync(video, ct),
+    "video.categorizacao",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>>());
+
+var embeddingConsumer = new Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer(
+    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("embedding"),
+    (video, ct) => host.Services.GetRequiredService<IEtapaEmbeddingHandler>().ProcessarAsync(video, ct),
+    "video.embedding",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>>());
+
+await Task.WhenAll(
+    transcricaoConsumer.ConsumirAsync(),
+    resumoConsumer.ConsumirAsync(),
+    categorizacaoConsumer.ConsumirAsync(),
+    embeddingConsumer.ConsumirAsync());
 
 await host.StopAsync();
 

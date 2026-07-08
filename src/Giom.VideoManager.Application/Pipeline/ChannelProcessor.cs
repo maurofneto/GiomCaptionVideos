@@ -21,8 +21,9 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// destinos (Sentry, Helicone, logs) leem dali.
 /// IVideoHandler aqui não é necessariamente quem processa de verdade (Instituto/Ministerio) —
 /// pode ser FilaVideoHandler (US #39/#40), que enfileira em vez de processar, delegando o
-/// processamento real pro VideoQueueConsumer. ChannelProcessor não sabe (nem precisa saber) qual
-/// dos dois está por trás — é só mais um IVideoHandler, igual sempre foi.
+/// processamento real pro EtapaQueueConsumer da etapa Transcrição (Feature #33). ChannelProcessor
+/// não sabe (nem precisa saber) qual dos dois está por trás — é só mais um IVideoHandler, igual
+/// sempre foi.
 /// </summary>
 public class ChannelProcessor(
     IVideoSourceService videoSource,

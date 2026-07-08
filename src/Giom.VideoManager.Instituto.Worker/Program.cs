@@ -83,8 +83,16 @@ await processor.RunAsync(channels);
 // Feature #33 — 4 consumers (Transcrição/Resumo/Categorização/Embedding) rodando concorrentes,
 // não em sequência: o objetivo é Resumo/Embedding começarem assim que o PRIMEIRO vídeo estiver
 // transcrito, não esperar o lote inteiro da Transcrição terminar (isso anularia o ganho da US
-// #41/#43). VideoQueueConsumer é a etapa de Transcrição (drena a fila de ingestão da US #39/#40).
-var transcricaoConsumer = host.Services.GetRequiredService<VideoQueueConsumer>();
+// #41/#43). Transcrição não é caso especial — é só mais uma etapa, drena a MESMA fila de
+// descoberta (IFilaConsumer<VideoEtapaMensagem> não-keyed, registrado por AddFilaVideo) via o
+// mesmo EtapaQueueConsumer genérico usado pelas demais.
+var transcricaoConsumer = new EtapaQueueConsumer(
+    host.Services.GetRequiredService<IFilaConsumer<VideoEtapaMensagem>>(),
+    (video, ct) => host.Services.GetRequiredService<IEtapaTranscricaoHandler>().ProcessarAsync(video, ct),
+    "video.transcricao",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
 
 var resumoConsumer = new EtapaQueueConsumer(
     host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("resumo"),

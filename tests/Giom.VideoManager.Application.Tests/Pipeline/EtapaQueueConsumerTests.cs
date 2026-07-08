@@ -8,10 +8,9 @@ using Xunit;
 namespace Giom.VideoManager.Application.Tests.Pipeline;
 
 /// <summary>
-/// EtapaQueueConsumer é reaproveitado pelas etapas de Resumo/Categorização/Embedding (Feature #33)
-/// — uma classe só, parametrizada pelo delegate da etapa e pelo nome do span. Estes testes cobrem
-/// o mesmo contrato de VideoQueueConsumerTests: sessão/traceparent reaplicados, erro propaga sem
-/// travar as próximas mensagens.
+/// EtapaQueueConsumer é reaproveitado por TODAS as 4 etapas do pipeline (Feature #33), incluindo
+/// Transcrição — uma classe só, parametrizada pelo delegate da etapa e pelo nome do span. Estes
+/// testes cobrem sessão/traceparent reaplicados, erro propaga sem travar as próximas mensagens.
 /// </summary>
 public class EtapaQueueConsumerTests
 {

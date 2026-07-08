@@ -14,7 +14,8 @@ namespace Giom.VideoManager.Application.Tests.Handlers;
 /// processador real (mesmo filtro de hoje), HandleAsync publica em vez de chamar
 /// IVideoProcessador.HandleAsync (se regredir, o vídeo processaria duas vezes ou nenhuma), e a
 /// mensagem carrega sessão + traceparent capturados no momento da publicação — sem isso, o
-/// VideoQueueConsumer do outro lado perde atributos de Sentry/Helicone e a árvore de spans.
+/// EtapaQueueConsumer da etapa Transcrição do outro lado perde atributos de Sentry/Helicone e a
+/// árvore de spans.
 /// </summary>
 public class FilaVideoHandlerTests
 {
@@ -23,7 +24,7 @@ public class FilaVideoHandlerTests
     private sealed class Ambiente
     {
         public Mock<IVideoProcessador> ProcessadorReal { get; } = new();
-        public FakeFilaPublisher<VideoParaProcessar> Publisher { get; } = new();
+        public FakeFilaPublisher<VideoEtapaMensagem> Publisher { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeTracingService Tracing { get; } = new();
 

@@ -11,17 +11,17 @@ namespace Giom.VideoManager.Application;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registra o pipeline de ingestão de vídeos: ChannelProcessor descobre e publica na fila
-    /// (via FilaVideoHandler, o IVideoHandler que injeta), VideoQueueConsumer drena e processa de
-    /// verdade (via IVideoProcessador — US #39/#40). O worker registra só o IVideoProcessador
-    /// concreto (Instituto/Ministério) e a fila (AddFilaVideo); o resto é genérico, daqui.
+    /// Registra a descoberta de vídeos: ChannelProcessor descobre e publica na fila (via
+    /// FilaVideoHandler, o IVideoHandler que injeta) — quem drena e processa de verdade é o
+    /// EtapaQueueConsumer da etapa Transcrição (Feature #33), montado no Program.cs de cada
+    /// worker junto com as demais etapas. O worker registra só o IVideoProcessador concreto
+    /// (Instituto/Ministério, usado por FilaVideoHandler pra IsRelevant) e a fila (AddFilaVideo).
     /// </summary>
     public static IServiceCollection AddChannelProcessor(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<ProcessingOptions>(config.GetSection("ProcessingOptions"));
         services.AddSingleton<IVideoHandler, FilaVideoHandler>();
         services.AddSingleton<ChannelProcessor>();
-        services.AddSingleton<VideoQueueConsumer>();
         return services;
     }
 

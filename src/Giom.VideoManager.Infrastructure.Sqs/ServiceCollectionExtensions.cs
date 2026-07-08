@@ -11,7 +11,7 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Fila:Sqs — QueueName/Region. Credenciais resolvidas do ambiente (IAM role/env), nunca aqui. A fila é criada automaticamente se não existir (ver SqsFilaCanal) — não precisa provisionar via console/CLI antes.</summary>
+    /// <summary>Fila:Sqs — QueueName/Region. Credenciais resolvidas do ambiente (IAM role/env), nunca aqui. A fila é criada automaticamente se não existir (ver SqsFilaCanal) — não precisa provisionar via console/CLI antes. Fila de descoberta/Transcrição (Feature #33 trata Transcrição como só mais uma etapa, mesmo tipo de mensagem das demais).</summary>
     public static IServiceCollection AddSqsFila(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SqsOptions>(config.GetSection("Fila:Sqs"));
@@ -23,8 +23,8 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton<SqsFilaCanal>();
-        services.AddSingleton<IFilaPublisher<VideoParaProcessar>, SqsFilaPublisher<VideoParaProcessar>>();
-        services.AddSingleton<IFilaConsumer<VideoParaProcessar>, SqsFilaConsumer<VideoParaProcessar>>();
+        services.AddSingleton<IFilaPublisher<VideoEtapaMensagem>, SqsFilaPublisher<VideoEtapaMensagem>>();
+        services.AddSingleton<IFilaConsumer<VideoEtapaMensagem>, SqsFilaConsumer<VideoEtapaMensagem>>();
 
         return services;
     }
