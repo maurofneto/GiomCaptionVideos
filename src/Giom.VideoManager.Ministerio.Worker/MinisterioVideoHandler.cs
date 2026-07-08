@@ -43,6 +43,10 @@ public class MinisterioVideoHandler(
             if (video.Transcricao == null && _options.ShouldGetCaption)
             {
                 video.Transcricao = await captionService.GetCaptionAsync(video, ct);
+                // Sem legenda no YouTube = vídeo fica incompleto pra sempre (sem fallback de
+                // transcrição em prod) — antes isso não deixava rastro nenhum (Bug #100).
+                if (video.Transcricao == null)
+                    logger.LogWarning("Ministério — sem legenda disponível no YouTube: {Title} ({Id})", video.Title, video.Id);
             }
 
             if (video.Resumo == null && _options.ShouldGenerateSummary && video.Transcricao != null)
