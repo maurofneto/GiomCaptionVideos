@@ -9,7 +9,7 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Fila:Sqs — QueueUrl/Region. Credenciais resolvidas do ambiente (IAM role/env), nunca aqui.</summary>
+    /// <summary>Fila:Sqs — QueueName/Region. Credenciais resolvidas do ambiente (IAM role/env), nunca aqui. A fila é criada automaticamente se não existir (ver SqsFilaCanal) — não precisa provisionar via console/CLI antes.</summary>
     public static IServiceCollection AddSqsFila(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SqsOptions>(config.GetSection("Fila:Sqs"));
@@ -20,6 +20,7 @@ public static class ServiceCollectionExtensions
             return new AmazonSQSClient(RegionEndpoint.GetBySystemName(region));
         });
 
+        services.AddSingleton<SqsFilaCanal>();
         services.AddSingleton<IFilaPublisher<VideoParaProcessar>, SqsFilaPublisher<VideoParaProcessar>>();
         services.AddSingleton<IFilaConsumer<VideoParaProcessar>, SqsFilaConsumer<VideoParaProcessar>>();
 

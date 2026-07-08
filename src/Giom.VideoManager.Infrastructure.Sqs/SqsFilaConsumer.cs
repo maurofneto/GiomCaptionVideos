@@ -14,17 +14,19 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 /// receive mas continua na fila — expira o VisibilityTimeout e o SQS reentrega sozinho, sem
 /// precisar de nenhuma Dead-Letter Queue dedicada só pra isso funcionar.
 /// </summary>
-public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, IOptions<SqsOptions> options, ILogger<SqsFilaConsumer<TMensagem>> logger) : IFilaConsumer<TMensagem>
+public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, IOptions<SqsOptions> options, ILogger<SqsFilaConsumer<TMensagem>> logger) : IFilaConsumer<TMensagem>
 {
     private readonly SqsOptions _options = options.Value;
 
     public async Task ConsumirAsync(Func<TMensagem, CancellationToken, Task> handler, CancellationToken ct = default)
     {
+        var queueUrl = await canal.ResolverQueueUrlAsync(ct);
+
         while (!ct.IsCancellationRequested)
         {
             var resposta = await cliente.ReceiveMessageAsync(new ReceiveMessageRequest
             {
-                QueueUrl = _options.QueueUrl,
+                QueueUrl = queueUrl,
                 MaxNumberOfMessages = _options.MaxNumberOfMessages,
                 WaitTimeSeconds = _options.WaitTimeSeconds,
                 VisibilityTimeout = _options.VisibilityTimeout
@@ -41,7 +43,7 @@ public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, IOptions<SqsOptions>
 
                     await handler(mensagem, ct);
 
-                    await cliente.DeleteMessageAsync(_options.QueueUrl, mensagemSqs.ReceiptHandle, ct);
+                    await cliente.DeleteMessageAsync(queueUrl, mensagemSqs.ReceiptHandle, ct);
                 }
                 catch (Exception ex)
                 {
