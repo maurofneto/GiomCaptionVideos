@@ -7,10 +7,17 @@
   genéricos (nomes de tipos de framework, siglas de protocolo) ficam em inglês naturalmente.
 - **Um projeto `Infrastructure.<Nome>` por dependência externa** — nunca agrupar duas
   dependências não relacionadas no mesmo projeto de infra.
-- **Interfaces por papel, não por implementação**: `IVideoHandler` (papel genérico) vs.
-  `IVideoProcessador` (papel específico de "processamento real") — quando duas
-  responsabilidades distintas colidiriam numa única interface, segregue (Interface
-  Segregation), seguindo o padrão já usado em `ITelemetriaSink`/`ITelemetriaService`.
+- **Interfaces por papel, não por implementação**: quando responsabilidades distintas
+  colidiriam numa única interface, segregue (Interface Segregation) — padrão usado em
+  `ITelemetriaSink`/`ITelemetriaService` e, na pipeline de vídeos, em
+  `IEtapaTranscricaoHandler`/`IEtapaResumoHandler`/`IEtapaCategorizacaoHandler`/
+  `IEtapaEmbeddingHandler` (cada canal implementa só a etapa que usa — Ministério não
+  implementa Categorização/Embedding, sem métodos vazios "porque a interface obriga").
+- **Erro de provedor externo vira exceção de Domain na borda do adapter, não uma exceção
+  específica de SDK vazando pra cima**: cada `Infrastructure.<Provedor>` mapeia o formato de
+  erro (HTTP status, tipo de exceção do SDK) do SEU provedor pra um tipo em
+  `Domain/Exceptions/` (ex: `RateLimitExcedidoException`), permitindo que quem consome (a
+  fila, `SqsFilaConsumer`) decida o que fazer sem conhecer YouTube/Claude/OpenAI.
 
 ## Código
 
