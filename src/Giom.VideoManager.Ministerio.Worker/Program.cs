@@ -1,11 +1,13 @@
 using Giom.VideoManager.Application;
 using Giom.VideoManager.Application.Handlers;
+using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Ministerio.Worker;
+using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
 using var host = Host.CreateDefaultBuilder(args)
@@ -42,9 +44,17 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        // Processador real do Ministério — quem de fato roda dentro de VideoQueueConsumer
-        // (ChannelProcessor fala com FilaVideoHandler, registrado em AddChannelProcessor)
+        // Processador real do Ministério — só usado por FilaVideoHandler pra IsRelevant, quem
+        // processa de verdade agora é MinisterioPipelineHandler (Feature #33)
         services.AddSingleton<IVideoProcessador, MinisterioVideoHandler>();
+
+        // Fila de etapa (Feature #33 — US #41/#42/#43): Ministério só tem Transcrição+Resumo,
+        // não implementa Categorização/Embedding (ISP).
+        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
+
+        services.AddSingleton<MinisterioPipelineHandler>();
+        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
+        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
     })
     .Build();
 
@@ -59,11 +69,25 @@ var channels = new[]
 // vira no-op (ActivitySource.StartActivity sempre devolve null).
 await host.StartAsync();
 
-var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
+var processor = host.Services.GetRequiredService<ChannelProcessor>();
 await processor.RunAsync(channels);
 
-// Drena a fila (US #39/#40) — mesma execução processa o que a descoberta acabou de publicar.
-var consumidor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.VideoQueueConsumer>();
-await consumidor.ConsumirAsync();
+// Feature #33 — 2 consumers (Transcrição/Resumo) rodando concorrentes, não em sequência: o
+// objetivo é o Resumo começar assim que o PRIMEIRO vídeo estiver transcrito, não esperar o lote
+// inteiro terminar. VideoQueueConsumer é a etapa de Transcrição (drena a fila de ingestão da US
+// #39/#40). Ministério não tem Categorização/Embedding.
+var transcricaoConsumer = host.Services.GetRequiredService<VideoQueueConsumer>();
+
+var resumoConsumer = new EtapaQueueConsumer(
+    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("resumo"),
+    (video, ct) => host.Services.GetRequiredService<IEtapaResumoHandler>().ProcessarAsync(video, ct),
+    "video.resumo",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
+
+await Task.WhenAll(
+    transcricaoConsumer.ConsumirAsync(),
+    resumoConsumer.ConsumirAsync());
 
 await host.StopAsync();

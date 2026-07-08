@@ -169,6 +169,20 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Fila de etapa (Feature #33 — Resumo/Categorização/Embedding) — registrada como Keyed
+    /// Service (<paramref name="chave"/>, ex: "resumo"), provider decidido dentro da própria seção
+    /// raiz (<paramref name="secaoRaiz"/>:Provider, ex: "FilaResumo:Provider"). Cada canal chama
+    /// isso só pras etapas que usa — Ministério não chama pra "categorizacao"/"embedding".
+    /// </summary>
+    public static IServiceCollection AddFilaVideoEtapa(this IServiceCollection services, string chave, IConfiguration config, string secaoRaiz)
+    {
+        var provider = config[$"{secaoRaiz}:Provider"] ?? "Sqs";
+        return provider == "RabbitMq"
+            ? services.AddRabbitMqFilaEtapa(chave, config, $"{secaoRaiz}:RabbitMq")
+            : services.AddSqsFilaEtapa(chave, config, $"{secaoRaiz}:Sqs");
+    }
+
+    /// <summary>
     /// IncertezaDetector:Provider — Heuristica (padrão). Deixado plugável (switch, não uma
     /// ligação direta) porque a forma de detectar incerteza numa resposta pode virar um
     /// classificador de IA ou outra lib no futuro, sem afetar quem consome o resultado.

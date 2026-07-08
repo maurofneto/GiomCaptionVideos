@@ -4,6 +4,8 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Infrastructure.Sqs;
 
@@ -23,6 +25,33 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqsFilaCanal>();
         services.AddSingleton<IFilaPublisher<VideoParaProcessar>, SqsFilaPublisher<VideoParaProcessar>>();
         services.AddSingleton<IFilaConsumer<VideoParaProcessar>, SqsFilaConsumer<VideoParaProcessar>>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registra uma fila de etapa (Feature #33 — Resumo/Categorização/Embedding) como Keyed
+    /// Service (.NET 9) — várias filas do mesmo tipo de mensagem (VideoEtapaMensagem) coexistindo
+    /// sem colidir, cada uma com seu próprio SqsFilaCanal/QueueName. Reaproveita o mesmo
+    /// IAmazonSQS singleton já registrado por AddSqsFila (mesma região, cliente reutilizável).
+    /// Fila se auto-cria no primeiro uso, igual à fila de ingestão.
+    /// </summary>
+    public static IServiceCollection AddSqsFilaEtapa(this IServiceCollection services, string chave, IConfiguration config, string sectionPath)
+    {
+        var options = config.GetSection(sectionPath).Get<SqsOptions>() ?? new SqsOptions();
+        var iOptions = Microsoft.Extensions.Options.Options.Create(options);
+
+        services.AddKeyedSingleton<SqsFilaCanal>(chave, (sp, _) => new SqsFilaCanal(sp.GetRequiredService<IAmazonSQS>(), iOptions));
+
+        services.AddKeyedSingleton<IFilaPublisher<VideoEtapaMensagem>>(chave, (sp, key) =>
+            new SqsFilaPublisher<VideoEtapaMensagem>(sp.GetRequiredService<IAmazonSQS>(), sp.GetRequiredKeyedService<SqsFilaCanal>(key)));
+
+        services.AddKeyedSingleton<IFilaConsumer<VideoEtapaMensagem>>(chave, (sp, key) =>
+            new SqsFilaConsumer<VideoEtapaMensagem>(
+                sp.GetRequiredService<IAmazonSQS>(),
+                sp.GetRequiredKeyedService<SqsFilaCanal>(key),
+                iOptions,
+                sp.GetRequiredService<ILogger<SqsFilaConsumer<VideoEtapaMensagem>>>()));
 
         return services;
     }

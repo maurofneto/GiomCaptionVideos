@@ -1,11 +1,13 @@
 using Giom.VideoManager.Application;
 using Giom.VideoManager.Application.Handlers;
+using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Instituto.Worker;
+using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
 using var host = Host.CreateDefaultBuilder(args)
@@ -44,9 +46,23 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        // Processador real do Instituto — quem de fato roda dentro de VideoQueueConsumer
-        // (ChannelProcessor fala com FilaVideoHandler, registrado em AddChannelProcessor)
+        // Processador real do Instituto — só usado por FilaVideoHandler pra IsRelevant, quem
+        // processa de verdade agora é InstitutoPipelineHandler (Feature #33)
         services.AddSingleton<IVideoProcessador, InstitutoVideoHandler>();
+
+        // Filas de etapa (Feature #33 — US #41/#42/#43): Resumo e Embedding dependem só de
+        // Transcrição (fan-out), Categorização depende de Resumo.
+        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
+        services.AddFilaVideoEtapa("categorizacao", config, "FilaCategorizacao");
+        services.AddFilaVideoEtapa("embedding", config, "FilaEmbedding");
+
+        // Um InstitutoPipelineHandler só, compartilhado pelas 4 interfaces de etapa — ele decide
+        // o que publicar em seguida, sabendo o ProcessingOptions do canal.
+        services.AddSingleton<InstitutoPipelineHandler>();
+        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaCategorizacaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
     })
     .Build();
 
@@ -61,11 +77,43 @@ var channels = new[]
 // vira no-op (ActivitySource.StartActivity sempre devolve null).
 await host.StartAsync();
 
-var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
+var processor = host.Services.GetRequiredService<ChannelProcessor>();
 await processor.RunAsync(channels);
 
-// Drena a fila (US #39/#40) — mesma execução processa o que a descoberta acabou de publicar.
-var consumidor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.VideoQueueConsumer>();
-await consumidor.ConsumirAsync();
+// Feature #33 — 4 consumers (Transcrição/Resumo/Categorização/Embedding) rodando concorrentes,
+// não em sequência: o objetivo é Resumo/Embedding começarem assim que o PRIMEIRO vídeo estiver
+// transcrito, não esperar o lote inteiro da Transcrição terminar (isso anularia o ganho da US
+// #41/#43). VideoQueueConsumer é a etapa de Transcrição (drena a fila de ingestão da US #39/#40).
+var transcricaoConsumer = host.Services.GetRequiredService<VideoQueueConsumer>();
+
+var resumoConsumer = new EtapaQueueConsumer(
+    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("resumo"),
+    (video, ct) => host.Services.GetRequiredService<IEtapaResumoHandler>().ProcessarAsync(video, ct),
+    "video.resumo",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
+
+var categorizacaoConsumer = new EtapaQueueConsumer(
+    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("categorizacao"),
+    (video, ct) => host.Services.GetRequiredService<IEtapaCategorizacaoHandler>().ProcessarAsync(video, ct),
+    "video.categorizacao",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
+
+var embeddingConsumer = new EtapaQueueConsumer(
+    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("embedding"),
+    (video, ct) => host.Services.GetRequiredService<IEtapaEmbeddingHandler>().ProcessarAsync(video, ct),
+    "video.embedding",
+    host.Services.GetRequiredService<ITracingService>(),
+    host.Services.GetRequiredService<ISessionContext>(),
+    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
+
+await Task.WhenAll(
+    transcricaoConsumer.ConsumirAsync(),
+    resumoConsumer.ConsumirAsync(),
+    categorizacaoConsumer.ConsumirAsync(),
+    embeddingConsumer.ConsumirAsync());
 
 await host.StopAsync();

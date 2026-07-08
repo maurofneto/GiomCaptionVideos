@@ -10,11 +10,12 @@ using Xunit;
 namespace Giom.VideoManager.Application.Tests.Pipeline;
 
 /// <summary>
-/// VideoQueueConsumer é quem de fato chama IVideoProcessador.HandleAsync do outro lado da fila
-/// (US #39/#40) — estes testes garantem que cada mensagem abre seu span "pipeline.video" (reatado
-/// ao traceparent da publicação), reaplica a sessão que veio na mensagem (sem isso, os atributos
-/// de Sentry/Helicone se perdiam), chama o processador real, e que um erro num vídeo não impede
-/// o consumo dos próximos (a fila decide retentativa, não o consumer em si).
+/// VideoQueueConsumer é quem de fato chama IEtapaTranscricaoHandler.ProcessarAsync do outro lado
+/// da fila (US #39/#40, adaptado pra Feature #33) — estes testes garantem que cada mensagem abre
+/// seu span "video.transcricao" (reatado ao traceparent da publicação), reaplica a sessão que veio
+/// na mensagem (sem isso, os atributos de Sentry/Helicone se perdiam), chama o handler da etapa, e
+/// que um erro num vídeo não impede o consumo dos próximos (a fila decide retentativa, não o
+/// consumer em si).
 /// </summary>
 public class VideoQueueConsumerTests
 {
@@ -25,14 +26,14 @@ public class VideoQueueConsumerTests
 
     private sealed class Ambiente
     {
-        public Mock<IVideoProcessador> ProcessadorReal { get; } = new();
+        public Mock<IEtapaTranscricaoHandler> TranscricaoHandler { get; } = new();
         public FakeFilaConsumer<VideoParaProcessar> FilaConsumer { get; } = new();
         public FakeTracingService Tracing { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeLogger<VideoQueueConsumer> Logger { get; } = new();
 
         public VideoQueueConsumer CriarConsumer() => new(
-            FilaConsumer, ProcessadorReal.Object, Tracing, SessionContext, Logger);
+            FilaConsumer, TranscricaoHandler.Object, Tracing, SessionContext, Logger);
     }
 
     [Fact]
@@ -46,8 +47,8 @@ public class VideoQueueConsumerTests
 
         await ambiente.CriarConsumer().ConsumirAsync();
 
-        ambiente.ProcessadorReal.Verify(p => p.HandleAsync(video1, It.IsAny<CancellationToken>()), Times.Once);
-        ambiente.ProcessadorReal.Verify(p => p.HandleAsync(video2, It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.TranscricaoHandler.Verify(p => p.ProcessarAsync(video1, It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.TranscricaoHandler.Verify(p => p.ProcessarAsync(video2, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -59,7 +60,7 @@ public class VideoQueueConsumerTests
 
         await ambiente.CriarConsumer().ConsumirAsync();
 
-        Assert.Equal(["video.processamento", "video.processamento"], ambiente.Tracing.Traces.Select(t => t.Nome));
+        Assert.Equal(["video.transcricao", "video.transcricao"], ambiente.Tracing.Traces.Select(t => t.Nome));
     }
 
     [Fact]
@@ -84,8 +85,8 @@ public class VideoQueueConsumerTests
         ambiente.FilaConsumer.MensagensParaConsumir.Add(CriarMensagem(video2));
 
         var excecao = new InvalidOperationException("falha simulada");
-        ambiente.ProcessadorReal.Setup(p => p.HandleAsync(video1, It.IsAny<CancellationToken>())).ThrowsAsync(excecao);
-        ambiente.ProcessadorReal.Setup(p => p.HandleAsync(video2, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        ambiente.TranscricaoHandler.Setup(p => p.ProcessarAsync(video1, It.IsAny<CancellationToken>())).ThrowsAsync(excecao);
+        ambiente.TranscricaoHandler.Setup(p => p.ProcessarAsync(video2, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         await ambiente.CriarConsumer().ConsumirAsync();
 
@@ -94,7 +95,7 @@ public class VideoQueueConsumerTests
         Assert.Single(ambiente.FilaConsumer.ErrosCapturados);
         Assert.Same(excecao, ambiente.FilaConsumer.ErrosCapturados[0]);
         Assert.True(ambiente.Tracing.Traces[0].Trace.Erro);
-        ambiente.ProcessadorReal.Verify(p => p.HandleAsync(video2, It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.TranscricaoHandler.Verify(p => p.ProcessarAsync(video2, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
