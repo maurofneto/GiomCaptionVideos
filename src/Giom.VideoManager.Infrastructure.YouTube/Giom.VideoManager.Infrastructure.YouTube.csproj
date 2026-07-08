@@ -24,4 +24,11 @@
     <RootNamespace>Giom.VideoManager.Infrastructure.YouTube</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- ResilientYouTubeApiService é internal — visível só pro teste que constrói o pipeline
+         Polly de verdade (AddCircuitBreaker valida as opções em runtime; um MinimumThroughput
+         inválido só estoura aí, não na simples construção do CircuitBreakerStrategyOptions). -->
+    <InternalsVisibleTo Include="Giom.VideoManager.Infrastructure.Tests" />
+  </ItemGroup>
+
 </Project>

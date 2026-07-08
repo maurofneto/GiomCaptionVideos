@@ -34,15 +34,16 @@ internal class ResilientYouTubeApiService
 
         var circuitBreaker = new CircuitBreakerStrategyOptions
         {
-            // MinimumThroughput=1 + FailureRatio=1.0: abre já na PRIMEIRA ocorrência de
-            // quotaExceeded, não depois de acumular falhas numa janela — quota estourada não é
-            // "problema intermitente" que melhora com mais uma tentativa, é fato consumado até
-            // o reset diário (meia-noite Pacific Time). BreakDuration de 1h (não 5min): reabrir
-            // em minutos só bateria em quotaExceeded de novo e reabriria o circuito à toa pelo
-            // resto da run.
+            // MinimumThroughput=2 (mínimo aceito pelo Polly — validação em tempo de execução,
+            // AddCircuitBreaker lança ValidationException pra qualquer valor < 2) + FailureRatio=1.0:
+            // abre já na SEGUNDA ocorrência de quotaExceeded, o mais perto de "imediato" que dá pra
+            // chegar — quota estourada não é "problema intermitente" que melhora com mais uma
+            // tentativa, é fato consumado até o reset diário (meia-noite Pacific Time). BreakDuration
+            // de 1h (não 5min): reabrir em minutos só bateria em quotaExceeded de novo e reabriria o
+            // circuito à toa pelo resto da run.
             FailureRatio = 1.0,
             SamplingDuration = TimeSpan.FromSeconds(30),
-            MinimumThroughput = 1,
+            MinimumThroughput = 2,
             BreakDuration = TimeSpan.FromHours(1),
             ShouldHandle = new PredicateBuilder().Handle<Google.GoogleApiException>(ex =>
                 ex.HttpStatusCode == System.Net.HttpStatusCode.Forbidden &&
