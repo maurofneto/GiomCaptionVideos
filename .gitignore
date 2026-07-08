@@ -365,3 +365,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Cache local de skills (ex: snapshot do Azure Boards) — dado efêmero, não documentação
+.claude/cache/
