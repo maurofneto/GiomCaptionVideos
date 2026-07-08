@@ -53,7 +53,13 @@ public class InstitutoVideoHandler(
             if (video.Transcricao == null && _options.ShouldGetCaption)
             {
                 video.Transcricao = await captionService.GetCaptionAsync(video, ct);
-                logger.LogInformation("Instituto — legenda obtida: {Title}", video.Title);
+                // Log condicional ao resultado real — antes logava "legenda obtida" mesmo quando
+                // GetCaptionAsync devolvia null (sem legenda no YouTube), escondendo que o vídeo
+                // ficaria incompleto pra sempre (sem fallback de transcrição em prod — Bug #100).
+                if (video.Transcricao != null)
+                    logger.LogInformation("Instituto — legenda obtida: {Title}", video.Title);
+                else
+                    logger.LogWarning("Instituto — sem legenda disponível no YouTube: {Title} ({Id})", video.Title, video.Id);
             }
 
             if (video.Resumo == null && _options.ShouldGenerateSummary && video.Transcricao != null)
