@@ -3,6 +3,7 @@ using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Telemetria;
@@ -14,8 +15,10 @@ using Serilog;
 // Mesma composição do Giom.VideoManager.Instituto.Worker (Program.cs) — só troca
 // AddVideoSourceService (YouTube real) pelo SupabaseVideoSource, e roda uma vez só.
 // Objetivo: exercitar o pipeline real (resumo/categorização/embedding, Sentry, Helicone,
-// CorrelationId) sem depender do YouTube — usando vídeos/legendas reais já existentes no
-// Supabase (dev), mas devolvidos com Id novo pra sempre reprocessar do zero.
+// CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — Resumo/Categorização
+// reaproveitam conteúdo real já gerado no Supabase (mesmo padrão de SupabaseCaptionService),
+// Embedding usa vetores fake (dimensão certa, sem semântica real) e injeta falha determinística
+// por vídeo pra exercitar o retry dinâmico da Feature #34 (ver FakeEmbeddingService).
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -49,9 +52,16 @@ using var host = Host.CreateDefaultBuilder(args)
             sp.GetRequiredService<ITelemetriaService>(),
             sp.GetRequiredService<ITracingService>(),
             sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-        services.AddSummaryService(config);        // Claude real — via Helicone
-        services.AddCategorizacaoService(config);  // Claude real — via Helicone
-        services.AddEmbeddingService(config);      // OpenAI real
+        // Sem IA nem YouTube: Resumo/Categorização reaproveitam conteúdo real do Supabase
+        // (idêntico ao SupabaseCaptionService pra transcrição); Embedding é fake com falha
+        // determinística por vídeo (ver FakeEmbeddingService) — nada disso chama Claude/OpenAI.
+        services.AddSingleton<IResumoService, SupabaseResumoService>();
+        services.AddSingleton<ICategorizacaoService, SupabaseCategorizacaoService>();
+        services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
+        // Antes vinha de dentro de AddSummaryService/AddCategorizacaoService (Claude real) —
+        // removidos daqui, então precisa ser chamado direto: ISessionContext é usado por
+        // SentryTracingService, InstitutoPipelineHandler etc.
+        services.AddSessionContext();
         services.AddTelemetriaService(config);     // Supabase + Sentry + alerta de gasto
         services.AddTracingService(config);         // Sentry Performance
         services.AddObservabilidadeExterna(config); // Helicone Sessions/Properties
