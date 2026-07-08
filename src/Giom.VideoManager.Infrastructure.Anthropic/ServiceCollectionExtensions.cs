@@ -54,6 +54,12 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Registra o tipo concreto (não a interface) — desde a Feature #101, quem decide como
+    /// ClaudeResumoService vira o IResumoService final (direto, ou um elo de
+    /// FallbackResumoService) é a Composition, não este método. Decoração de telemetria também
+    /// migrou pra lá, aplicada uma vez só sobre o resultado final da cadeia.
+    /// </summary>
     public static IServiceCollection AddClaudeSummary(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
@@ -61,11 +67,11 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeResumoOptions>(config.GetSection("ClaudeResumo"));
-        services.AddSingleton<IResumoService, ClaudeResumoService>();
-        services.Decorate<IResumoService, TelemetriaResumoService>();
+        services.AddSingleton<ClaudeResumoService>();
         return services;
     }
 
+    /// <summary>Ver comentário de AddClaudeSummary — mesmo raciocínio (tipo concreto, decisão de composição na Composition).</summary>
     public static IServiceCollection AddClaudeCategorizacao(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
@@ -73,8 +79,7 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeCategorizacaoOptions>(config.GetSection("ClaudeCategorizacao"));
-        services.AddSingleton<ICategorizacaoService, ClaudeCategorizacaoService>();
-        services.Decorate<ICategorizacaoService, TelemetriaCategorizacaoService>();
+        services.AddSingleton<ClaudeCategorizacaoService>();
         return services;
     }
 

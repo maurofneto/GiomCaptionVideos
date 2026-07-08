@@ -1,12 +1,12 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Resiliencia;
 using Giom.VideoManager.Infrastructure.Supabase;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace Giom.VideoManager.Infrastructure.OpenAI;
 
@@ -88,7 +88,7 @@ public class DirectEmbeddingService : IEmbeddingService
             video.Id, conteudo.Length,
             conteudo.Length > 300 ? conteudo[..300] : conteudo);
 
-        var chunks = SplitIntoChunks(conteudo);
+        var chunks = TextChunker.Dividir(conteudo, _options.ChunkSize, _options.ChunkOverlap);
         _logger.LogInformation("{VideoId} — {Chunks} chunks de {Chars} chars",
             video.Id, chunks.Count, conteudo.Length);
 
@@ -164,65 +164,6 @@ public class DirectEmbeddingService : IEmbeddingService
     // =========================================================
     // Helpers privados
     // =========================================================
-
-    // Retorna spans sobre a string original — zero cópias intermediárias.
-    // Cada ReadOnlyMemory<char> é apenas (ponteiro + offset + length) sobre `text`.
-    private List<ReadOnlyMemory<char>> SplitIntoChunks(string text)
-    {
-        var chunks = new List<ReadOnlyMemory<char>>();
-        var mem    = text.AsMemory();
-        int start  = 0;
-
-        while (start < text.Length)
-        {
-            int end = start + _options.ChunkSize;
-
-            if (end < text.Length)
-                end = FindGoodBreak(text, end);
-            else
-                end = text.Length;
-
-            // Trim sem alocar: avança/recua os índices dentro do span
-            var slice = mem.Slice(start, end - start);
-            var span  = slice.Span;
-            int trimStart = 0;
-            while (trimStart < span.Length && char.IsWhiteSpace(span[trimStart])) trimStart++;
-            int trimEnd = span.Length;
-            while (trimEnd > trimStart && char.IsWhiteSpace(span[trimEnd - 1])) trimEnd--;
-
-            if (trimEnd > trimStart)
-                chunks.Add(slice.Slice(trimStart, trimEnd - trimStart));
-
-            // Garante progresso mínimo de 1 char — evita loop infinito quando
-            // FindGoodBreak recua muito e end - ChunkOverlap <= start anterior.
-            int nextStart = end - _options.ChunkOverlap;
-            start = nextStart > start ? nextStart : end;
-            if (start >= text.Length) break;
-        }
-
-        return chunks;
-    }
-
-    // Opera sobre Span — sem alocar substring temporária.
-    private static int FindGoodBreak(string text, int around)
-    {
-        int sliceStart = Math.Max(0, around - 200);
-        int sliceEnd   = Math.Min(text.Length, around + 200);
-        var span       = text.AsSpan(sliceStart, sliceEnd - sliceStart);
-        int offset     = sliceStart;
-
-        int paraBreak = span.LastIndexOf("\n\n".AsSpan(), StringComparison.Ordinal);
-        if (paraBreak != -1) return offset + paraBreak + 2;
-
-        int lineBreak = span.LastIndexOf('\n');
-        if (lineBreak != -1) return offset + lineBreak + 1;
-
-        // Regex ainda precisa de string — mas só é chamada como fallback raro
-        var sentenceMatch = Regex.Match(span.ToString(), @"[.!?]\s");
-        if (sentenceMatch.Success) return offset + sentenceMatch.Index + 2;
-
-        return around;
-    }
 
     private async Task<(List<float[]> Embeddings, int TokensTotais)> GenerateEmbeddingsAsync(List<ReadOnlyMemory<char>> chunks, CancellationToken ct)
     {
