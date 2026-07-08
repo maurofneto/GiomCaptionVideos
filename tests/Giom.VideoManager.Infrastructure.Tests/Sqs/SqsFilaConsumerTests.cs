@@ -1,6 +1,8 @@
+using System.Net;
 using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Infrastructure.Sqs;
 using Giom.VideoManager.Testes.Comuns;
 using Microsoft.Extensions.Logging;
@@ -97,6 +99,56 @@ public class SqsFilaConsumerTests
 
         _sqs.Verify(s => s.ChangeMessageVisibilityAsync(It.IsAny<string>(), "r1", 10, It.IsAny<CancellationToken>()), Times.Once);
         _sqs.Verify(s => s.DeleteMessageAsync(It.IsAny<string>(), "r2", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Consumir_FalhaComRateLimitSemEsperaSugerida_UsaODelayPadraoDeRateLimit()
+    {
+        ConfigurarFilaCom(NovaMensagem("a", "r1", tentativa: 1));
+
+        await _consumer.ConsumirAsync((_, _) => throw new RateLimitExcedidoException("YouTube.Teste"));
+
+        // Sem Retry-After conhecido: usa RateLimitDelaySeconds (300s por padrão), não o
+        // RetryDelaySeconds (10s) da falha transitória comum — rate limit não some em 10s.
+        _sqs.Verify(s => s.ChangeMessageVisibilityAsync("https://sqs/fila-teste", "r1", 300, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(_logger.Entradas, e => e.Nivel == LogLevel.Warning && e.Mensagem.Contains("rate limit"));
+    }
+
+    [Fact]
+    public async Task Consumir_FalhaComRateLimitComEsperaSugerida_UsaAEsperaDoProvedor()
+    {
+        ConfigurarFilaCom(NovaMensagem("a", "r1", tentativa: 1));
+
+        await _consumer.ConsumirAsync((_, _) => throw new RateLimitExcedidoException("Claude.Resumo", TimeSpan.FromSeconds(45)));
+
+        // Retry-After informado pelo provedor (ex: Anthropic RateLimits.RetryAfter) tem
+        // prioridade sobre o delay padrão configurado.
+        _sqs.Verify(s => s.ChangeMessageVisibilityAsync("https://sqs/fila-teste", "r1", 45, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Consumir_FalhaComHttp429Generico_TambemUsaODelayDeRateLimit()
+    {
+        ConfigurarFilaCom(NovaMensagem("a", "r1", tentativa: 1));
+
+        await _consumer.ConsumirAsync((_, _) => throw new HttpRequestException("blocked", inner: null, statusCode: HttpStatusCode.TooManyRequests));
+
+        // Cobre provedores que ainda não mapeiam pra RateLimitExcedidoException (ex.: OpenAI
+        // embeddings, que só lança HttpRequestException com StatusCode).
+        _sqs.Verify(s => s.ChangeMessageVisibilityAsync("https://sqs/fila-teste", "r1", 300, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Consumir_RateLimitEmbrulhadaEmOutraExcecao_AindaDetectaPercorrendoInnerException()
+    {
+        ConfigurarFilaCom(NovaMensagem("a", "r1", tentativa: 1));
+
+        await _consumer.ConsumirAsync((_, _) =>
+            throw new InvalidOperationException("decorator relançou", new RateLimitExcedidoException("YouTube.Teste", TimeSpan.FromSeconds(20))));
+
+        // Decorators de telemetria costumam relançar embrulhando a causa original — o delay
+        // dinâmico precisa continuar reconhecendo o rate limit lá dentro.
+        _sqs.Verify(s => s.ChangeMessageVisibilityAsync("https://sqs/fila-teste", "r1", 20, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
