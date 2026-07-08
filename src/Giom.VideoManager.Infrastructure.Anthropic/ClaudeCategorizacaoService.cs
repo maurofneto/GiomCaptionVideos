@@ -2,6 +2,7 @@ using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Enums;
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Helicone;
@@ -57,14 +58,22 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("categorizacao", video));
         using var span = _tracingService.IniciarEtapaAtual("categorizacao");
 
-        var response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
+        MessageResponse response;
+        try
         {
-            Model         = _options.Model,
-            MaxTokens     = _options.MaxTokens,
-            PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
-            System        = [new SystemMessage(_systemPrompt)],
-            Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = resumo }] }]
-        }, ct);
+            response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
+            {
+                Model         = _options.Model,
+                MaxTokens     = _options.MaxTokens,
+                PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
+                System        = [new SystemMessage(_systemPrompt)],
+                Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = resumo }] }]
+            }, ct);
+        }
+        catch (RateLimitsExceeded ex)
+        {
+            throw new RateLimitExcedidoException("Claude.Categorizacao", ex.RateLimits.RetryAfter, ex);
+        }
 
         // Concatena todos os blocos de texto — FirstOrDefault() descartava o resto
         // quando a resposta vinha em mais de um bloco.

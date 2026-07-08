@@ -25,6 +25,12 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 /// dias", sem precisar abrir uma transação específica pra consultar).
 /// Seguro mesmo se o Sentry não estiver inicializado nesse worker (Sentry:Dsn vazio) —
 /// SentrySdk vira no-op nesse caso.
+/// US #89: cogitou-se migrar pra Meter/Histogram/Counter padrão do
+/// System.Diagnostics.Metrics (OTel), exportado via Sentry.OpenTelemetry, em vez de
+/// SentrySdk.Metrics.EmitDistribution (API própria do Sentry). Verificado por inspeção do
+/// assembly `Sentry.OpenTelemetry` 6.6.0 (nenhuma referência a `MeterProviderBuilder`,
+/// só `TracerProviderBuilder`) — essa versão NÃO exporta métricas OTel pro Sentry, só traces.
+/// Mantido `SentrySdk.Metrics` até uma versão futura do pacote adicionar esse suporte.
 /// </summary>
 public class SentryTelemetriaService(ISessionContext sessionContext) : ITelemetriaSink
 {
