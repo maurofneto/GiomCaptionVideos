@@ -10,7 +10,9 @@ using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
+using Giom.VideoManager.Infrastructure.RabbitMq;
 using Giom.VideoManager.Infrastructure.Sql;
+using Giom.VideoManager.Infrastructure.Sqs;
 using Giom.VideoManager.Infrastructure.Supabase;
 using Giom.VideoManager.Infrastructure.SummarizeTech;
 using Giom.VideoManager.Infrastructure.Telegram;
@@ -156,6 +158,15 @@ public static class ServiceCollectionExtensions
     /// <summary>Rastreamento de etapas de uma interação (ex: busca RAG / agente / envio) — hoje via Sentry Performance.</summary>
     public static IServiceCollection AddTracingService(this IServiceCollection services, IConfiguration config)
         => services.AddSentryTracing(config);
+
+    /// <summary>Fila:Provider — Sqs (padrão), RabbitMq (CloudAMQP/LavinMQ) — fila de ingestão de vídeos (US #39/#40).</summary>
+    public static IServiceCollection AddFilaVideo(this IServiceCollection services, IConfiguration config)
+    {
+        var provider = config["Fila:Provider"] ?? "Sqs";
+        return provider == "RabbitMq"
+            ? services.AddRabbitMqFila(config)
+            : services.AddSqsFila(config);
+    }
 
     /// <summary>
     /// IncertezaDetector:Provider — Heuristica (padrão). Deixado plugável (switch, não uma

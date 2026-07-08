@@ -55,9 +55,10 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddTelemetriaService(config);     // Supabase + Sentry + alerta de gasto
         services.AddTracingService(config);         // Sentry Performance
         services.AddObservabilidadeExterna(config); // Helicone Sessions/Properties
+        services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        services.AddSingleton<IVideoHandler, InstitutoVideoHandler>();
+        services.AddSingleton<IVideoProcessador, InstitutoVideoHandler>();
     })
     .Build();
 
@@ -73,6 +74,10 @@ await host.StartAsync();
 
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
 await processor.RunAsync(canalDeTeste);
+
+// Drena a fila (US #39/#40) — mesma execução processa o que a descoberta acabou de publicar.
+var consumidor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.VideoQueueConsumer>();
+await consumidor.ConsumirAsync();
 
 await host.StopAsync();
 

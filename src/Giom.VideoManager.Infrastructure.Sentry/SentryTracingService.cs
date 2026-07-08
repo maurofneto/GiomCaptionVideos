@@ -30,9 +30,12 @@ namespace Giom.VideoManager.Infrastructure.Sentry;
 /// </summary>
 public class SentryTracingService(ISessionContext sessionContext) : ITracingService
 {
-    public ITrace IniciarTrace(string nome, string operacao)
+    public ITrace IniciarTrace(string nome, string operacao, string? contextoExterno = null)
     {
-        var activity = GiomActivitySource.Instance.StartActivity(nome);
+        var activity = contextoExterno is not null && ActivityContext.TryParse(contextoExterno, null, out var contexto)
+            ? GiomActivitySource.Instance.StartActivity(nome, ActivityKind.Internal, contexto)
+            : GiomActivitySource.Instance.StartActivity(nome);
+
         activity?.SetTag("operacao", operacao);
         AplicarAtributosDaSessao(activity);
         return new SentryTrace(activity, this);
@@ -44,6 +47,8 @@ public class SentryTracingService(ISessionContext sessionContext) : ITracingServ
         AplicarAtributosDaSessao(activity);
         return (IDisposable?)activity ?? NoopDisposable.Instance;
     }
+
+    public string? CapturarContextoAtual() => Activity.Current?.Id;
 
     private void AplicarAtributosDaSessao(Activity? activity)
     {
