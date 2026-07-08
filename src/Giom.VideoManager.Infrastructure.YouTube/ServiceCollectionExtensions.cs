@@ -72,6 +72,7 @@ public static class ServiceCollectionExtensions
                 services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
                     sp.GetRequiredService<YtDlpCaptionService>(),
                     sp.GetRequiredService<ITelemetriaService>(),
+                    sp.GetRequiredService<ITracingService>(),
                     sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
                 break;
 
@@ -81,6 +82,7 @@ public static class ServiceCollectionExtensions
                 services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
                     sp.GetRequiredService<YouTubeCaptionService>(),
                     sp.GetRequiredService<ITelemetriaService>(),
+                    sp.GetRequiredService<ITracingService>(),
                     sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
                 break;
 
@@ -90,6 +92,7 @@ public static class ServiceCollectionExtensions
                 services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
                     sp.GetRequiredService<YouTubeTranscriptService>(),
                     sp.GetRequiredService<ITelemetriaService>(),
+                    sp.GetRequiredService<ITracingService>(),
                     sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
                 break;
         }

@@ -1,3 +1,4 @@
+using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Application.Pipeline;
@@ -10,13 +11,17 @@ namespace Giom.VideoManager.Application;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registra o pipeline de ingestão de vídeos (ChannelProcessor). O IVideoHandler concreto
-    /// (Instituto/Ministério) é registrado pelo worker — é a única peça específica de canal.
+    /// Registra o pipeline de ingestão de vídeos: ChannelProcessor descobre e publica na fila
+    /// (via FilaVideoHandler, o IVideoHandler que injeta), VideoQueueConsumer drena e processa de
+    /// verdade (via IVideoProcessador — US #39/#40). O worker registra só o IVideoProcessador
+    /// concreto (Instituto/Ministério) e a fila (AddFilaVideo); o resto é genérico, daqui.
     /// </summary>
     public static IServiceCollection AddChannelProcessor(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<ProcessingOptions>(config.GetSection("ProcessingOptions"));
+        services.AddSingleton<IVideoHandler, FilaVideoHandler>();
         services.AddSingleton<ChannelProcessor>();
+        services.AddSingleton<VideoQueueConsumer>();
         return services;
     }
 

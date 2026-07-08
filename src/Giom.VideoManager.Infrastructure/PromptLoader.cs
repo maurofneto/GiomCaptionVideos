@@ -1,19 +1,17 @@
-using Microsoft.Extensions.Hosting;
-
 namespace Giom.VideoManager.Infrastructure;
 
 /// <summary>
-/// Carrega arquivos de prompt .md da pasta Prompts/ dentro do ContentRootPath do host.
+/// Carrega arquivos de prompt .md da pasta Prompts/ ao lado do assembly em execução.
 /// Cada aplicação (worker) define seus próprios prompts em sua pasta Prompts/.
+/// Usa AppContext.BaseDirectory (não IHostEnvironment.ContentRootPath) de propósito —
+/// ContentRootPath é o diretório de trabalho de onde o processo foi iniciado, que varia
+/// (ex.: "dotnet run" usa a pasta do .csproj, sem Prompts/ copiado; rodar o .dll publicado usa a
+/// pasta de build, com Prompts/ copiado) — BaseDirectory é sempre a pasta onde o assembly
+/// realmente está, coerente com o CopyToOutputDirectory dos arquivos de prompt.
 /// </summary>
 public class PromptLoader
 {
-    private readonly string _promptsDir;
-
-    public PromptLoader(IHostEnvironment env)
-    {
-        _promptsDir = Path.Combine(env.ContentRootPath, "Prompts");
-    }
+    private readonly string _promptsDir = Path.Combine(AppContext.BaseDirectory, "Prompts");
 
     public string Load(string fileName)
     {

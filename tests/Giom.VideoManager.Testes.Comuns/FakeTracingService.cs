@@ -9,6 +9,7 @@ public class FakeTrace : ITrace
     public Dictionary<string, string> Tags { get; } = [];
     public bool Erro { get; private set; }
     public Exception? ExcecaoMarcada { get; private set; }
+    public string? ContextoExternoRecebido { get; init; }
 
     public IDisposable IniciarEtapa(string nome)
     {
@@ -37,11 +38,27 @@ public class FakeTrace : ITrace
 public class FakeTracingService : ITracingService
 {
     public List<(string Nome, string Operacao, FakeTrace Trace)> Traces { get; } = [];
+    public List<string> EtapasAtuais { get; } = [];
+    public string? ContextoASimular { get; set; }
 
-    public ITrace IniciarTrace(string nome, string operacao)
+    public ITrace IniciarTrace(string nome, string operacao, string? contextoExterno = null)
     {
-        var trace = new FakeTrace();
+        var trace = new FakeTrace { ContextoExternoRecebido = contextoExterno };
         Traces.Add((nome, operacao, trace));
         return trace;
+    }
+
+    public IDisposable IniciarEtapaAtual(string nome)
+    {
+        EtapasAtuais.Add(nome);
+        return NoopDisposableEtapaAtual.Instance;
+    }
+
+    public string? CapturarContextoAtual() => ContextoASimular;
+
+    private sealed class NoopDisposableEtapaAtual : IDisposable
+    {
+        public static readonly NoopDisposableEtapaAtual Instance = new();
+        public void Dispose() { }
     }
 }

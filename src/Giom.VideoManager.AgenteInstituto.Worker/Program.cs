@@ -8,7 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Sentry;
 using Serilog;
 
-var host = Host.CreateDefaultBuilder(args)
+using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
         config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
@@ -24,7 +24,8 @@ var host = Host.CreateDefaultBuilder(args)
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
             .Enrich.With<ShortSourceContextEnricher>()
-            .ConfigureSentry(context.Configuration);
+            .Enrich.With<SessionContextEnricher>()
+            .AddSentrySink(context.Configuration);
     })
     .ConfigureServices((ctx, services) =>
     {
@@ -38,7 +39,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB
         services.AddBotComandos(config);           // ajuda/sobre/limpar — cada canal decide como invocar
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
-        services.AddTracingService();              // Sentry Performance — quebra de tempo por etapa
+        services.AddTracingService(config);         // Sentry Performance — quebra de tempo por etapa
         services.AddObservabilidadeExterna(config); // Helicone — Sessions/Users/Properties/Feedback
         services.AddChatBotProcessor(config);
     })

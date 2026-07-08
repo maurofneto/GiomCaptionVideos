@@ -11,10 +11,11 @@ namespace Giom.VideoManager.Infrastructure.Telemetria;
 /// providers atuais cobra por chamada (legenda direto da plataforma, sem custo de IA), então
 /// CustoEstimadoUsd fica sempre null aqui — só tempo/sucesso são registrados.
 /// </summary>
-public class TelemetriaCaptionService(ICaptionService inner, ITelemetriaService telemetria, ILogger<TelemetriaCaptionService> logger) : ICaptionService
+public class TelemetriaCaptionService(ICaptionService inner, ITelemetriaService telemetria, ITracingService tracingService, ILogger<TelemetriaCaptionService> logger) : ICaptionService
 {
     public async Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
     {
+        using var span = tracingService.IniciarEtapaAtual("transcricao");
         var stopwatch = Stopwatch.StartNew();
         try
         {

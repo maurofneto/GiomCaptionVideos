@@ -2,13 +2,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Giom.VideoManager.Domain\Giom.VideoManager.Domain.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure\Giom.VideoManager.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
-    <PackageReference Include="Sentry.Serilog" Version="6.6.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
+    <PackageReference Include="Sentry.OpenTelemetry" Version="6.6.0" />
+    <PackageReference Include="Sentry" Version="6.6.0" />
     <PackageReference Include="Serilog" Version="4.3.0" />
   </ItemGroup>
 

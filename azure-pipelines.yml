@@ -2,60 +2,69 @@ trigger:
   branches:
     include:
       - master
+      - dev
 
 pool:
   vmImage: ubuntu-latest
 
 variables:
-  AWS_REGION: us-east-1
-  ECR_REGISTRY: 798229612288.dkr.ecr.us-east-1.amazonaws.com
-  # AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY são variáveis secretas do pipeline
-  # (Pipelines > Edit > Variables), NÃO ficam neste arquivo. User: giom-ci-deploy,
-  # permissão só de push nos repositórios giom-instituto/giom-ministerio.
+  # AWS_REGION/ECR_REGISTRY vêm do group giom-aws (não variam por branch — mesma conta/registro
+  # pra dev e prod). AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY continuam como variáveis secretas
+  # do pipeline (Pipelines > Edit > Variables), NÃO ficam neste arquivo nem em variable group.
+  # User: giom-ci-deploy, permissão só de push nos repositórios giom-instituto/giom-ministerio
+  # e ecs:UpdateService nos dois services do AgenteInstituto.
+  - group: giom-aws
+  #
+  # branch dev publica recursos -dev (imagem :dev, service giom-agenteinstituto-dev-service);
+  # master publica prod (imagem :latest, service giom-agenteinstituto-service) e só recebe
+  # commits via PR aprovado (branch policy no Azure Repos). IMAGE_TAG/AGENTEINSTITUTO_SERVICE
+  # vêm de variable groups (Pipelines > Library) em vez de hardcoded aqui — trocar de ambiente
+  # (ou adicionar um terceiro) vira só um novo group, sem editar este arquivo.
+  #
+  # Ambos os "if" abaixo comparam com igualdade explícita (nunca "!= dev") — sem isso, uma
+  # branch qualquer (ex.: enfileirada manualmente pra validar este YAML) cairia no "senão" e
+  # seria tratada como prod, forçando deploy no service de produção sem querer. O job abaixo
+  # também só roda em dev/master (condition) — qualquer outra branch simplesmente não builda
+  # nem publica nada.
+  - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+      - group: giom-dev
+  - ${{ if eq(variables['Build.SourceBranchName'], 'master') }}:
+      - group: giom-prod
 
-steps:
-  - script: |
-      command -v aws >/dev/null 2>&1 || pip install --user awscli
-      echo "##vso[task.prependpath]$HOME/.local/bin"
-    displayName: 'Garantir AWS CLI disponível'
+jobs:
+  - job: BuildAndDeploy
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    steps:
+      - script: |
+          command -v aws >/dev/null 2>&1 || pip install --user awscli
+          echo "##vso[task.prependpath]$HOME/.local/bin"
+        displayName: 'Garantir AWS CLI disponível'
 
-  - script: |
-      aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-    displayName: 'Login no ECR'
-    env:
-      AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-      AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+      - script: |
+          aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+        displayName: 'Login no ECR'
+        env:
+          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
-  - script: |
-      docker build -f src/Giom.VideoManager.Instituto.Worker/Dockerfile \
-        --build-arg BUILD_ID=$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-instituto:latest .
-      docker push $(ECR_REGISTRY)/giom-instituto:$(Build.BuildId)
-      docker push $(ECR_REGISTRY)/giom-instituto:latest
-    displayName: 'Build e push — GiomInstituto'
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-instituto
+          dockerfilePath: src/Giom.VideoManager.Instituto.Worker/Dockerfile
 
-  - script: |
-      docker build -f src/Giom.VideoManager.Ministerio.Worker/Dockerfile \
-        --build-arg BUILD_ID=$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-ministerio:latest .
-      docker push $(ECR_REGISTRY)/giom-ministerio:$(Build.BuildId)
-      docker push $(ECR_REGISTRY)/giom-ministerio:latest
-    displayName: 'Build e push — GiomMinisterio'
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-ministerio
+          dockerfilePath: src/Giom.VideoManager.Ministerio.Worker/Dockerfile
 
-  - script: |
-      docker build -f src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile \
-        --build-arg BUILD_ID=$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId) \
-        -t $(ECR_REGISTRY)/giom-agenteinstituto:latest .
-      docker push $(ECR_REGISTRY)/giom-agenteinstituto:$(Build.BuildId)
-      docker push $(ECR_REGISTRY)/giom-agenteinstituto:latest
-    displayName: 'Build e push — GiomAgenteInstituto'
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-agenteinstituto
+          dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
 
-  - script: |
-      aws ecs update-service --cluster giom-cluster --service giom-agenteinstituto-service --force-new-deployment --region $(AWS_REGION)
-    displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
-    env:
-      AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-      AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+      - script: |
+          aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)
+        displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
+        env:
+          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)

@@ -8,7 +8,7 @@ using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Ministerio.Worker;
 using Serilog;
 
-var host = Host.CreateDefaultBuilder(args)
+using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
         config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
@@ -25,7 +25,8 @@ var host = Host.CreateDefaultBuilder(args)
             .Enrich.WithMachineName()
             .Enrich.WithThreadId()
             .Enrich.With<ShortSourceContextEnricher>()
-            .ConfigureSentry(context.Configuration);
+            .Enrich.With<SessionContextEnricher>()
+            .AddSentrySink(context.Configuration);
     })
     .ConfigureServices((ctx, services) =>
     {
@@ -36,12 +37,14 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddTranscriptionService(config);  // YouTubeCaption por padrão
         services.AddSummaryService(config);        // Claude por padrão
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
-        services.AddTracingService();              // Sentry Performance — quebra de tempo por página/vídeo
+        services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
         services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo)
+        services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        // Handler específico do Ministério
-        services.AddSingleton<IVideoHandler, MinisterioVideoHandler>();
+        // Processador real do Ministério — quem de fato roda dentro de VideoQueueConsumer
+        // (ChannelProcessor fala com FilaVideoHandler, registrado em AddChannelProcessor)
+        services.AddSingleton<IVideoProcessador, MinisterioVideoHandler>();
     })
     .Build();
 
@@ -51,5 +54,16 @@ var channels = new[]
     new ChannelConfig("UCyHMyZH5oon8jW7y_yMRstQ", null, "Ministério Giom", Mine: false),
 };
 
+// StartAsync/StopAsync (não só resolver os serviços direto) — sem isso o IHostedService que sobe
+// o TracerProvider do OpenTelemetry (registrado em AddSentryTracing) nunca roda, e todo Activity
+// vira no-op (ActivitySource.StartActivity sempre devolve null).
+await host.StartAsync();
+
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
 await processor.RunAsync(channels);
+
+// Drena a fila (US #39/#40) — mesma execução processa o que a descoberta acabou de publicar.
+var consumidor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.VideoQueueConsumer>();
+await consumidor.ConsumirAsync();
+
+await host.StopAsync();

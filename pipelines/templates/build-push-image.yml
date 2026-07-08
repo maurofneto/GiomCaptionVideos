@@ -1,0 +1,15 @@
+parameters:
+  - name: serviceName
+    type: string
+  - name: dockerfilePath
+    type: string
+
+steps:
+  - script: |
+      docker build -f ${{ parameters.dockerfilePath }} \
+        --build-arg BUILD_ID=$(Build.BuildId) \
+        -t $(ECR_REGISTRY)/${{ parameters.serviceName }}:$(Build.BuildId) \
+        -t $(ECR_REGISTRY)/${{ parameters.serviceName }}:$(IMAGE_TAG) .
+      docker push $(ECR_REGISTRY)/${{ parameters.serviceName }}:$(Build.BuildId)
+      docker push $(ECR_REGISTRY)/${{ parameters.serviceName }}:$(IMAGE_TAG)
+    displayName: 'Build e push — ${{ parameters.serviceName }}'
