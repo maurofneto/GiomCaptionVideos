@@ -26,8 +26,10 @@ Sempre parte de `dev` atualizado (`git fetch origin dev` antes de criar a branch
 **Branch empilhada**: quando uma Feature depende de código de outra ainda não mergeada em
 `dev` (ex: Feature #34 — DLQ/retry — depende das filas por etapa da Feature #33), a nova
 worktree/branch parte da branch da feature anterior, não de `dev`, e a PR é aberta contra
-essa branch (não contra `dev`). Quando a PR de base mesclar em `dev`, a PR empilhada passa a
-apontar pra `dev` automaticamente.
+essa branch (não contra `dev`). **O retarget pra `dev` depois que a PR-base mescla NÃO é
+automático** (confirmado na prática — PR #13 ficou apontando pra uma branch já mergeada até
+alguém notar e corrigir na mão) — sempre conferir e retargetar manualmente (ver skill
+`criar-pr-template`).
 
 ## Pull Requests
 
