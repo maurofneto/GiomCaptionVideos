@@ -5,6 +5,26 @@ description: Consulta ou atualiza o status de work items no Azure Boards deste p
 
 # Atualizar / consultar o Azure Boards
 
+## Use o MCP `azure-devops` — não `az boards`
+
+O MCP `azure-devops` (configurado em `.mcp.json`) lê e escreve UTF-8 corretamente (confirmado
+com títulos cheios de acento) — nada do workaround de PowerShell + `Out-File` + leitura de
+arquivo que era obrigatório com `az boards query` (que corrompe acento direto no Bash). Use:
+
+```
+mcp__azure-devops__list_work_items
+  projectId: "Giom"
+  wiql: "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [System.Parent] FROM WorkItems WHERE [System.TeamProject] = 'Giom' AND ..."
+```
+
+**Cuidado**: `list_work_items` parece devolver só um subconjunto dos campos por item (título,
+estado, `assignedTo` quando existe) mesmo pedindo mais colunas no `SELECT` — se precisar de um
+campo específico que não veio (ex: `System.WorkItemType`, `System.Parent`), busque o item
+individual com `mcp__azure-devops__get_work_item(workItemId, expand: "fields")`.
+
+Regra do WIQL (independe do cliente): não dá pra usar `ORDER BY` num campo não-ordenável como
+`[System.Parent]` — tira o erro "field cannot be sorted by" se acontecer.
+
 ## Cache local (`.claude/cache/board.json`) — leia primeiro, sincronize sempre que escrever
 
 Consultar o board sempre do zero (WIQL + parse) custa uma ida-e-volta e um pedaço de contexto
@@ -17,9 +37,9 @@ muda por fora do meu controle também (o usuário edita direto na UI, outro proc
 cache sem validade mente com confiança. O padrão certo:
 
 - **Leitura**: se `.claude/cache/board.json` existe e tem um `lastSynced` de menos de ~1 dia
-  (ou da mesma sessão), responda a partir dele — sem chamar `az` de novo. Se não existir, ou
+  (ou da mesma sessão), responda a partir dele — sem consultar de novo. Se não existir, ou
   estiver mais velho que isso, ou o usuário pedir explicitamente ("confere de novo",
-  "atualiza o cache"), rode a query fresca (seção abaixo) e regrave o cache antes de
+  "atualiza o cache"), rode a query fresca (`list_work_items`) e regrave o cache antes de
   responder.
 - **Escrita**: toda vez que eu mudar o estado de um item de verdade (seção "Atualizar
   estado"), atualizo o Azure **e** o cache no mesmo passo — nunca deixo o cache desatualizado
@@ -34,46 +54,40 @@ cache sem validade mente com confiança. O padrão certo:
   }
   ```
 
-## Cuidado com encoding — sempre via PowerShell + arquivo
-
-`az boards query` rodado direto no Bash (Git Bash) corrompe acentuação UTF-8 na saída
-(vira `�`). **Sempre** rode a consulta via PowerShell redirecionando pra um arquivo, depois
-leia o arquivo com a ferramenta de leitura — nunca printe o resultado direto no bash:
-
-```powershell
-$wiql = "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State] FROM WorkItems WHERE [System.TeamProject] = 'Giom' AND [System.State] = 'Active'"
-az boards query --wiql $wiql --output json | Out-File -Encoding utf8 <caminho-scratchpad>/board.json
-```
-Depois leia `<caminho-scratchpad>/board.json` com a ferramenta de leitura de arquivo.
-
-Regra do WIQL: não dá pra usar `ORDER BY` num campo não-ordenável como `[System.Parent]` —
-tira o erro "field cannot be sorted by" se acontecer.
-
 ## Consultar status/prioridade
 
-Depois de rodar a query acima, tipicamente filtrando por `[System.State]` (`New`, `Active`,
-`Resolved`, `Closed`) ou por `[System.Parent] = <id>` pra ver a árvore de um Épico/Feature.
-Ao reportar pro usuário, note explicitamente se algo parece **desatualizado** — é comum um
-item continuar `New` mesmo com o trabalho já mergeado em `dev`, porque ninguém fecha o work
-item manualmente depois do merge.
+Tipicamente filtrando por `[System.State]` (`New`, `Active`, `Resolved`, `Closed`) ou por
+`[System.Parent] = <id>` pra ver a árvore de um Épico/Feature. Ao reportar pro usuário, note
+explicitamente se algo parece **desatualizado** — é comum um item continuar `New` mesmo com o
+trabalho já mergeado em `dev`, porque ninguém fecha o work item manualmente depois do merge.
 
 ## Atualizar estado
 
-```bash
-az boards work-item update --id <id> --state <estado>
 ```
-Estados válidos: `New`, `Active`, `Resolved`, `Closed` (varia por tipo de work item, mas esses
-cobrem o caso comum). **Confirme com o usuário quais IDs fechar antes de rodar em lote** — não
-presuma que "US relacionada" significa todos os work items da Feature inteira; às vezes só a
-US específica que foi entregue deve fechar, deixando as irmãs em aberto. Depois de cada
+mcp__azure-devops__update_work_item
+  workItemId: <id>
+  state: "<Active|Resolved|Closed|...>"
+```
+Estados válidos variam por tipo de work item, mas `New`/`Active`/`Resolved`/`Closed` cobrem o
+caso comum. **Confirme com o usuário quais IDs fechar antes de rodar em lote** — não presuma
+que "US relacionada" significa todos os work items da Feature inteira; às vezes só a US
+específica que foi entregue deve fechar, deixando as irmãs em aberto. Depois de cada
 atualização bem-sucedida, atualize o item correspondente em `.claude/cache/board.json` (ou
 apague o cache pra forçar um refresh completo na próxima leitura, se forem várias mudanças).
 
-## Se o `az` falhar com erro de SSL/certificado
+## Se precisar do `az boards` como fallback
 
-`SSLError: CERTIFICATE_VERIFY_FAILED` costuma ser proxy/VPN local, não um problema de
-configuração do projeto — não é algo pra "resolver" desabilitando verificação de certificado.
-Reporte pro usuário e sugira checar VPN/proxy; não insista tentando de novo repetidamente.
+O MCP cobre leitura/escrita de work item; se algo faltar nele (ex: um recurso muito específico
+do board que o MCP não expõe), `az boards query`/`work-item update` continuam funcionando, mas
+**voltam a ter o problema de encoding** — nesse caso, rode via PowerShell redirecionando pra
+arquivo, nunca prints direto no Bash:
+```powershell
+$wiql = "..."
+az boards query --wiql $wiql --output json | Out-File -Encoding utf8 <caminho-scratchpad>/board.json
+```
+Se o `az` falhar com `SSLError: CERTIFICATE_VERIFY_FAILED`, é proxy/VPN local, não um problema
+do projeto — não tente "resolver" desabilitando verificação de certificado; reporte pro
+usuário e sugira checar VPN/proxy.
 
 ## Depois de um merge
 
