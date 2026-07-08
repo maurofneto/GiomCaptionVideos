@@ -42,7 +42,11 @@ public class YouTubeCaptionService : ICaptionService
         var caption = listResponse.Items?.FirstOrDefault(c => c.Snippet?.Status != "failed");
         if (caption == null)
         {
-            _logger.LogDebug("Nenhuma legenda disponível para vídeo {VideoId}", video.Id);
+            // Era LogDebug — invisível em prod (MinimumLevel=Information), o que escondia por
+            // completo a causa de vídeos que ficam incompletos pra sempre (Bug #100). O handler
+            // que chama isso já loga um Warning com o título quando Transcricao continua null —
+            // aqui fica em Information pra não duplicar o nível de alerta, só dar o motivo exato.
+            _logger.LogInformation("Nenhuma legenda disponível para vídeo {VideoId}", video.Id);
             return null;
         }
 
