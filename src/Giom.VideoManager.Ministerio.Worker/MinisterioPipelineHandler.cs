@@ -10,24 +10,40 @@ using Microsoft.Extensions.Options;
 namespace Giom.VideoManager.Ministerio.Worker;
 
 /// <summary>
-/// Orquestrador orientado a eventos do Ministério (Feature #33, US #41/#42/#43) — reaproveita os
-/// mesmos serviços que <see cref="MinisterioVideoHandler"/> já usa (esta classe não é tocada,
-/// continua servindo só de IVideoProcessador/IsRelevant pro FilaVideoHandler). Ministério só tem
-/// 2 etapas (Transcrição + Resumo) — não implementa IEtapaCategorizacaoHandler/
-/// IEtapaEmbeddingHandler, não existem essas filas/consumers pro Ministério (ISP).
+/// Orquestrador orientado a eventos do Ministério (Feature #33, US #41/#42/#43) — único handler
+/// ativo do canal. <see cref="MinisterioVideoHandler"/> fica no repositório só de histórico/
+/// rollback (não é tocado, não é registrado em nenhum DI, não roda mais) — IVideoProcessador
+/// só existia pra distinguir "quem enfileira" de "quem processa de verdade", sem sentido agora
+/// que os dois são a mesma classe, então IsRelevant vive aqui direto.
+/// Dono da própria topologia — implementa IVideoHandler diretamente, sem depender de um
+/// FilaVideoHandler genérico compartilhado (ver InstitutoPipelineHandler pro raciocínio completo).
+/// Ministério só tem 2 etapas (Transcrição + Resumo) — não implementa
+/// IEtapaCategorizacaoHandler/IEtapaEmbeddingHandler, não existem essas filas/consumers pro
+/// Ministério (ISP).
 /// </summary>
 public class MinisterioPipelineHandler(
     IVideoRepository videoRepository,
     ICaptionService captionService,
     IResumoService resumoService,
     IOptions<ProcessingOptions> options,
+    [FromKeyedServices("transcricao")] IFilaPublisher<VideoEtapaMensagem> transcricaoPublisher,
     [FromKeyedServices("resumo")] IFilaPublisher<VideoEtapaMensagem> resumoPublisher,
     ISessionContext sessionContext,
     ITracingService tracingService,
     ILogger<MinisterioPipelineHandler> logger)
-    : IEtapaTranscricaoHandler, IEtapaResumoHandler
+    : IVideoHandler, IEtapaTranscricaoHandler, IEtapaResumoHandler
 {
     private readonly ProcessingOptions _options = options.Value;
+
+    /// <summary>Mesmo critério de MinisterioVideoHandler.IsRelevant — título indica culto/ministério.</summary>
+    public bool IsRelevant(Video video)
+    {
+        var title = video.Title.ToUpperInvariant();
+        return title.Contains("CULTO") || title.Contains("MINISTÉRIO") || title.StartsWith("GIOM");
+    }
+
+    public Task HandleAsync(Video video, CancellationToken ct = default) =>
+        transcricaoPublisher.PublicarAsync(new VideoEtapaMensagem(video, sessionContext.Atual, tracingService.CapturarContextoAtual()), ct);
 
     async Task IEtapaTranscricaoHandler.ProcessarAsync(Video video, CancellationToken ct)
     {

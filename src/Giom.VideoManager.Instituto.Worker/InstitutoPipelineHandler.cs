@@ -11,17 +11,25 @@ using Microsoft.Extensions.Options;
 namespace Giom.VideoManager.Instituto.Worker;
 
 /// <summary>
-/// Orquestrador orientado a eventos do Instituto (Feature #33, US #41/#42/#43) — reaproveita os
-/// mesmos serviços de domínio que <see cref="InstitutoVideoHandler"/> já usa (esta classe não é
-/// tocada, continua servindo só de IVideoProcessador/IsRelevant pro FilaVideoHandler), só que cada
-/// etapa vira sua própria mensagem/fila em vez de tudo numa chamada só.
+/// Orquestrador orientado a eventos do Instituto (Feature #33, US #41/#42/#43) — único handler
+/// ativo do canal. <see cref="InstitutoVideoHandler"/> fica no repositório só de histórico/
+/// rollback (não é tocado, não é registrado em nenhum DI, não roda mais) — o papel de
+/// IVideoProcessador que existia só pra distinguir "quem enfileira" de "quem processa de verdade"
+/// não faz mais sentido agora que os dois são a mesma classe, então IsRelevant vive aqui direto,
+/// sem indireção.
+/// Cada canal é DONO da própria topologia — não existe mais um FilaVideoHandler genérico
+/// decidindo por todo mundo "descoberta sempre publica na fila X": este orquestrador implementa
+/// IVideoHandler diretamente e decide sozinho o que fazer com um vídeo recém-descoberto (aqui:
+/// publica pra própria etapa de Transcrição). Um canal futuro que não precise de Transcrição como
+/// primeira etapa (ex: já recebe o conteúdo pronto, ou quer pular direto pro Resumo) implementa
+/// isso do jeito que quiser, sem tocar nesta classe nem em nenhuma abstração compartilhada.
 /// Dependências reais entre etapas (não é uma corrente linear): Resumo depende de Transcrição;
 /// Categorização depende de Resumo; Embedding depende só de Transcrição (indexa a transcrição
 /// completa, não o resumo) — por isso Transcrição faz FAN-OUT pra Resumo E Embedding em paralelo,
 /// não uma corrente única.
-/// Cada ProcessarAsync reaplica a mesma sessão/traceparent capturados pelo consumer (via
-/// ISessionContext.Atual/ITracingService.CapturarContextoAtual) na mensagem da PRÓXIMA etapa —
-/// sem isso a árvore de spans e as propriedades do Helicone se perderiam a cada hop.
+/// Cada método reaplica a mesma sessão/traceparent capturados (via ISessionContext.Atual/
+/// ITracingService.CapturarContextoAtual) na mensagem da PRÓXIMA etapa — sem isso a árvore de
+/// spans e as propriedades do Helicone se perderiam a cada hop.
 /// </summary>
 public class InstitutoPipelineHandler(
     IVideoRepository videoRepository,
@@ -30,15 +38,22 @@ public class InstitutoPipelineHandler(
     ICategorizacaoService categorizacaoService,
     IEmbeddingService embeddingService,
     IOptions<ProcessingOptions> options,
+    [FromKeyedServices("transcricao")] IFilaPublisher<VideoEtapaMensagem> transcricaoPublisher,
     [FromKeyedServices("resumo")] IFilaPublisher<VideoEtapaMensagem> resumoPublisher,
     [FromKeyedServices("categorizacao")] IFilaPublisher<VideoEtapaMensagem> categorizacaoPublisher,
     [FromKeyedServices("embedding")] IFilaPublisher<VideoEtapaMensagem> embeddingPublisher,
     ISessionContext sessionContext,
     ITracingService tracingService,
     ILogger<InstitutoPipelineHandler> logger)
-    : IEtapaTranscricaoHandler, IEtapaResumoHandler, IEtapaCategorizacaoHandler, IEtapaEmbeddingHandler
+    : IVideoHandler, IEtapaTranscricaoHandler, IEtapaResumoHandler, IEtapaCategorizacaoHandler, IEtapaEmbeddingHandler
 {
     private readonly ProcessingOptions _options = options.Value;
+
+    /// <summary>Mesmo critério de InstitutoVideoHandler.IsRelevant — vídeos ao vivo não listados.</summary>
+    public bool IsRelevant(Video video) => video.Type == VideoType.Live && video.PrivacyStatus == "unlisted";
+
+    public Task HandleAsync(Video video, CancellationToken ct = default) =>
+        PublicarAsync(transcricaoPublisher, video, ct);
 
     async Task IEtapaTranscricaoHandler.ProcessarAsync(Video video, CancellationToken ct)
     {

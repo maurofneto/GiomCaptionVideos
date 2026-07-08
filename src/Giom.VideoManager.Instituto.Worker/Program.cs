@@ -43,26 +43,33 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
         services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo/categorização)
-        services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        // Processador real do Instituto — só usado por FilaVideoHandler pra IsRelevant, quem
-        // processa de verdade agora é InstitutoPipelineHandler (Feature #33)
-        services.AddSingleton<IVideoProcessador, InstitutoVideoHandler>();
-
-        // Filas de etapa (Feature #33 — US #41/#42/#43): Resumo e Embedding dependem só de
-        // Transcrição (fan-out), Categorização depende de Resumo.
-        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
-        services.AddFilaVideoEtapa("categorizacao", config, "FilaCategorizacao");
-        services.AddFilaVideoEtapa("embedding", config, "FilaEmbedding");
-
-        // Um InstitutoPipelineHandler só, compartilhado pelas 4 interfaces de etapa — ele decide
-        // o que publicar em seguida, sabendo o ProcessingOptions do canal.
+        // Um InstitutoPipelineHandler só, compartilhado por TODAS as interfaces de etapa (incluindo
+        // IVideoHandler — dono da própria topologia de descoberta, sem FilaVideoHandler genérico).
         services.AddSingleton<InstitutoPipelineHandler>();
+        services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
         services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
         services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
         services.AddSingleton<IEtapaCategorizacaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
         services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+
+        // Filas + consumers de etapa (Feature #33 — US #41/#42/#43): Transcrição não é caso
+        // especial, usa o mesmo mecanismo das demais — "Fila" é só o nome da seção raiz (US #39/
+        // #40). Resumo e Embedding dependem só de Transcrição (fan-out), Categorização depende de
+        // Resumo. AddEtapaConsumer registra o EtapaQueueConsumer pronto (keyed), sem montar a
+        // classe na mão no fim do arquivo.
+        services.AddFilaVideoEtapa("transcricao", config, "Fila");
+        services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
+        services.AddEtapaConsumer<IEtapaResumoHandler>("resumo", "video.resumo", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa("categorizacao", config, "FilaCategorizacao");
+        services.AddEtapaConsumer<IEtapaCategorizacaoHandler>("categorizacao", "video.categorizacao", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa("embedding", config, "FilaEmbedding");
+        services.AddEtapaConsumer<IEtapaEmbeddingHandler>("embedding", "video.embedding", (h, v, ct) => h.ProcessarAsync(v, ct));
     })
     .Build();
 
@@ -83,45 +90,12 @@ await processor.RunAsync(channels);
 // Feature #33 — 4 consumers (Transcrição/Resumo/Categorização/Embedding) rodando concorrentes,
 // não em sequência: o objetivo é Resumo/Embedding começarem assim que o PRIMEIRO vídeo estiver
 // transcrito, não esperar o lote inteiro da Transcrição terminar (isso anularia o ganho da US
-// #41/#43). Transcrição não é caso especial — é só mais uma etapa, drena a MESMA fila de
-// descoberta (IFilaConsumer<VideoEtapaMensagem> não-keyed, registrado por AddFilaVideo) via o
-// mesmo EtapaQueueConsumer genérico usado pelas demais.
-var transcricaoConsumer = new EtapaQueueConsumer(
-    host.Services.GetRequiredService<IFilaConsumer<VideoEtapaMensagem>>(),
-    (video, ct) => host.Services.GetRequiredService<IEtapaTranscricaoHandler>().ProcessarAsync(video, ct),
-    "video.transcricao",
-    host.Services.GetRequiredService<ITracingService>(),
-    host.Services.GetRequiredService<ISessionContext>(),
-    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
-
-var resumoConsumer = new EtapaQueueConsumer(
-    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("resumo"),
-    (video, ct) => host.Services.GetRequiredService<IEtapaResumoHandler>().ProcessarAsync(video, ct),
-    "video.resumo",
-    host.Services.GetRequiredService<ITracingService>(),
-    host.Services.GetRequiredService<ISessionContext>(),
-    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
-
-var categorizacaoConsumer = new EtapaQueueConsumer(
-    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("categorizacao"),
-    (video, ct) => host.Services.GetRequiredService<IEtapaCategorizacaoHandler>().ProcessarAsync(video, ct),
-    "video.categorizacao",
-    host.Services.GetRequiredService<ITracingService>(),
-    host.Services.GetRequiredService<ISessionContext>(),
-    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
-
-var embeddingConsumer = new EtapaQueueConsumer(
-    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("embedding"),
-    (video, ct) => host.Services.GetRequiredService<IEtapaEmbeddingHandler>().ProcessarAsync(video, ct),
-    "video.embedding",
-    host.Services.GetRequiredService<ITracingService>(),
-    host.Services.GetRequiredService<ISessionContext>(),
-    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
-
+// #41/#43). Transcrição não é caso especial — é só mais uma etapa keyed ("transcricao"), mesmo
+// EtapaQueueConsumer genérico usado pelas demais — já pronto, registrado por AddEtapaConsumer.
 await Task.WhenAll(
-    transcricaoConsumer.ConsumirAsync(),
-    resumoConsumer.ConsumirAsync(),
-    categorizacaoConsumer.ConsumirAsync(),
-    embeddingConsumer.ConsumirAsync());
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("transcricao").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("resumo").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("categorizacao").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("embedding").ConsumirAsync());
 
 await host.StopAsync();

@@ -41,20 +41,22 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
         services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo)
-        services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        // Processador real do Ministério — só usado por FilaVideoHandler pra IsRelevant, quem
-        // processa de verdade agora é MinisterioPipelineHandler (Feature #33)
-        services.AddSingleton<IVideoProcessador, MinisterioVideoHandler>();
-
-        // Fila de etapa (Feature #33 — US #41/#42/#43): Ministério só tem Transcrição+Resumo,
-        // não implementa Categorização/Embedding (ISP).
-        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
-
+        // Dono da própria topologia de descoberta (IVideoHandler), sem FilaVideoHandler genérico.
         services.AddSingleton<MinisterioPipelineHandler>();
+        services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
         services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
         services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
+
+        // Filas + consumers de etapa (Feature #33 — US #41/#42/#43): Transcrição não é caso
+        // especial, usa o mesmo mecanismo das demais — "Fila" é só o nome da seção raiz (US #39/
+        // #40). Ministério só tem Transcrição+Resumo, não implementa Categorização/Embedding (ISP).
+        services.AddFilaVideoEtapa("transcricao", config, "Fila");
+        services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
+        services.AddEtapaConsumer<IEtapaResumoHandler>("resumo", "video.resumo", (h, v, ct) => h.ProcessarAsync(v, ct));
     })
     .Build();
 
@@ -74,27 +76,9 @@ await processor.RunAsync(channels);
 
 // Feature #33 — 2 consumers (Transcrição/Resumo) rodando concorrentes, não em sequência: o
 // objetivo é o Resumo começar assim que o PRIMEIRO vídeo estiver transcrito, não esperar o lote
-// inteiro terminar. Transcrição não é caso especial — é só mais uma etapa, drena a MESMA fila de
-// descoberta (IFilaConsumer<VideoEtapaMensagem> não-keyed) via o mesmo EtapaQueueConsumer
-// genérico usado pelo Resumo. Ministério não tem Categorização/Embedding.
-var transcricaoConsumer = new EtapaQueueConsumer(
-    host.Services.GetRequiredService<IFilaConsumer<VideoEtapaMensagem>>(),
-    (video, ct) => host.Services.GetRequiredService<IEtapaTranscricaoHandler>().ProcessarAsync(video, ct),
-    "video.transcricao",
-    host.Services.GetRequiredService<ITracingService>(),
-    host.Services.GetRequiredService<ISessionContext>(),
-    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
-
-var resumoConsumer = new EtapaQueueConsumer(
-    host.Services.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>("resumo"),
-    (video, ct) => host.Services.GetRequiredService<IEtapaResumoHandler>().ProcessarAsync(video, ct),
-    "video.resumo",
-    host.Services.GetRequiredService<ITracingService>(),
-    host.Services.GetRequiredService<ISessionContext>(),
-    host.Services.GetRequiredService<ILogger<EtapaQueueConsumer>>());
-
+// inteiro terminar. Ministério não tem Categorização/Embedding.
 await Task.WhenAll(
-    transcricaoConsumer.ConsumirAsync(),
-    resumoConsumer.ConsumirAsync());
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("transcricao").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("resumo").ConsumirAsync());
 
 await host.StopAsync();

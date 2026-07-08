@@ -4,6 +4,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -11,35 +12,21 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Fila:Sqs — QueueName/Region. Credenciais resolvidas do ambiente (IAM role/env), nunca aqui. A fila é criada automaticamente se não existir (ver SqsFilaCanal) — não precisa provisionar via console/CLI antes. Fila de descoberta/Transcrição (Feature #33 trata Transcrição como só mais uma etapa, mesmo tipo de mensagem das demais).</summary>
-    public static IServiceCollection AddSqsFila(this IServiceCollection services, IConfiguration config)
-    {
-        services.Configure<SqsOptions>(config.GetSection("Fila:Sqs"));
-
-        services.AddSingleton<IAmazonSQS>(sp =>
-        {
-            var region = config["Fila:Sqs:Region"] ?? "us-east-1";
-            return new AmazonSQSClient(RegionEndpoint.GetBySystemName(region));
-        });
-
-        services.AddSingleton<SqsFilaCanal>();
-        services.AddSingleton<IFilaPublisher<VideoEtapaMensagem>, SqsFilaPublisher<VideoEtapaMensagem>>();
-        services.AddSingleton<IFilaConsumer<VideoEtapaMensagem>, SqsFilaConsumer<VideoEtapaMensagem>>();
-
-        return services;
-    }
-
     /// <summary>
-    /// Registra uma fila de etapa (Feature #33 — Resumo/Categorização/Embedding) como Keyed
-    /// Service (.NET 9) — várias filas do mesmo tipo de mensagem (VideoEtapaMensagem) coexistindo
-    /// sem colidir, cada uma com seu próprio SqsFilaCanal/QueueName. Reaproveita o mesmo
-    /// IAmazonSQS singleton já registrado por AddSqsFila (mesma região, cliente reutilizável).
-    /// Fila se auto-cria no primeiro uso, igual à fila de ingestão.
+    /// Registra uma fila de etapa (Feature #33 — Transcrição/Resumo/Categorização/Embedding, todas
+    /// tratadas igual, sem caso especial) como Keyed Service (.NET 9) — várias filas do mesmo tipo
+    /// de mensagem (VideoEtapaMensagem) coexistindo sem colidir, cada uma com seu próprio
+    /// SqsFilaCanal/QueueName. TryAddSingleton no IAmazonSQS — um cliente só, reutilizado por
+    /// todas as chamadas a este método (uma por etapa). Fila se auto-cria no primeiro uso — não
+    /// precisa provisionar via console/CLI antes.
     /// </summary>
     public static IServiceCollection AddSqsFilaEtapa(this IServiceCollection services, string chave, IConfiguration config, string sectionPath)
     {
         var options = config.GetSection(sectionPath).Get<SqsOptions>() ?? new SqsOptions();
         var iOptions = Microsoft.Extensions.Options.Options.Create(options);
+
+        services.TryAddSingleton<IAmazonSQS>(_ =>
+            new AmazonSQSClient(RegionEndpoint.GetBySystemName(options.Region)));
 
         services.AddKeyedSingleton<SqsFilaCanal>(chave, (sp, _) => new SqsFilaCanal(sp.GetRequiredService<IAmazonSQS>(), iOptions));
 

@@ -159,20 +159,13 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddTracingService(this IServiceCollection services, IConfiguration config)
         => services.AddSentryTracing(config);
 
-    /// <summary>Fila:Provider — Sqs (padrão), RabbitMq (CloudAMQP/LavinMQ) — fila de ingestão de vídeos (US #39/#40).</summary>
-    public static IServiceCollection AddFilaVideo(this IServiceCollection services, IConfiguration config)
-    {
-        var provider = config["Fila:Provider"] ?? "Sqs";
-        return provider == "RabbitMq"
-            ? services.AddRabbitMqFila(config)
-            : services.AddSqsFila(config);
-    }
-
     /// <summary>
-    /// Fila de etapa (Feature #33 — Resumo/Categorização/Embedding) — registrada como Keyed
-    /// Service (<paramref name="chave"/>, ex: "resumo"), provider decidido dentro da própria seção
-    /// raiz (<paramref name="secaoRaiz"/>:Provider, ex: "FilaResumo:Provider"). Cada canal chama
-    /// isso só pras etapas que usa — Ministério não chama pra "categorizacao"/"embedding".
+    /// Fila de etapa (Feature #33 — Transcrição/Resumo/Categorização/Embedding, todas tratadas
+    /// igual, sem caso especial) — registrada como Keyed Service (<paramref name="chave"/>, ex:
+    /// "transcricao"/"resumo"), provider decidido dentro da própria seção raiz
+    /// (<paramref name="secaoRaiz"/>:Provider, ex: "Fila:Provider"/"FilaResumo:Provider"). Cada
+    /// canal chama isso só pras etapas que usa — Ministério não chama pra
+    /// "categorizacao"/"embedding".
     /// </summary>
     public static IServiceCollection AddFilaVideoEtapa(this IServiceCollection services, string chave, IConfiguration config, string secaoRaiz)
     {

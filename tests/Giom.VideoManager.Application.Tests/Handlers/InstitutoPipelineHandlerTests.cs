@@ -13,11 +13,13 @@ using Xunit;
 namespace Giom.VideoManager.Application.Tests.Handlers;
 
 /// <summary>
-/// InstitutoPipelineHandler é o orquestrador orientado a eventos do Instituto (Feature #33) — não
-/// mexe em InstitutoVideoHandler (que continua servindo só IsRelevant pro FilaVideoHandler).
-/// Estes testes cobrem o fan-out real das dependências entre etapas: Transcrição dispara Resumo
-/// E Embedding em paralelo (Embedding não depende de Resumo), Resumo dispara Categorização,
-/// Categorização/Embedding são terminais (não publicam nada).
+/// InstitutoPipelineHandler é o único handler ativo do Instituto (Feature #33) — implementa
+/// IVideoHandler diretamente (IsRelevant + HandleAsync publica pra própria etapa de Transcrição),
+/// dono da própria topologia de descoberta, sem FilaVideoHandler genérico compartilhado.
+/// InstitutoVideoHandler fica no repositório só de histórico/rollback, não é tocado nem
+/// referenciado aqui. Estes testes cobrem o fan-out real das dependências entre etapas: Transcrição
+/// dispara Resumo E Embedding em paralelo (Embedding não depende de Resumo), Resumo dispara
+/// Categorização, Categorização/Embedding são terminais (não publicam nada).
 /// </summary>
 public class InstitutoPipelineHandlerTests
 {
@@ -30,6 +32,7 @@ public class InstitutoPipelineHandlerTests
         public Mock<IResumoService> ResumoService { get; } = new();
         public Mock<ICategorizacaoService> CategorizacaoService { get; } = new();
         public Mock<IEmbeddingService> EmbeddingService { get; } = new();
+        public FakeFilaPublisher<VideoEtapaMensagem> TranscricaoPublisher { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> ResumoPublisher { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> CategorizacaoPublisher { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> EmbeddingPublisher { get; } = new();
@@ -56,6 +59,7 @@ public class InstitutoPipelineHandlerTests
                 CategorizacaoService.Object,
                 EmbeddingService.Object,
                 Microsoft.Extensions.Options.Options.Create(Options),
+                TranscricaoPublisher,
                 ResumoPublisher,
                 CategorizacaoPublisher,
                 EmbeddingPublisher,
@@ -63,6 +67,36 @@ public class InstitutoPipelineHandlerTests
                 Tracing,
                 NullLogger<InstitutoPipelineHandler>.Instance);
         }
+    }
+
+    [Theory]
+    [InlineData(Domain.Enums.VideoType.Live, "unlisted", true)]
+    [InlineData(Domain.Enums.VideoType.Upload, "unlisted", false)]
+    [InlineData(Domain.Enums.VideoType.Live, "public", false)]
+    public void IsRelevant_SoAoVivoENaoListado(Domain.Enums.VideoType type, string privacyStatus, bool esperado)
+    {
+        var video = CriarVideo();
+        video.Type = type;
+        video.PrivacyStatus = privacyStatus;
+
+        Assert.Equal(esperado, new Ambiente().CriarHandler().IsRelevant(video));
+    }
+
+    [Fact]
+    public async Task HandleAsync_PublicaNaEtapaDeTranscricaoComSessaoETraceparent()
+    {
+        var ambiente = new Ambiente();
+        var video = CriarVideo();
+        var sessao = new SessaoObservabilidade("corr-1", "hora", "/caminho", "canal", new Dictionary<string, string> { ["Canal"] = "Canal X" });
+        ambiente.SessionContext.Definir(sessao);
+        ambiente.Tracing.ContextoASimular = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+        await ((IVideoHandler)ambiente.CriarHandler()).HandleAsync(video);
+
+        var mensagem = Assert.Single(ambiente.TranscricaoPublisher.Publicadas);
+        Assert.Same(video, mensagem.Video);
+        Assert.Same(sessao, mensagem.Sessao);
+        Assert.Equal("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", mensagem.TraceParent);
     }
 
     [Fact]

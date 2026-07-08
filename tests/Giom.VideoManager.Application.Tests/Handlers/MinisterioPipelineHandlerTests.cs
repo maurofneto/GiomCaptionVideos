@@ -12,8 +12,10 @@ using Xunit;
 namespace Giom.VideoManager.Application.Tests.Handlers;
 
 /// <summary>
-/// MinisterioPipelineHandler (Feature #33) só tem 2 etapas — não implementa
-/// IEtapaCategorizacaoHandler/IEtapaEmbeddingHandler (ISP), diferente do Instituto.
+/// MinisterioPipelineHandler é o único handler ativo do Ministério (Feature #33) — implementa
+/// IVideoHandler diretamente, dono da própria topologia de descoberta. MinisterioVideoHandler fica
+/// no repositório só de histórico/rollback, não é tocado nem referenciado aqui. Só tem 2 etapas —
+/// não implementa IEtapaCategorizacaoHandler/IEtapaEmbeddingHandler (ISP), diferente do Instituto.
 /// </summary>
 public class MinisterioPipelineHandlerTests
 {
@@ -24,6 +26,7 @@ public class MinisterioPipelineHandlerTests
         public Mock<IVideoRepository> VideoRepository { get; } = new();
         public Mock<ICaptionService> CaptionService { get; } = new();
         public Mock<IResumoService> ResumoService { get; } = new();
+        public FakeFilaPublisher<VideoEtapaMensagem> TranscricaoPublisher { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> ResumoPublisher { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeTracingService Tracing { get; } = new();
@@ -39,11 +42,37 @@ public class MinisterioPipelineHandlerTests
                 CaptionService.Object,
                 ResumoService.Object,
                 Microsoft.Extensions.Options.Options.Create(Options),
+                TranscricaoPublisher,
                 ResumoPublisher,
                 SessionContext,
                 Tracing,
                 NullLogger<MinisterioPipelineHandler>.Instance);
         }
+    }
+
+    [Theory]
+    [InlineData("Culto de domingo", true)]
+    [InlineData("Ministério em foco", true)]
+    [InlineData("GIOM ao vivo", true)]
+    [InlineData("Aula qualquer", false)]
+    public void IsRelevant_TituloIndicaCultoOuMinisterio(string titulo, bool esperado)
+    {
+        var video = CriarVideo();
+        video.Title = titulo;
+
+        Assert.Equal(esperado, new Ambiente().CriarHandler().IsRelevant(video));
+    }
+
+    [Fact]
+    public async Task HandleAsync_PublicaNaEtapaDeTranscricao()
+    {
+        var ambiente = new Ambiente();
+        var video = CriarVideo();
+
+        await ((IVideoHandler)ambiente.CriarHandler()).HandleAsync(video);
+
+        var mensagem = Assert.Single(ambiente.TranscricaoPublisher.Publicadas);
+        Assert.Same(video, mensagem.Video);
     }
 
     [Fact]
