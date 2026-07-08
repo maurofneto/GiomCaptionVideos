@@ -9,7 +9,7 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 
 /// <summary>
 /// Drena a fila (long polling) até um ReceiveMessage devolver vazio — condizente com "mesma
-/// execução processa o que a descoberta publicou" (ver ChannelProcessor/VideoQueueConsumer).
+/// execução processa o que a descoberta publicou" (ver ChannelProcessor/EtapaQueueConsumer).
 /// Mensagem só é confirmada (deletada) se o handler não lançar; se lançar, a mensagem some do
 /// receive mas continua na fila — expira o VisibilityTimeout e o SQS reentrega sozinho, sem
 /// precisar de nenhuma Dead-Letter Queue dedicada só pra isso funcionar.
