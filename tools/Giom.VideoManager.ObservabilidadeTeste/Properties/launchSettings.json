@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Giom.VideoManager.Observabilidade - Teste": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "teste"
+      }
+    }
+  }
+}
