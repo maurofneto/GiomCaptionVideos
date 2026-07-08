@@ -15,10 +15,10 @@ using Serilog;
 // Mesma composição do Giom.VideoManager.Instituto.Worker (Program.cs) — só troca
 // AddVideoSourceService (YouTube real) pelo SupabaseVideoSource, e roda uma vez só.
 // Objetivo: exercitar o pipeline real (resumo/categorização/embedding, Sentry, Helicone,
-// CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — Resumo/Categorização
-// reaproveitam conteúdo real já gerado no Supabase (mesmo padrão de SupabaseCaptionService),
-// Embedding usa vetores fake (dimensão certa, sem semântica real) e injeta falha determinística
-// por vídeo pra exercitar o retry dinâmico da Feature #34 (ver FakeEmbeddingService).
+// CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — Resumo/Categorização/
+// Embedding reaproveitam conteúdo real já gerado no Supabase (mesmo padrão de
+// SupabaseCaptionService). Embedding também injeta falha determinística por vídeo de origem
+// pra exercitar o retry dinâmico da Feature #34 (ver SupabaseEmbeddingService).
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -52,12 +52,13 @@ using var host = Host.CreateDefaultBuilder(args)
             sp.GetRequiredService<ITelemetriaService>(),
             sp.GetRequiredService<ITracingService>(),
             sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-        // Sem IA nem YouTube: Resumo/Categorização reaproveitam conteúdo real do Supabase
-        // (idêntico ao SupabaseCaptionService pra transcrição); Embedding é fake com falha
-        // determinística por vídeo (ver FakeEmbeddingService) — nada disso chama Claude/OpenAI.
+        // Sem IA nem YouTube: Resumo/Categorização/Embedding reaproveitam conteúdo real já
+        // gerado no Supabase (idêntico ao SupabaseCaptionService pra transcrição) — nada disso
+        // chama Claude/OpenAI. Embedding injeta falha determinística por vídeo de origem (ver
+        // SupabaseEmbeddingService) pra exercitar o retry dinâmico da Feature #34.
         services.AddSingleton<IResumoService, SupabaseResumoService>();
         services.AddSingleton<ICategorizacaoService, SupabaseCategorizacaoService>();
-        services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
+        services.AddSingleton<IEmbeddingService, SupabaseEmbeddingService>();
         // Antes vinha de dentro de AddSummaryService/AddCategorizacaoService (Claude real) —
         // removidos daqui, então precisa ser chamado direto: ISessionContext é usado por
         // SentryTracingService, InstitutoPipelineHandler etc.
