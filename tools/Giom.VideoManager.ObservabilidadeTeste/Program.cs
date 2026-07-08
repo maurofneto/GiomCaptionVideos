@@ -13,12 +13,13 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 
 // Mesma composição do Giom.VideoManager.Instituto.Worker (Program.cs) — só troca
-// AddVideoSourceService (YouTube real) pelo SupabaseVideoSource, e roda uma vez só.
+// AddVideoSourceService (YouTube real) pelo FakeVideoSource, e roda uma vez só.
 // Objetivo: exercitar o pipeline real (resumo/categorização/embedding, Sentry, Helicone,
-// CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — Resumo/Categorização/
-// Embedding reaproveitam conteúdo real já gerado no Supabase (mesmo padrão de
-// SupabaseCaptionService). Embedding também injeta falha determinística por vídeo de origem
-// pra exercitar o retry dinâmico da Feature #34 (ver SupabaseEmbeddingService).
+// CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — todo o CONTEÚDO de
+// entrada (legenda/resumo/categoria/embedding) é 100% sintético (Fake*Service), sem nenhuma
+// leitura no Supabase. A PERSISTÊNCIA continua indo pro Supabase de dev de verdade — é isso
+// que valida span/telemetria/Helicone ponta a ponta. Cada Fake*Service injeta falha
+// determinística por vídeo (ver InjecaoDeFalha) pra exercitar o retry dinâmico da Feature #34.
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -42,23 +43,19 @@ using var host = Host.CreateDefaultBuilder(args)
     {
         var config = ctx.Configuration;
 
-        services.AddPersistence(config);           // Supabase dev — SupabaseVideoSource/SupabaseCaptionService leem daqui, e o vídeo de teste também é gravado aqui de verdade
-        services.AddSingleton<IVideoSourceService, SupabaseVideoSource>();
+        services.AddPersistence(config);           // Supabase dev — só escrita real; conteúdo de entrada é 100% sintético (Fake*Service)
+        services.AddSingleton<IVideoSourceService, FakeVideoSource>();
         // Decorado com TelemetriaCaptionService — igual AddYouTubeCaptionService faz pros
         // providers reais — senão a etapa "transcricao" nunca abre span/métrica nesta ferramenta.
-        services.AddSingleton<SupabaseCaptionService>();
+        services.AddSingleton<FakeCaptionService>();
         services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
-            sp.GetRequiredService<SupabaseCaptionService>(),
+            sp.GetRequiredService<FakeCaptionService>(),
             sp.GetRequiredService<ITelemetriaService>(),
             sp.GetRequiredService<ITracingService>(),
             sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-        // Sem IA nem YouTube: Resumo/Categorização/Embedding reaproveitam conteúdo real já
-        // gerado no Supabase (idêntico ao SupabaseCaptionService pra transcrição) — nada disso
-        // chama Claude/OpenAI. Embedding injeta falha determinística por vídeo de origem (ver
-        // SupabaseEmbeddingService) pra exercitar o retry dinâmico da Feature #34.
-        services.AddSingleton<IResumoService, SupabaseResumoService>();
-        services.AddSingleton<ICategorizacaoService, SupabaseCategorizacaoService>();
-        services.AddSingleton<IEmbeddingService, SupabaseEmbeddingService>();
+        services.AddSingleton<IResumoService, FakeResumoService>();
+        services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
+        services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
         // Antes vinha de dentro de AddSummaryService/AddCategorizacaoService (Claude real) —
         // removidos daqui, então precisa ser chamado direto: ISessionContext é usado por
         // SentryTracingService, InstitutoPipelineHandler etc.
