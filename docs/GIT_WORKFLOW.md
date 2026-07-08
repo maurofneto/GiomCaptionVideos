@@ -23,6 +23,12 @@ git worktree add ../GiomCaptionVideos-worktrees/32-fila-ingestao-desacoplamento 
 Sempre parte de `dev` atualizado (`git fetch origin dev` antes de criar a branch, ou
 `git rebase origin/dev` se a branch já existir e `dev` tiver avançado).
 
+**Branch empilhada**: quando uma Feature depende de código de outra ainda não mergeada em
+`dev` (ex: Feature #34 — DLQ/retry — depende das filas por etapa da Feature #33), a nova
+worktree/branch parte da branch da feature anterior, não de `dev`, e a PR é aberta contra
+essa branch (não contra `dev`). Quando a PR de base mesclar em `dev`, a PR empilhada passa a
+apontar pra `dev` automaticamente.
+
 ## Pull Requests
 
 - Sempre contra `dev` (nunca direto em `master`).
