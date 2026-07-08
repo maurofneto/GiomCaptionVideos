@@ -3,6 +3,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Giom.VideoManager.Application\Giom.VideoManager.Application.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Testes.Comuns\Giom.VideoManager.Testes.Comuns.csproj" />
+    <!-- Feature #33: InstitutoPipelineHandler/MinisterioPipelineHandler vivem nos projetos dos
+         workers (não em Application), mesmo lugar de InstitutoVideoHandler/MinisterioVideoHandler -->
+    <ProjectReference Include="..\..\src\Giom.VideoManager.Instituto.Worker\Giom.VideoManager.Instituto.Worker.csproj" />
+    <ProjectReference Include="..\..\src\Giom.VideoManager.Ministerio.Worker\Giom.VideoManager.Ministerio.Worker.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,26 +2,52 @@ using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Application.Pipeline;
+using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Domain.ValueObjects;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Application;
 
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registra o pipeline de ingestão de vídeos: ChannelProcessor descobre e publica na fila
-    /// (via FilaVideoHandler, o IVideoHandler que injeta), VideoQueueConsumer drena e processa de
-    /// verdade (via IVideoProcessador — US #39/#40). O worker registra só o IVideoProcessador
-    /// concreto (Instituto/Ministério) e a fila (AddFilaVideo); o resto é genérico, daqui.
+    /// Registra o ChannelProcessor genérico — não registra IVideoHandler: cada canal é DONO da
+    /// própria topologia de descoberta (Feature #33) e registra seu próprio
+    /// InstitutoPipelineHandler/MinisterioPipelineHandler como IVideoHandler no Program.cs do
+    /// worker, sem um decorator compartilhado (FilaVideoHandler) impondo o mesmo comportamento
+    /// pra todo canal.
     /// </summary>
     public static IServiceCollection AddChannelProcessor(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<ProcessingOptions>(config.GetSection("ProcessingOptions"));
-        services.AddSingleton<IVideoHandler, FilaVideoHandler>();
         services.AddSingleton<ChannelProcessor>();
-        services.AddSingleton<VideoQueueConsumer>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registra o EtapaQueueConsumer genérico (Feature #33) como Keyed Service, na MESMA chave da
+    /// fila (ver AddFilaVideoEtapa) — reduz o Program.cs de cada worker a 1 linha por etapa, em vez
+    /// de construir a classe na mão com 6 dependências repetidas a cada instância. Chame depois de
+    /// AddFilaVideoEtapa(chave, ...) pra fila e o handler concreto (THandler) já registrados.
+    /// </summary>
+    public static IServiceCollection AddEtapaConsumer<THandler>(
+        this IServiceCollection services,
+        string chave,
+        string nomeSpan,
+        Func<THandler, Video, CancellationToken, Task> processar)
+        where THandler : notnull
+    {
+        services.AddKeyedSingleton<EtapaQueueConsumer>(chave, (sp, key) => new EtapaQueueConsumer(
+            sp.GetRequiredKeyedService<IFilaConsumer<VideoEtapaMensagem>>(key),
+            (video, ct) => processar(sp.GetRequiredService<THandler>(), video, ct),
+            nomeSpan,
+            sp.GetRequiredService<ITracingService>(),
+            sp.GetRequiredService<ISessionContext>(),
+            sp.GetRequiredService<ILogger<EtapaQueueConsumer>>()));
+
         return services;
     }
 

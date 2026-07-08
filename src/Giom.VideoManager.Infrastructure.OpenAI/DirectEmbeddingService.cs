@@ -243,7 +243,10 @@ public class DirectEmbeddingService : IEmbeddingService
             var json = await response.Content.ReadAsStringAsync(ct);
 
             if (!response.IsSuccessStatusCode)
-                throw new HttpRequestException($"OpenAI embeddings falhou: {response.StatusCode} — {json}");
+                // StatusCode explícito no ctor — é o que o SqsFilaConsumer usa pra reconhecer
+                // 429 (rate limit) e aplicar o delay dinâmico (US #44), sem este projeto
+                // conhecer nada de fila/retry.
+                throw new HttpRequestException($"OpenAI embeddings falhou: {response.StatusCode} — {json}", inner: null, statusCode: response.StatusCode);
 
             var result = JsonConvert.DeserializeAnonymousType(json, new
             {

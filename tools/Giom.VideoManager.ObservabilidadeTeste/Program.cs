@@ -3,6 +3,7 @@ using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Telemetria;
@@ -12,10 +13,13 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 
 // Mesma composição do Giom.VideoManager.Instituto.Worker (Program.cs) — só troca
-// AddVideoSourceService (YouTube real) pelo SupabaseVideoSource, e roda uma vez só.
+// AddVideoSourceService (YouTube real) pelo FakeVideoSource, e roda uma vez só.
 // Objetivo: exercitar o pipeline real (resumo/categorização/embedding, Sentry, Helicone,
-// CorrelationId) sem depender do YouTube — usando vídeos/legendas reais já existentes no
-// Supabase (dev), mas devolvidos com Id novo pra sempre reprocessar do zero.
+// CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — todo o CONTEÚDO de
+// entrada (legenda/resumo/categoria/embedding) é 100% sintético (Fake*Service), sem nenhuma
+// leitura no Supabase. A PERSISTÊNCIA continua indo pro Supabase de dev de verdade — é isso
+// que valida span/telemetria/Helicone ponta a ponta. Cada Fake*Service injeta falha
+// determinística por vídeo (ver InjecaoDeFalha) pra exercitar o retry dinâmico da Feature #34.
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -39,26 +43,47 @@ using var host = Host.CreateDefaultBuilder(args)
     {
         var config = ctx.Configuration;
 
-        services.AddPersistence(config);           // Supabase dev — SupabaseVideoSource/SupabaseCaptionService leem daqui, e o vídeo de teste também é gravado aqui de verdade
-        services.AddSingleton<IVideoSourceService, SupabaseVideoSource>();
+        services.AddPersistence(config);           // Supabase dev — só escrita real; conteúdo de entrada é 100% sintético (Fake*Service)
+        services.AddSingleton<IVideoSourceService, FakeVideoSource>();
         // Decorado com TelemetriaCaptionService — igual AddYouTubeCaptionService faz pros
         // providers reais — senão a etapa "transcricao" nunca abre span/métrica nesta ferramenta.
-        services.AddSingleton<SupabaseCaptionService>();
+        services.AddSingleton<FakeCaptionService>();
         services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
-            sp.GetRequiredService<SupabaseCaptionService>(),
+            sp.GetRequiredService<FakeCaptionService>(),
             sp.GetRequiredService<ITelemetriaService>(),
             sp.GetRequiredService<ITracingService>(),
             sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-        services.AddSummaryService(config);        // Claude real — via Helicone
-        services.AddCategorizacaoService(config);  // Claude real — via Helicone
-        services.AddEmbeddingService(config);      // OpenAI real
+        services.AddSingleton<IResumoService, FakeResumoService>();
+        services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
+        services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
+        // Antes vinha de dentro de AddSummaryService/AddCategorizacaoService (Claude real) —
+        // removidos daqui, então precisa ser chamado direto: ISessionContext é usado por
+        // SentryTracingService, InstitutoPipelineHandler etc.
+        services.AddSessionContext();
         services.AddTelemetriaService(config);     // Supabase + Sentry + alerta de gasto
         services.AddTracingService(config);         // Sentry Performance
         services.AddObservabilidadeExterna(config); // Helicone Sessions/Properties
-        services.AddFilaVideo(config);              // Fila:Provider — Sqs (padrão)/RabbitMq — ingestão desacoplada (US #39/#40)
         services.AddChannelProcessor(config);
 
-        services.AddSingleton<IVideoProcessador, InstitutoVideoHandler>();
+        services.AddSingleton<InstitutoPipelineHandler>();
+        services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaCategorizacaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+
+        // Filas + consumers de etapa (Feature #33) — mesma composição do Instituto.Worker/Program.cs
+        services.AddFilaVideoEtapa("transcricao", config, "FilaTranscricao");
+        services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
+        services.AddEtapaConsumer<IEtapaResumoHandler>("resumo", "video.resumo", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa("categorizacao", config, "FilaCategorizacao");
+        services.AddEtapaConsumer<IEtapaCategorizacaoHandler>("categorizacao", "video.categorizacao", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa("embedding", config, "FilaEmbedding");
+        services.AddEtapaConsumer<IEtapaEmbeddingHandler>("embedding", "video.embedding", (h, v, ct) => h.ProcessarAsync(v, ct));
     })
     .Build();
 
@@ -75,9 +100,13 @@ await host.StartAsync();
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
 await processor.RunAsync(canalDeTeste);
 
-// Drena a fila (US #39/#40) — mesma execução processa o que a descoberta acabou de publicar.
-var consumidor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.VideoQueueConsumer>();
-await consumidor.ConsumirAsync();
+// Feature #33 — 4 consumers (Transcrição/Resumo/Categorização/Embedding) concorrentes, mesma
+// composição do Instituto.Worker/Program.cs — já registrados via AddEtapaConsumer.
+await Task.WhenAll(
+    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("transcricao").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("resumo").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("categorizacao").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("embedding").ConsumirAsync());
 
 await host.StopAsync();
 

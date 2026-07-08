@@ -365,3 +365,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Cache local de skills (ex: snapshot do Azure Boards) — dado efêmero, não documentação
+.claude/cache/
+
+# Config de servidores MCP locais — pode conter secrets (ex: PAT do Azure DevOps), nunca commitar
+.mcp.json

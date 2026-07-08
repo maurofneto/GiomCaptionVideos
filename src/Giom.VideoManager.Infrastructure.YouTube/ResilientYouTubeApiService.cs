@@ -1,3 +1,4 @@
+using Giom.VideoManager.Domain.Exceptions;
 using Google.Apis.YouTube.v3;
 using Google.Apis.YouTube.v3.Data;
 using Microsoft.Extensions.Logging;
@@ -33,10 +34,17 @@ internal class ResilientYouTubeApiService
 
         var circuitBreaker = new CircuitBreakerStrategyOptions
         {
-            FailureRatio = 0.5,
+            // MinimumThroughput=2 (mínimo aceito pelo Polly — validação em tempo de execução,
+            // AddCircuitBreaker lança ValidationException pra qualquer valor < 2) + FailureRatio=1.0:
+            // abre já na SEGUNDA ocorrência de quotaExceeded, o mais perto de "imediato" que dá pra
+            // chegar — quota estourada não é "problema intermitente" que melhora com mais uma
+            // tentativa, é fato consumado até o reset diário (meia-noite Pacific Time). BreakDuration
+            // de 1h (não 5min): reabrir em minutos só bateria em quotaExceeded de novo e reabriria o
+            // circuito à toa pelo resto da run.
+            FailureRatio = 1.0,
             SamplingDuration = TimeSpan.FromSeconds(30),
-            MinimumThroughput = 4,
-            BreakDuration = TimeSpan.FromMinutes(5),
+            MinimumThroughput = 2,
+            BreakDuration = TimeSpan.FromHours(1),
             ShouldHandle = new PredicateBuilder().Handle<Google.GoogleApiException>(ex =>
                 ex.HttpStatusCode == System.Net.HttpStatusCode.Forbidden &&
                 ex.Error?.Errors?.Any(e => e.Reason == "quotaExceeded") == true)
@@ -69,17 +77,19 @@ internal class ResilientYouTubeApiService
         {
             return await _pipeline.ExecuteAsync(async _ => await operation());
         }
-        catch (BrokenCircuitException)
+        catch (BrokenCircuitException ex)
         {
             _logger.LogWarning("Circuit breaker aberto em {Operation} — quota provavelmente esgotada.", name);
-            throw;
+            // Quota diária do YouTube só reseta à meia-noite Pacific Time — sem Retry-After
+            // conhecido aqui, o consumer usa o delay padrão configurado (RateLimitDelaySeconds).
+            throw new RateLimitExcedidoException($"YouTube.{name}", innerException: ex);
         }
         catch (Google.GoogleApiException ex) when (
             ex.HttpStatusCode == System.Net.HttpStatusCode.Forbidden &&
             ex.Error?.Errors?.Any(e => e.Reason == "quotaExceeded") == true)
         {
             _logger.LogWarning("Quota da YouTube API esgotada em {Operation}.", name);
-            throw;
+            throw new RateLimitExcedidoException($"YouTube.{name}", innerException: ex);
         }
         catch (Exception ex)
         {
