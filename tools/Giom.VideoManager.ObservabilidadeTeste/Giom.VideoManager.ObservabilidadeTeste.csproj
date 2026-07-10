@@ -35,6 +35,12 @@
     <!-- Reaproveita o InstitutoVideoHandler real (mesma orquestração legenda->resumo->
          categorização->embedding) — só a fonte de vídeos/legendas vem do Supabase, não do YouTube. -->
     <ProjectReference Include="..\..\src\Giom.VideoManager.Instituto.Worker\Giom.VideoManager.Instituto.Worker.csproj" />
+    <!-- Feature #104 — handlers de etapa genéricos (não mais os IEtapaXHandler embutidos no
+         InstitutoPipelineHandler, que encolheu pra só ingestão). -->
+    <ProjectReference Include="..\..\src\Giom.VideoManager.Transcricao.Worker\Giom.VideoManager.Transcricao.Worker.csproj" />
+    <ProjectReference Include="..\..\src\Giom.VideoManager.Resumo.Worker\Giom.VideoManager.Resumo.Worker.csproj" />
+    <ProjectReference Include="..\..\src\Giom.VideoManager.Categorizacao.Worker\Giom.VideoManager.Categorizacao.Worker.csproj" />
+    <ProjectReference Include="..\..\src\Giom.VideoManager.Embedding.Worker\Giom.VideoManager.Embedding.Worker.csproj" />
   </ItemGroup>
 
 </Project>

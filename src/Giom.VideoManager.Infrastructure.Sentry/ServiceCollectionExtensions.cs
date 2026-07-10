@@ -28,7 +28,9 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSentryTracing(this IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton<ITracingService, SentryTracingService>();
-        services.AddHostedService(_ => new SentryBootstrapHostedService(config));
+        // Sem factory: IConfiguration já é registrado pelo Generic Host — o construtor da
+        // hosted service resolve sozinho.
+        services.AddHostedService<SentryBootstrapHostedService>();
         return services;
     }
 }

@@ -1,7 +1,6 @@
 using Amazon;
 using Amazon.SQS;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Domain.ValueObjects;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -15,12 +14,14 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registra uma fila de etapa (Feature #33 — Transcrição/Resumo/Categorização/Embedding, todas
     /// tratadas igual, sem caso especial) como Keyed Service (.NET 9) — várias filas do mesmo tipo
-    /// de mensagem (VideoEtapaMensagem) coexistindo sem colidir, cada uma com seu próprio
-    /// SqsFilaCanal/QueueName. TryAddSingleton no IAmazonSQS — um cliente só, reutilizado por
-    /// todas as chamadas a este método (uma por etapa). Fila se auto-cria no primeiro uso — não
-    /// precisa provisionar via console/CLI antes.
+    /// de mensagem coexistindo sem colidir, cada uma com seu próprio SqsFilaCanal/QueueName.
+    /// Genérico em <typeparamref name="TMensagem"/> desde a Feature #104 — a fila de eventos de
+    /// conclusão (<c>EtapaConcluidaMensagem</c>) reaproveita exatamente este método, só muda o tipo
+    /// da mensagem, não o mecanismo. TryAddSingleton no IAmazonSQS — um cliente só, reutilizado por
+    /// todas as chamadas a este método. Fila se auto-cria no primeiro uso — não precisa provisionar
+    /// via console/CLI antes.
     /// </summary>
-    public static IServiceCollection AddSqsFilaEtapa(this IServiceCollection services, string chave, IConfiguration config, string sectionPath)
+    public static IServiceCollection AddSqsFilaEtapa<TMensagem>(this IServiceCollection services, string chave, IConfiguration config, string sectionPath)
     {
         var options = config.GetSection(sectionPath).Get<SqsOptions>() ?? new SqsOptions();
         var iOptions = Microsoft.Extensions.Options.Options.Create(options);
@@ -31,15 +32,15 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<SqsFilaCanal>(chave, (sp, _) =>
             new SqsFilaCanal(sp.GetRequiredService<IAmazonSQS>(), iOptions, sp.GetRequiredService<ILogger<SqsFilaCanal>>()));
 
-        services.AddKeyedSingleton<IFilaPublisher<VideoEtapaMensagem>>(chave, (sp, key) =>
-            new SqsFilaPublisher<VideoEtapaMensagem>(sp.GetRequiredService<IAmazonSQS>(), sp.GetRequiredKeyedService<SqsFilaCanal>(key)));
+        services.AddKeyedSingleton<IFilaPublisher<TMensagem>>(chave, (sp, key) =>
+            new SqsFilaPublisher<TMensagem>(sp.GetRequiredService<IAmazonSQS>(), sp.GetRequiredKeyedService<SqsFilaCanal>(key)));
 
-        services.AddKeyedSingleton<IFilaConsumer<VideoEtapaMensagem>>(chave, (sp, key) =>
-            new SqsFilaConsumer<VideoEtapaMensagem>(
+        services.AddKeyedSingleton<IFilaConsumer<TMensagem>>(chave, (sp, key) =>
+            new SqsFilaConsumer<TMensagem>(
                 sp.GetRequiredService<IAmazonSQS>(),
                 sp.GetRequiredKeyedService<SqsFilaCanal>(key),
                 iOptions,
-                sp.GetRequiredService<ILogger<SqsFilaConsumer<VideoEtapaMensagem>>>()));
+                sp.GetRequiredService<ILogger<SqsFilaConsumer<TMensagem>>>()));
 
         return services;
     }

@@ -17,7 +17,10 @@ public class FakeCaptionService(ILogger<FakeCaptionService> logger) : ICaptionSe
         "A Palavra nos ensina que somos chamados para viver em comunhão uns com os outros, " +
         "edificando o corpo de Cristo com amor e verdade. ";
 
-    public Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
+    // Domain.Entities.Transcricao qualificado — desde a Feature #104, o projeto Transcricao.Worker
+    // também é referenciado aqui, e "Giom.VideoManager.Transcricao" (namespace do worker) colide
+    // com "Transcricao" (a entidade) na resolução de nome sem qualificação.
+    public Task<Domain.Entities.Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
     {
         switch (InjecaoDeFalha.Avaliar(video.Id, "transcricao"))
         {
@@ -34,7 +37,7 @@ public class FakeCaptionService(ILogger<FakeCaptionService> logger) : ICaptionSe
 
         var conteudo = string.Concat(Enumerable.Repeat(Paragrafo, 20));
 
-        return Task.FromResult<Transcricao?>(new Transcricao
+        return Task.FromResult<Domain.Entities.Transcricao?>(new Domain.Entities.Transcricao
         {
             VideoId       = video.Id,
             Conteudo      = conteudo,

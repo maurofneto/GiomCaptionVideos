@@ -82,6 +82,36 @@ jobs:
           serviceName: giom-agenteinstituto
           dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
 
+      # Feature #104 — workers de etapa (Transcrição/Resumo/Categorização/Embedding) +
+      # orquestrador. Cada imagem é única (não duplicada por canal) — Instituto e Ministério
+      # compartilham a mesma imagem, disparada via run-task com config diferente por canal
+      # (não faz parte do build). Requer os repositórios ECR giom-transcricao/giom-resumo/
+      # giom-categorizacao/giom-embedding/giom-orquestracao já criados.
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-transcricao
+          dockerfilePath: src/Giom.VideoManager.Transcricao.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-resumo
+          dockerfilePath: src/Giom.VideoManager.Resumo.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-categorizacao
+          dockerfilePath: src/Giom.VideoManager.Categorizacao.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-embedding
+          dockerfilePath: src/Giom.VideoManager.Embedding.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-orquestracao
+          dockerfilePath: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile
+
       - script: |
           aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)
         displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
