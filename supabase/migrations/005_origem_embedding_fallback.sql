@@ -20,9 +20,12 @@ ALTER TABLE video_chunk
 -- DROP explícito antes do CREATE: origem_filtro entra NO MEIO da lista de parâmetros (antes de
 -- match_count), o que muda a assinatura por completo — sem o DROP, o Postgres cria uma
 -- sobrecarga nova ao lado da antiga (ambígua pra chamada nomeada via PostgREST) em vez de
--- substituí-la.
+-- substituí-la. Existem 2 sobrecargas herdadas de migrações anteriores (sem e com
+-- canal_id_filtro) — as duas precisam sair, senão o GRANT sem tipos abaixo fica ambíguo entre a
+-- que sobrar e a nova.
 -- =========================================================
 
+DROP FUNCTION IF EXISTS match_chunks_hibrido(vector, text, int, int);
 DROP FUNCTION IF EXISTS match_chunks_hibrido(vector, text, int, int, text);
 
 CREATE OR REPLACE FUNCTION match_chunks_hibrido(
@@ -88,9 +91,10 @@ GRANT EXECUTE ON FUNCTION match_chunks_hibrido TO anon, authenticated;
 
 -- =========================================================
 -- RPC: busca híbrida filtrada por área — agora filtrando por origem também (mesmo motivo do
--- DROP explícito acima).
+-- DROP explícito acima, incluindo as 2 sobrecargas herdadas).
 -- =========================================================
 
+DROP FUNCTION IF EXISTS match_chunks_hibrido_por_area(vector, text, text, int, int);
 DROP FUNCTION IF EXISTS match_chunks_hibrido_por_area(vector, text, text, int, int, text);
 
 CREATE OR REPLACE FUNCTION match_chunks_hibrido_por_area(
