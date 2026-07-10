@@ -324,16 +324,19 @@ public static class ServiceCollectionExtensions
     /// Fila de etapa (Feature #33 — Transcrição/Resumo/Categorização/Embedding, todas tratadas
     /// igual, sem caso especial) — registrada como Keyed Service (<paramref name="chave"/>, ex:
     /// "transcricao"/"resumo"), provider decidido dentro da própria seção raiz
-    /// (<paramref name="secaoRaiz"/>:Provider, ex: "FilaTranscricao:Provider"/"FilaResumo:Provider"). Cada
-    /// canal chama isso só pras etapas que usa — Ministério não chama pra
-    /// "categorizacao"/"embedding".
+    /// (<paramref name="secaoRaiz"/>:Provider, ex: "FilaTranscricao:Provider"/"FilaResumo:Provider").
+    /// Genérico em <typeparamref name="TMensagem"/> desde a Feature #104 — a fila de eventos de
+    /// conclusão (<c>EtapaConcluidaMensagem</c>) reaproveita este mesmo método com o tipo trocado.
+    /// Cada worker de etapa chama isso só pra própria fila (uma etapa, um worker) — não mais um
+    /// canal chamando várias vezes pras etapas que usa (ver Instituto.Worker/Ministerio.Worker,
+    /// que agora só chamam pra "transcricao").
     /// </summary>
-    public static IServiceCollection AddFilaVideoEtapa(this IServiceCollection services, string chave, IConfiguration config, string secaoRaiz)
+    public static IServiceCollection AddFilaVideoEtapa<TMensagem>(this IServiceCollection services, string chave, IConfiguration config, string secaoRaiz)
     {
         var provider = config[$"{secaoRaiz}:Provider"] ?? "Sqs";
         return provider == "RabbitMq"
-            ? services.AddRabbitMqFilaEtapa(chave, config, $"{secaoRaiz}:RabbitMq")
-            : services.AddSqsFilaEtapa(chave, config, $"{secaoRaiz}:Sqs");
+            ? services.AddRabbitMqFilaEtapa<TMensagem>(chave, config, $"{secaoRaiz}:RabbitMq")
+            : services.AddSqsFilaEtapa<TMensagem>(chave, config, $"{secaoRaiz}:Sqs");
     }
 
     /// <summary>

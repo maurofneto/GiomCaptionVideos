@@ -11,7 +11,10 @@ namespace Giom.VideoManager.ObservabilidadeTeste;
 /// </summary>
 public class FakeResumoService(ILogger<FakeResumoService> logger) : IResumoService
 {
-    public Task<Resumo?> GerarResumoAsync(Video video, CancellationToken ct = default)
+    // Domain.Entities.Resumo qualificado — desde a Feature #104, o projeto Resumo.Worker
+    // também é referenciado aqui, e "Giom.VideoManager.Resumo" (namespace do worker) colide com
+    // "Resumo" (a entidade) na resolução de nome sem qualificação.
+    public Task<Domain.Entities.Resumo?> GerarResumoAsync(Video video, CancellationToken ct = default)
     {
         switch (InjecaoDeFalha.Avaliar(video.Id, "resumo"))
         {
@@ -26,7 +29,7 @@ public class FakeResumoService(ILogger<FakeResumoService> logger) : IResumoServi
                 throw new RateLimitExcedidoException("Resumo.Fake", TimeSpan.FromSeconds(15));
         }
 
-        return Task.FromResult<Resumo?>(new Resumo
+        return Task.FromResult<Domain.Entities.Resumo?>(new Domain.Entities.Resumo
         {
             VideoId  = video.Id,
             Descricao = $"Resumo sintético de teste E2E para \"{video.Title}\" — sem IA envolvida.",

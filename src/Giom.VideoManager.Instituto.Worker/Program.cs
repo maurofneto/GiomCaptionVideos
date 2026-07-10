@@ -36,39 +36,19 @@ using var host = Host.CreateDefaultBuilder(args)
 
         services.AddVideoSourceService(config);
         services.AddPersistence(config);           // Supabase
-        services.AddTranscriptionService(config);  // Whisper
-        services.AddSummaryService(config);        // Claude
-        services.AddCategorizacaoService(config);  // Claude (Haiku)
-        services.AddEmbeddingService(config);      // Supabase pgvector
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
-        services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo/categorização)
         services.AddChannelProcessor(config);
 
-        // Um InstitutoPipelineHandler só, compartilhado por TODAS as interfaces de etapa (incluindo
-        // IVideoHandler — dono da própria topologia de descoberta, sem FilaVideoHandler genérico).
+        // Feature #104 — Instituto.Worker só cuida de ingestão desde a #104: filtra relevância e
+        // publica na fila única de Transcrição (compartilhada com o Ministério, Video.ChannelId
+        // já identifica de quem é o vídeo). O processamento de cada etapa (Transcrição/Resumo/
+        // Categorização/Embedding) saiu daqui — vive nos workers de etapa próprios, orquestrado
+        // pelo PipelineHandler central. InstitutoPipelineHandler não implementa mais IEtapaXHandler.
         services.AddSingleton<InstitutoPipelineHandler>();
         services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaCategorizacaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
 
-        // Filas + consumers de etapa (Feature #33 — US #41/#42/#43): Transcrição não é caso
-        // especial, usa o mesmo mecanismo das demais. Resumo e Embedding dependem só de
-        // Transcrição (fan-out), Categorização depende de Resumo. AddEtapaConsumer registra o
-        // EtapaQueueConsumer pronto (keyed), sem montar a classe na mão no fim do arquivo.
-        services.AddFilaVideoEtapa("transcricao", config, "FilaTranscricao");
-        services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
-
-        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
-        services.AddEtapaConsumer<IEtapaResumoHandler>("resumo", "video.resumo", (h, v, ct) => h.ProcessarAsync(v, ct));
-
-        services.AddFilaVideoEtapa("categorizacao", config, "FilaCategorizacao");
-        services.AddEtapaConsumer<IEtapaCategorizacaoHandler>("categorizacao", "video.categorizacao", (h, v, ct) => h.ProcessarAsync(v, ct));
-
-        services.AddFilaVideoEtapa("embedding", config, "FilaEmbedding");
-        services.AddEtapaConsumer<IEtapaEmbeddingHandler>("embedding", "video.embedding", (h, v, ct) => h.ProcessarAsync(v, ct));
+        services.AddFilaVideoEtapa<VideoEtapaMensagem>("transcricao", config, "FilaTranscricao");
     })
     .Build();
 
@@ -86,32 +66,4 @@ await host.StartAsync();
 var processor = host.Services.GetRequiredService<ChannelProcessor>();
 await processor.RunAsync(channels);
 
-// Feature #33 — 4 consumers (Transcrição/Resumo/Categorização/Embedding) rodando concorrentes,
-// não em sequência: o objetivo é Resumo/Embedding começarem assim que o PRIMEIRO vídeo estiver
-// transcrito, não esperar o lote inteiro da Transcrição terminar (isso anularia o ganho da US
-// #41/#43). Transcrição não é caso especial — é só mais uma etapa keyed ("transcricao"), mesmo
-// EtapaQueueConsumer genérico usado pelas demais — já pronto, registrado por AddEtapaConsumer.
-//
-// Bug #102 (incidente 2026-07-09): Task.WhenAll propaga a PRIMEIRA exceção de qualquer consumer
-// e derruba o processo inteiro — se só a fila de "categorizacao" tivesse um blip no boot, os
-// outros 3 consumers saudáveis morriam junto. ConsumirEtapaIsoladamente captura por consumer:
-// uma etapa falhar não derruba as demais.
-await Task.WhenAll(
-    ConsumirEtapaIsoladamente("transcricao"),
-    ConsumirEtapaIsoladamente("resumo"),
-    ConsumirEtapaIsoladamente("categorizacao"),
-    ConsumirEtapaIsoladamente("embedding"));
-
 await host.StopAsync();
-
-async Task ConsumirEtapaIsoladamente(string chave)
-{
-    try
-    {
-        await host.Services.GetRequiredKeyedService<EtapaQueueConsumer>(chave).ConsumirAsync();
-    }
-    catch (Exception ex)
-    {
-        Log.Error(ex, "Consumer de etapa {Etapa} falhou e foi encerrado — as demais etapas continuam rodando normalmente nesta run", chave);
-    }
-}

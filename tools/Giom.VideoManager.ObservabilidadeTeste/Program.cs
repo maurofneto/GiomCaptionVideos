@@ -1,14 +1,19 @@
 using Giom.VideoManager.Application;
 using Giom.VideoManager.Application.Handlers;
+using Giom.VideoManager.Application.Pipeline;
+using Giom.VideoManager.Categorizacao.Worker;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Embedding.Worker;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Instituto.Worker;
 using Giom.VideoManager.ObservabilidadeTeste;
+using Giom.VideoManager.Resumo.Worker;
+using Giom.VideoManager.Transcricao.Worker;
 using Microsoft.Extensions.Logging;
 using Serilog;
 
@@ -20,6 +25,11 @@ using Serilog;
 // leitura no Supabase. A PERSISTÊNCIA continua indo pro Supabase de dev de verdade — é isso
 // que valida span/telemetria/Helicone ponta a ponta. Cada Fake*Service injeta falha
 // determinística por vídeo (ver InjecaoDeFalha) pra exercitar o retry dinâmico da Feature #34.
+//
+// Feature #104 — desde a orquestração central, este tool também exercita o fluxo distribuído
+// real: publica na fila de Transcrição, os 4 workers de etapa (fakes por dentro) processam e
+// avisam "concluí", e o PipelineHandler (mesmo orquestrador dos workers de produção) decide o
+// fan-out — tudo dentro de 1 processo só, mas usando exatamente a mesma composição.
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -63,34 +73,43 @@ using var host = Host.CreateDefaultBuilder(args)
             services.AddSingleton<IResumoService, FakeResumoService>();
         services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
         services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
-        // Antes vinha de dentro de AddSummaryService/AddCategorizacaoService (Claude real) —
-        // removidos daqui, então precisa ser chamado direto: ISessionContext é usado por
-        // SentryTracingService, InstitutoPipelineHandler etc.
         services.AddSessionContext();
         services.AddTelemetriaService(config);     // Supabase + Sentry + alerta de gasto
         services.AddTracingService(config);         // Sentry Performance
         services.AddObservabilidadeExterna(config); // Helicone Sessions/Properties
         services.AddChannelProcessor(config);
 
+        // Ingestão — só publica na fila de Transcrição (Feature #104).
         services.AddSingleton<InstitutoPipelineHandler>();
         services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaCategorizacaoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
-        services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
 
-        // Filas + consumers de etapa (Feature #33) — mesma composição do Instituto.Worker/Program.cs
-        services.AddFilaVideoEtapa("transcricao", config, "FilaTranscricao");
+        // Handlers de etapa genéricos (mesmas classes dos workers de produção) — os Fake*Service
+        // acima entram no lugar dos providers reais via injeção normal.
+        services.AddSingleton<TranscricaoEtapaHandler>();
+        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<TranscricaoEtapaHandler>());
+        services.AddSingleton<ResumoEtapaHandler>();
+        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<ResumoEtapaHandler>());
+        services.AddSingleton<CategorizacaoEtapaHandler>();
+        services.AddSingleton<IEtapaCategorizacaoHandler>(sp => sp.GetRequiredService<CategorizacaoEtapaHandler>());
+        services.AddSingleton<EmbeddingEtapaHandler>();
+        services.AddSingleton<IEtapaEmbeddingHandler>(sp => sp.GetRequiredService<EmbeddingEtapaHandler>());
+
+        // Filas de etapa + fila de eventos de conclusão + orquestrador (Feature #104) — mesma
+        // composição de produção, só que todo mundo dentro do mesmo processo.
+        services.AddFilaVideoEtapa<VideoEtapaMensagem>("transcricao", config, "FilaTranscricao");
         services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
 
-        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
+        services.AddFilaVideoEtapa<VideoEtapaMensagem>("resumo", config, "FilaResumo");
         services.AddEtapaConsumer<IEtapaResumoHandler>("resumo", "video.resumo", (h, v, ct) => h.ProcessarAsync(v, ct));
 
-        services.AddFilaVideoEtapa("categorizacao", config, "FilaCategorizacao");
+        services.AddFilaVideoEtapa<VideoEtapaMensagem>("categorizacao", config, "FilaCategorizacao");
         services.AddEtapaConsumer<IEtapaCategorizacaoHandler>("categorizacao", "video.categorizacao", (h, v, ct) => h.ProcessarAsync(v, ct));
 
-        services.AddFilaVideoEtapa("embedding", config, "FilaEmbedding");
+        services.AddFilaVideoEtapa<VideoEtapaMensagem>("embedding", config, "FilaEmbedding");
         services.AddEtapaConsumer<IEtapaEmbeddingHandler>("embedding", "video.embedding", (h, v, ct) => h.ProcessarAsync(v, ct));
+
+        services.AddFilaVideoEtapa<EtapaConcluidaMensagem>("etapa-concluida", config, "FilaEtapaConcluida");
+        services.AddPipelineOrquestrador(config);
     })
     .Build();
 
@@ -112,16 +131,20 @@ Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Resumo={ModoResumo}
     configFinal.GetSection("Resumo:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Resumo:FallbackChain").Get<string[]>() ?? [])}]" : "FakeResumoService",
     configFinal["ProcessingOptions:MaxVideosPerRun"]);
 
-var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
+var processor = host.Services.GetRequiredService<ChannelProcessor>();
 await processor.RunAsync(canalDeTeste);
 
-// Feature #33 — 4 consumers (Transcrição/Resumo/Categorização/Embedding) concorrentes, mesma
-// composição do Instituto.Worker/Program.cs — já registrados via AddEtapaConsumer.
+// Feature #104 — 4 workers de etapa + o orquestrador, concorrentes dentro do mesmo processo:
+// conforme a Transcrição termina, publica "concluí" na fila de eventos; o orquestrador (que
+// também está drenando, nesta mesma run) decide o fan-out; os workers seguintes pegam a
+// mensagem nova assim que ela chega. Mesmo mecanismo run-to-completion de sempre — quando as 5
+// filas ficam vazias, cada um sai sozinho.
 await Task.WhenAll(
-    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("transcricao").ConsumirAsync(),
-    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("resumo").ConsumirAsync(),
-    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("categorizacao").ConsumirAsync(),
-    host.Services.GetRequiredKeyedService<Giom.VideoManager.Application.Pipeline.EtapaQueueConsumer>("embedding").ConsumirAsync());
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("transcricao").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("resumo").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("categorizacao").ConsumirAsync(),
+    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("embedding").ConsumirAsync(),
+    host.Services.GetRequiredService<EtapaConcluidaQueueConsumer>().ConsumirAsync());
 
 await host.StopAsync();
 
