@@ -69,6 +69,37 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Variante de AddYouTubeVideoSource pra quando um único worker processa N canais numa run
+    /// só (US #105, Ingestao.Worker) — não registra UMA credencial fixa (AddYouTubeCredential),
+    /// porque cada canal pode ter Client Secret/Refresh Token diferentes. As credenciais keyed
+    /// por canal são registradas à parte no bootstrap (ver AddIngestaoMultiCanal na
+    /// Composition), usando BuildYouTubeService pra cada CanalIngestaoConfig lido do banco.
+    /// YouTubeVideoSourceService resolve a keyed certa via IActiveChannelContext em runtime.
+    /// </summary>
+    public static IServiceCollection AddYouTubeVideoSourceMultiCanal(this IServiceCollection services)
+    {
+        services.AddSingleton<IVideoSourceService, YouTubeVideoSourceService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Monta um YouTubeService a partir de uma credencial já resolvida (ClientId/ClientSecret/
+    /// RefreshToken) — usado pelo bootstrap multi-canal (AddIngestaoMultiCanal) pra registrar um
+    /// YouTubeService keyed por canal. Extraído de AddYouTubeCredential (que resolve só UMA
+    /// credencial fixa por processo, do appsettings) pra reaproveitar a mesma lógica de auth
+    /// com N credenciais diferentes, uma por canal, buscadas do SSM em runtime.
+    /// </summary>
+    public static YouTubeService BuildYouTubeService(GoogleCredentialOptions options)
+    {
+        var credential = GetGoogleCredential(options).GetAwaiter().GetResult();
+        return new YouTubeService(new BaseClientService.Initializer
+        {
+            HttpClientInitializer = credential,
+            ApplicationName = options.ApplicationName
+        });
+    }
+
     private static async Task<UserCredential> GetGoogleCredential(GoogleCredentialOptions options)
     {
         if (string.IsNullOrWhiteSpace(options.ClientId))

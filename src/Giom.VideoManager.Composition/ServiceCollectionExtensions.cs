@@ -1,6 +1,8 @@
 using Giom.VideoManager.Application;
+using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Feedback;
@@ -266,6 +268,84 @@ public static class ServiceCollectionExtensions
     /// <summary>VideoSource:Provider — YouTube (padrão, único por enquanto).</summary>
     public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
         => services.AddYouTubeVideoSource(config);
+
+    /// <summary>
+    /// Bootstrap multi-canal pra ingestão unificada (US #105, Ingestao.Worker) — lê os canais
+    /// ativos do Supabase (tabela canal_ingestao) SÍNCRONO durante ConfigureServices (mesmo
+    /// padrão já aceito nesse código pra GetGoogleCredential(...).GetAwaiter().GetResult() em
+    /// AddYouTubeCredential), registra um YouTubeService keyed por canal e um
+    /// Func&lt;string, IVideoHandler&gt; resolvido preguiçosamente na primeira chamada — só
+    /// depois que o container termina de montar, já que CanalIngestaoVideoHandler precisa de
+    /// dependências registradas por OUTROS Add* nesta mesma composição (AddFilaVideoEtapa,
+    /// AddTelemetriaService, AddTracingService), que podem rodar antes ou depois deste método.
+    /// Credencial Google de cada canal vem de "{secrets_key}:Google:ClientSecret"/"RefreshToken"
+    /// em IConfiguration — não busca no SSM aqui: com Secrets:Aws:Path apontando pra
+    /// "/giom/{env}/canais/", o bulk-load recursivo já feito em ConfigureAppConfiguration
+    /// (AddSecretsProvider) carrega "/giom/{env}/canais/instituto/Google/ClientSecret" etc.
+    /// direto pra dentro do IConfiguration, sem precisar de uma chamada SSM pontual extra por
+    /// canal (AwsParameterStoreSecretsProvider.Load() já é recursivo).
+    /// Falha ao resolver credencial de UM canal não derruba os demais — loga e pula esse canal.
+    /// </summary>
+    public static IServiceCollection AddIngestaoMultiCanal(this IServiceCollection services, IConfiguration config)
+    {
+        var supabaseOptions = config.GetSection("Supabase").Get<SupabaseOptions>() ?? new SupabaseOptions();
+        var canalRepository = new SupabaseCanalIngestaoRepository(Microsoft.Extensions.Options.Options.Create(supabaseOptions));
+        var canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+
+        var googleClientId = config["Google:ClientId"] ?? string.Empty;
+        var googleUser = config["Google:User"] ?? "user";
+
+        var canaisValidos = new List<CanalIngestaoConfig>();
+
+        foreach (var canal in canais)
+        {
+            try
+            {
+                var googleOptions = new GoogleCredentialOptions
+                {
+                    ClientId = googleClientId,
+                    ClientSecret = config[$"{canal.SecretsKey}:Google:ClientSecret"] ?? string.Empty,
+                    RefreshToken = config[$"{canal.SecretsKey}:Google:RefreshToken"],
+                    ApplicationName = $"Giom {canal.Nome} Processor",
+                    User = googleUser
+                };
+
+                var youtubeService = Giom.VideoManager.Infrastructure.YouTube.ServiceCollectionExtensions.BuildYouTubeService(googleOptions);
+                services.AddKeyedSingleton(canal.ChannelId, youtubeService);
+                canaisValidos.Add(canal);
+            }
+            catch (Exception ex)
+            {
+                // Um canal com credencial quebrada não pode derrubar o Host.Build() inteiro pra
+                // todos os outros — sem ILogger disponível ainda nesse ponto do bootstrap, loga
+                // no Console mesmo (mesma limitação de GetGoogleCredential) e pula esse canal.
+                Console.Error.WriteLine($"[AddIngestaoMultiCanal] Falha ao resolver credencial do canal {canal.Nome} ({canal.ChannelId}) — pulando. {ex.Message}");
+            }
+        }
+
+        services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
+
+        services.AddSingleton<Func<string, IVideoHandler>>(sp =>
+        {
+            var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
+            var sessionContext = sp.GetRequiredService<ISessionContext>();
+            var tracingService = sp.GetRequiredService<ITracingService>();
+            var canalPorId = canaisValidos.ToDictionary(c => c.ChannelId);
+            var cache = new Dictionary<string, IVideoHandler>();
+
+            return channelId =>
+            {
+                if (!cache.TryGetValue(channelId, out var handler))
+                {
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], transcricaoPublisher, sessionContext, tracingService);
+                    cache[channelId] = handler;
+                }
+                return handler;
+            };
+        });
+
+        return services;
+    }
 
     /// <summary>
     /// ConversaHistorico:Provider — InMemory (padrão), Supabase, MongoDB. Decorado com

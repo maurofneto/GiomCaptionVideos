@@ -24,13 +24,18 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// processamento real pro EtapaQueueConsumer da etapa Transcrição (Feature #33). ChannelProcessor
 /// não sabe (nem precisa saber) qual dos dois está por trás — é só mais um IVideoHandler, igual
 /// sempre foi.
+/// Desde a US #105, o handler é resolvido por canal (resolverHandler) em vez de injetado fixo —
+/// uma run pode processar N canais, cada um com seu próprio IVideoHandler (regra de relevância
+/// diferente). ActiveChannelContext (AsyncLocal) também é definido aqui por canal, pra
+/// YouTubeVideoSourceService saber qual credencial Google keyed usar.
 /// </summary>
 public class ChannelProcessor(
     IVideoSourceService videoSource,
     IProgressoRepository progressoRepository,
-    IVideoHandler videoHandler,
+    Func<string, IVideoHandler> resolverHandler,
     ITracingService tracingService,
     ISessionContext sessionContext,
+    IActiveChannelContext activeChannelContext,
     IHostEnvironment hostEnvironment,
     ILogger<ChannelProcessor> logger,
     IOptions<ProcessingOptions> options)
@@ -66,7 +71,17 @@ public class ChannelProcessor(
     private async Task ProcessChannelAsync(ChannelConfig config, string correlationId, string horaExecucao, CancellationToken ct)
     {
         using var traceCanal = tracingService.IniciarTrace("pipeline.canal", "video_pipeline");
+        activeChannelContext.Definir(config.ChannelId);
         DefinirSessaoAtual(correlationId, horaExecucao, config);
+
+        var videoHandler = resolverHandler(config.ChannelId);
+
+        // Overrides por canal (US #105, ChannelConfig.MaxVideosPerRun/DelayBetween*) — quando
+        // null (ChannelConfig hardcoded, sem vir de canal_ingestao), cai no valor global de
+        // ProcessingOptions, igual sempre foi.
+        var maxVideosPerRun = config.MaxVideosPerRun ?? _options.MaxVideosPerRun;
+        var delayEntreVideosMs = config.DelayBetweenVideosMs ?? _options.DelayBetweenVideosMs;
+        var delayEntrePaginasMs = config.DelayBetweenPagesMs ?? _options.DelayBetweenPagesMs;
 
         var playlistId = await videoSource.GetUploadPlaylistIdAsync(config, ct);
         if (string.IsNullOrEmpty(playlistId))
@@ -98,19 +113,19 @@ public class ChannelProcessor(
 
         var processedIds = new HashSet<string>();
 
-        while (processedIds.Count < _options.MaxVideosPerRun && !ct.IsCancellationRequested)
+        while (processedIds.Count < maxVideosPerRun && !ct.IsCancellationRequested)
         {
             logger.LogInformation($"Canal {config.Name} — processando página (já processados: {processedIds.Count})", config.Name);
 
             using var tracePagina = tracingService.IniciarTrace("pipeline.pagina", "video_pipeline");
             DefinirSessaoAtual(correlationId, horaExecucao, config, playlistId, pageToken ?? "primeira");
 
-            var page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, _options.MaxVideosPerRun), pageToken, ct);
+            var page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, maxVideosPerRun), pageToken, ct);
             if (page.Videos.Count == 0) break;
 
             foreach (var video in page.Videos)
             {
-                if (processedIds.Count >= _options.MaxVideosPerRun || ct.IsCancellationRequested) break;
+                if (processedIds.Count >= maxVideosPerRun || ct.IsCancellationRequested) break;
 
                 if (applyDateFilter && video.UploadedAt <= (filtroDataBase ?? DateTime.MinValue)) continue;
 
@@ -136,7 +151,7 @@ public class ChannelProcessor(
                     logger.LogError(ex, "Erro ao processar vídeo {Id} — {Title}", video.Id, video.Title);
                 }
 
-                await Task.Delay(_options.DelayBetweenVideosMs, ct);
+                await Task.Delay(delayEntreVideosMs, ct);
             }
 
             pageToken = page.NextPageToken;
@@ -153,7 +168,7 @@ public class ChannelProcessor(
                 break;
             }
 
-            await Task.Delay(_options.DelayBetweenPagesMs, ct);
+            await Task.Delay(delayEntrePaginasMs, ct);
         }
     }
 

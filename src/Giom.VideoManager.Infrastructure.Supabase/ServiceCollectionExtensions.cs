@@ -56,4 +56,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITelemetriaSink, SupabaseTelemetriaService>();
         return services;
     }
+
+    /// <summary>
+    /// Registro normal de ICanalIngestaoRepository (US #105) pra quem quiser injetar via DI. O
+    /// bootstrap do Ingestao.Worker (AddIngestaoMultiCanal, Composition) constrói uma instância
+    /// direto — precisa da lista de canais ANTES do container terminar de montar, pra registrar
+    /// as credenciais Google keyed por canal.
+    /// </summary>
+    public static IServiceCollection AddSupabaseCanalIngestao(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSingleton<ICanalIngestaoRepository, SupabaseCanalIngestaoRepository>();
+        return services;
+    }
 }
