@@ -113,8 +113,11 @@ public class ClaudeAgentService : IAgentService
 
         if (string.IsNullOrWhiteSpace(texto))
         {
+            // Lança em vez de devolver uma resposta genérica — dentro da cadeia de fallback
+            // (Feature #101), "sem texto" precisa contar como falha pra passar pro próximo
+            // provider, não virar a resposta final silenciosamente.
             _logger.LogWarning("Claude não retornou texto para {ChatId} — pergunta: {Pergunta}", chatId, turnoAtual.Pergunta);
-            return "Desculpe, não consegui gerar uma resposta agora. Tente novamente em instantes.";
+            throw new InvalidOperationException("Claude não retornou texto");
         }
 
         return texto;

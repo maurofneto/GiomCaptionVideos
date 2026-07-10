@@ -4,7 +4,6 @@ using Microsoft.Extensions.Http.Resilience;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Helicone;
-using Giom.VideoManager.Infrastructure.Telemetria;
 
 namespace Giom.VideoManager.Infrastructure.Anthropic;
 
@@ -42,6 +41,7 @@ public static class ServiceCollectionExtensions
     // "new" nenhum montando a decoração à mão (Scrutor resolve o "inner" como a implementação
     // já registrada antes do Decorate).
 
+    /// <summary>Registra o tipo concreto (não a interface) — desde a Feature #101, a Composition decide como este elo entra na cadeia de fallback (Claude → Grok → OpenAI), decorando telemetria uma vez só sobre o resultado final.</summary>
     public static IServiceCollection AddClaudeAgent(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
@@ -49,11 +49,16 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeAgentOptions>(config.GetSection("ClaudeAgent"));
-        services.AddSingleton<IAgentService, ClaudeAgentService>();
-        services.Decorate<IAgentService, TelemetriaAgentService>();
+        services.AddSingleton<ClaudeAgentService>();
         return services;
     }
 
+    /// <summary>
+    /// Registra o tipo concreto (não a interface) — desde a Feature #101, quem decide como
+    /// ClaudeResumoService vira o IResumoService final (direto, ou um elo de
+    /// FallbackResumoService) é a Composition, não este método. Decoração de telemetria também
+    /// migrou pra lá, aplicada uma vez só sobre o resultado final da cadeia.
+    /// </summary>
     public static IServiceCollection AddClaudeSummary(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
@@ -61,11 +66,11 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeResumoOptions>(config.GetSection("ClaudeResumo"));
-        services.AddSingleton<IResumoService, ClaudeResumoService>();
-        services.Decorate<IResumoService, TelemetriaResumoService>();
+        services.AddSingleton<ClaudeResumoService>();
         return services;
     }
 
+    /// <summary>Ver comentário de AddClaudeSummary — mesmo raciocínio (tipo concreto, decisão de composição na Composition).</summary>
     public static IServiceCollection AddClaudeCategorizacao(this IServiceCollection services, IConfiguration config)
     {
         services.AddPromptLoader();
@@ -73,8 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddContextoTelemetria();
         services.AddSessionContext();
         services.Configure<ClaudeCategorizacaoOptions>(config.GetSection("ClaudeCategorizacao"));
-        services.AddSingleton<ICategorizacaoService, ClaudeCategorizacaoService>();
-        services.Decorate<ICategorizacaoService, TelemetriaCategorizacaoService>();
+        services.AddSingleton<ClaudeCategorizacaoService>();
         return services;
     }
 

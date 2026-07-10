@@ -53,7 +53,14 @@ using var host = Host.CreateDefaultBuilder(args)
             sp.GetRequiredService<ITelemetriaService>(),
             sp.GetRequiredService<ITracingService>(),
             sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-        services.AddSingleton<IResumoService, FakeResumoService>();
+        // Resumo: com Resumo:FallbackChain configurado, usa a cadeia REAL de fallback da
+        // Feature #101 (Claude → Grok → OpenAI, mesma composição dos workers) em vez do Fake —
+        // é assim que o E2E exercita o fallback de provider de verdade (ex.: ClaudeResumo:Model
+        // inválido força a queda pro próximo elo). Sem a seção, mantém o Fake (retry/DLQ).
+        if (config.GetSection("Resumo:FallbackChain").Exists())
+            services.AddSummaryService(config);
+        else
+            services.AddSingleton<IResumoService, FakeResumoService>();
         services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
         services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
         // Antes vinha de dentro de AddSummaryService/AddCategorizacaoService (Claude real) —
@@ -96,6 +103,14 @@ var canalDeTeste = new[]
 // inicializa o Sentry/OpenTelemetry (registrado em AddSentryTracing) nunca roda, e nada é
 // enviado pro Sentry (nem inicializado, nem descartado/flushado no fim).
 await host.StartAsync();
+
+// Torna visível qual perfil/modo de resumo esta run está usando — sem isso não dá pra saber, só
+// pelo log, se a cadeia real de fallback (appsettings.teste-fallback.json) foi carregada ou não.
+var configFinal = host.Services.GetRequiredService<IConfiguration>();
+Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Resumo={ModoResumo}, MaxVideosPerRun={Max}",
+    Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "(nulo → Development)",
+    configFinal.GetSection("Resumo:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Resumo:FallbackChain").Get<string[]>() ?? [])}]" : "FakeResumoService",
+    configFinal["ProcessingOptions:MaxVideosPerRun"]);
 
 var processor = host.Services.GetRequiredService<Giom.VideoManager.Application.Pipeline.ChannelProcessor>();
 await processor.RunAsync(canalDeTeste);

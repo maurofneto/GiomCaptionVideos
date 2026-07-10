@@ -4,6 +4,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Feedback;
+using Giom.VideoManager.Infrastructure.Grok;
 using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Helicone;
 using Giom.VideoManager.Infrastructure.Telemetria;
@@ -11,15 +12,18 @@ using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
 using Giom.VideoManager.Infrastructure.RabbitMq;
+using Giom.VideoManager.Infrastructure.Resiliencia;
 using Giom.VideoManager.Infrastructure.Sql;
 using Giom.VideoManager.Infrastructure.Sqs;
 using Giom.VideoManager.Infrastructure.Supabase;
 using Giom.VideoManager.Infrastructure.SummarizeTech;
 using Giom.VideoManager.Infrastructure.Telegram;
+using Giom.VideoManager.Infrastructure.Voyage;
 using Giom.VideoManager.Infrastructure.Whisper;
 using Giom.VideoManager.Infrastructure.YouTube;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Composition;
 
@@ -43,55 +47,212 @@ public static class ServiceCollectionExtensions
         };
     }
 
-    /// <summary>Transcription:Provider — YouTubeTranscript (padrão), YouTubeCaption, YtDlpCaption, Whisper.</summary>
+    /// <summary>
+    /// Transcrição — cadeia de fallback (Feature #101), configurável via Transcricao:FallbackChain
+    /// (default: YouTubeTranscript → YtDlpCaption → Whisper — mesma ordem de custo/quota de hoje,
+    /// só sem parar no primeiro que não achar nada). Cada nome do array vira um provider registrado
+    /// como Keyed Service; a cadeia tenta na ordem e só cai pro próximo em caso de falha/exceção
+    /// (ver FallbackChain/FallbackHandler). Valores aceitos: YouTubeTranscript, YouTubeCaption,
+    /// YtDlpCaption, Whisper.
+    /// </summary>
     public static IServiceCollection AddTranscriptionService(this IServiceCollection services, IConfiguration config)
     {
-        var provider = config["Transcription:Provider"] ?? "YouTubeTranscript";
+        var cadeiaNomes = config.GetSection("Transcricao:FallbackChain").Get<string[]>()
+            ?? ["YouTubeTranscript", "YtDlpCaption", "Whisper"];
 
-        return provider == "Whisper"
-            ? services.AddWhisperTranscription(config)
-            : services.AddYouTubeCaptionService(config);
+        foreach (var nome in cadeiaNomes)
+        {
+            switch (nome)
+            {
+                case "YouTubeCaption":
+                    services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
+                    services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>(nome);
+                    break;
+                case "YtDlpCaption":
+                    services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
+                    services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>(nome);
+                    break;
+                case "Whisper":
+                    services.Configure<WhisperOptions>(config.GetSection("Whisper"));
+                    services.AddSingleton<ITranscricaoService, WhisperTranscricaoService>();
+                    services.AddKeyedSingleton<ICaptionService, WhisperCaptionService>(nome);
+                    break;
+                default: // YouTubeTranscript
+                    services.Configure<YouTubeTranscriptOptions>(config.GetSection("YouTubeTranscript"));
+                    services.AddKeyedSingleton<ICaptionService, YouTubeTranscriptService>(nome);
+                    break;
+            }
+        }
+
+        services.AddSingleton<ICaptionService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<ICaptionService>(nome))).ToList();
+            return new FallbackCaptionService(cadeia, sp.GetRequiredService<ILogger<FallbackCaptionService>>());
+        });
+        services.Decorate<ICaptionService, TelemetriaCaptionService>();
+
+        return services;
     }
 
-    /// <summary>Summary:Provider — Claude (padrão), SummarizeTech.</summary>
+    /// <summary>
+    /// Resumo — cadeia de fallback (Feature #101), configurável via Resumo:FallbackChain
+    /// (default: Claude → Grok → OpenAI). Mesmo mecanismo de Keyed Service + FallbackChain de
+    /// AddTranscriptionService — ver comentário lá. Valores aceitos: Claude, Grok, OpenAI,
+    /// SummarizeTech.
+    /// </summary>
     public static IServiceCollection AddSummaryService(this IServiceCollection services, IConfiguration config)
     {
-        var provider = config["Summary:Provider"] ?? "Claude";
+        var cadeiaNomes = config.GetSection("Resumo:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
 
-        return provider == "SummarizeTech"
-            ? services.AddSummarizeTechSummary()
-            : services.AddClaudeSummary(config);
+        foreach (var nome in cadeiaNomes)
+        {
+            switch (nome)
+            {
+                case "Grok":
+                    services.AddGrokSummary(config);
+                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<GrokResumoService>());
+                    break;
+                case "OpenAI":
+                    services.AddOpenAiSummary(config);
+                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<OpenAiResumoService>());
+                    break;
+                case "SummarizeTech":
+                    services.AddSummarizeTechSummary();
+                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<SummarizeTechResumoService>());
+                    break;
+                default: // Claude
+                    services.AddClaudeSummary(config);
+                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<ClaudeResumoService>());
+                    break;
+            }
+        }
+
+        services.AddSingleton<IResumoService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IResumoService>(nome))).ToList();
+            return new FallbackResumoService(cadeia, sp.GetRequiredService<ILogger<FallbackResumoService>>());
+        });
+        services.Decorate<IResumoService, TelemetriaResumoService>();
+
+        return services;
     }
 
-    /// <summary>Categorização (sempre Claude por enquanto).</summary>
+    /// <summary>
+    /// Categorização — cadeia de fallback (Feature #101), configurável via
+    /// Categorizacao:FallbackChain (default: Claude → Grok → OpenAI). Mesmo mecanismo de
+    /// AddSummaryService.
+    /// </summary>
     public static IServiceCollection AddCategorizacaoService(this IServiceCollection services, IConfiguration config)
-        => services.AddClaudeCategorizacao(config);
+    {
+        var cadeiaNomes = config.GetSection("Categorizacao:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
+
+        foreach (var nome in cadeiaNomes)
+        {
+            switch (nome)
+            {
+                case "Grok":
+                    services.AddGrokCategorizacao(config);
+                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
+                    break;
+                case "OpenAI":
+                    services.AddOpenAiCategorizacao(config);
+                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<OpenAiCategorizacaoService>());
+                    break;
+                default: // Claude
+                    services.AddClaudeCategorizacao(config);
+                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<ClaudeCategorizacaoService>());
+                    break;
+            }
+        }
+
+        services.AddSingleton<ICategorizacaoService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<ICategorizacaoService>(nome))).ToList();
+            return new FallbackCategorizacaoService(cadeia, sp.GetRequiredService<ILogger<FallbackCategorizacaoService>>());
+        });
+        services.Decorate<ICategorizacaoService, TelemetriaCategorizacaoService>();
+
+        return services;
+    }
 
     /// <summary>Avaliador de conteúdo via IA (sempre Claude por enquanto) — usado pelo guardrail AvaliacaoIA.</summary>
     public static IServiceCollection AddAvaliadorIAService(this IServiceCollection services, IConfiguration config)
         => services.AddClaudeAvaliadorIA(config);
 
     /// <summary>
-    /// Embedding:Provider — Direct (padrão), SupabaseEdgeFunction. IndexarAsync sai decorado
-    /// com telemetria (tempo/custo — custo só aparece com Direct, que chama a OpenAI aqui
-    /// mesmo; a Edge Function do Supabase chama a OpenAI do lado de lá, invisível pro .NET).
+    /// Embedding — cadeia de fallback (Feature #101), configurável via Embedding:FallbackChain
+    /// (default: só ["OpenAI"] por enquanto). Cada provider embeda a pergunta/os chunks do seu
+    /// próprio lado e marca a origem (VideoChunk.Origem) — o Supabase (Edge Function
+    /// buscar-similar) filtra por origem antes de comparar vetores, então adicionar um segundo
+    /// provider na cadeia (ex: "VoyageAI") não mistura espaços vetoriais incompatíveis, ao
+    /// contrário do que acontecia antes dessa mudança. Mesmo mecanismo de AddSummaryService.
     /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
-        var provider = config["Embedding:Provider"] ?? "Direct";
+        var cadeiaNomes = config.GetSection("Embedding:FallbackChain").Get<string[]>() ?? ["OpenAI"];
 
-        if (provider == "SupabaseEdgeFunction")
-            services.AddSupabaseEmbedding(config);
-        else
-            services.AddDirectEmbedding(config);
+        foreach (var nome in cadeiaNomes)
+        {
+            switch (nome)
+            {
+                case "VoyageAI":
+                    services.AddVoyageEmbedding(config);
+                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<VoyageEmbeddingService>());
+                    break;
+                default: // OpenAI
+                    services.AddOpenAiEmbedding(config);
+                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<OpenAIEmbeddingService>());
+                    break;
+            }
+        }
 
+        services.AddSingleton<IEmbeddingService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
+            return new FallbackEmbeddingService(cadeia, sp.GetRequiredService<ILogger<FallbackEmbeddingService>>());
+        });
         services.Decorate<IEmbeddingService, TelemetriaEmbeddingService>();
+
         return services;
     }
 
-    /// <summary>Agent de perguntas e respostas (sempre Claude por enquanto).</summary>
+    /// <summary>
+    /// Agent de perguntas e respostas — cadeia de fallback (Feature #101), configurável via
+    /// Agent:FallbackChain (default: Claude → Grok → OpenAI). Mesmo mecanismo de
+    /// AddSummaryService.
+    /// </summary>
     public static IServiceCollection AddAgentService(this IServiceCollection services, IConfiguration config)
-        => services.AddClaudeAgent(config);
+    {
+        var cadeiaNomes = config.GetSection("Agent:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
+
+        foreach (var nome in cadeiaNomes)
+        {
+            switch (nome)
+            {
+                case "Grok":
+                    services.AddGrokAgent(config);
+                    services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<GrokAgentService>());
+                    break;
+                case "OpenAI":
+                    services.AddOpenAiAgent(config);
+                    services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<OpenAiAgentService>());
+                    break;
+                default: // Claude
+                    services.AddClaudeAgent(config);
+                    services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<ClaudeAgentService>());
+                    break;
+            }
+        }
+
+        services.AddSingleton<IAgentService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IAgentService>(nome))).ToList();
+            return new FallbackAgentService(cadeia, sp.GetRequiredService<ILogger<FallbackAgentService>>());
+        });
+        services.Decorate<IAgentService, TelemetriaAgentService>();
+
+        return services;
+    }
 
     /// <summary>Channel:Provider — Telegram (único por enquanto; WhatsApp/Web futuramente).</summary>
     public static IServiceCollection AddChatChannel(this IServiceCollection services, IConfiguration config)

@@ -49,7 +49,8 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
                 titulo      = c.Titulo,
                 chunk_index = c.ChunkIndex,
                 conteudo    = c.Conteudo,
-                embedding   = c.Embedding
+                embedding   = c.Embedding,
+                origem      = c.Origem
             });
 
             var content = new StringContent(JsonConvert.SerializeObject(batch), Encoding.UTF8, "application/json");

@@ -1,16 +1,18 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
 
-namespace Giom.VideoManager.Infrastructure.Anthropic;
+namespace Giom.VideoManager.Infrastructure.Observabilidade;
 
 /// <summary>
 /// Estende a sessão de canal/página/vídeo já aberta pelo ChannelProcessor com o segmento da
 /// etapa atual (resumo/categorização), em vez de recomeçar uma sessão isolada por vídeo — é
 /// isso que dá a hierarquia canal->página->vídeo->etapa na plataforma de observabilidade
 /// externa (Helicone). Se não houver sessão de canal aberta (ex.: chamada avulsa em teste),
-/// cai de volta pra uma sessão isolada por vídeo.
+/// cai de volta pra uma sessão isolada por vídeo. Compartilhado entre todos os adapters de
+/// IA (Anthropic, Grok, OpenAI) — vive no kernel Infrastructure pra evitar referência direta
+/// entre projetos Infrastructure.*.
 /// </summary>
-internal static class SessaoPipelineExtensions
+public static class SessaoPipelineExtensions
 {
     public static SessaoObservabilidade ParaEtapa(this SessaoObservabilidade? sessaoBase, string etapa, Video video)
     {

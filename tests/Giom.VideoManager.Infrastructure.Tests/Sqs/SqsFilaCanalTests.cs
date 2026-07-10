@@ -2,6 +2,7 @@ using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using Giom.VideoManager.Infrastructure.Sqs;
+using Giom.VideoManager.Testes.Comuns;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -22,7 +23,7 @@ public class SqsFilaCanalTests
         _sqs.Setup(s => s.GetQueueAttributesAsync(It.IsAny<GetQueueAttributesRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GetQueueAttributesResponse { Attributes = new() { [QueueAttributeName.QueueArn] = ArnDlq } });
 
-        _canal = new SqsFilaCanal(_sqs.Object, Options.Create(new SqsOptions { QueueName = "fila-teste", MaxReceiveCount = 3, VisibilityTimeout = 300 }));
+        _canal = new SqsFilaCanal(_sqs.Object, Options.Create(new SqsOptions { QueueName = "fila-teste", MaxReceiveCount = 3, VisibilityTimeout = 300 }), new FakeLogger<SqsFilaCanal>(), TimeSpan.Zero);
     }
 
     [Fact]
@@ -65,6 +66,38 @@ public class SqsFilaCanalTests
 
         // 2 CreateQueue no total (DLQ + fila), não 4 — a segunda chamada usa o cache
         _sqs.Verify(s => s.CreateQueueAsync(It.IsAny<CreateQueueRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ResolverQueueUrl_FalhaTransitoriaUmaVez_TentaDeNovoESucede()
+    {
+        // Bug #103 (incidente 2026-07-09): blip transitório do SQS na criação da fila principal
+        // — a mesma chamada que falhou uma vez deve suceder na tentativa seguinte, sem propagar.
+        var chamadas = 0;
+        _sqs.Setup(s => s.CreateQueueAsync(It.Is<CreateQueueRequest>(r => r.QueueName == "fila-teste"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                chamadas++;
+                if (chamadas == 1) throw new AmazonSQSException("blip transitório simulado");
+                return new CreateQueueResponse { QueueUrl = "https://sqs/fila-teste" };
+            });
+
+        var url = await _canal.ResolverQueueUrlAsync(CancellationToken.None);
+
+        Assert.Equal("https://sqs/fila-teste", url);
+        Assert.Equal(2, chamadas);
+    }
+
+    [Fact]
+    public async Task ResolverQueueUrl_FalhaPersistente_PropagaAposEsgotarTentativas()
+    {
+        _sqs.Setup(s => s.CreateQueueAsync(It.Is<CreateQueueRequest>(r => r.QueueName == "fila-teste"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AmazonSQSException("falha persistente simulada"));
+
+        await Assert.ThrowsAsync<AmazonSQSException>(() => _canal.ResolverQueueUrlAsync(CancellationToken.None));
+
+        // DLQ (1) + 3 tentativas na fila principal — não deve tentar uma 4ª vez
+        _sqs.Verify(s => s.CreateQueueAsync(It.Is<CreateQueueRequest>(r => r.QueueName == "fila-teste"), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
     private static bool RedrivePolicyValida(CreateQueueRequest request)

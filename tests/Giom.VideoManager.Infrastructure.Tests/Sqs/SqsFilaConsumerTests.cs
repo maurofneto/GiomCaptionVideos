@@ -32,7 +32,7 @@ public class SqsFilaConsumerTests
             .ReturnsAsync(new ChangeMessageVisibilityResponse());
 
         var options = Options.Create(new SqsOptions { QueueName = "fila-teste", MaxReceiveCount = 3, RetryDelaySeconds = 10 });
-        _consumer = new SqsFilaConsumer<MensagemDeTeste>(_sqs.Object, new SqsFilaCanal(_sqs.Object, options), options, _logger);
+        _consumer = new SqsFilaConsumer<MensagemDeTeste>(_sqs.Object, new SqsFilaCanal(_sqs.Object, options, new FakeLogger<SqsFilaCanal>()), options, _logger);
     }
 
     private void ConfigurarFilaCom(params Message[] mensagens)

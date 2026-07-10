@@ -28,7 +28,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IAmazonSQS>(_ =>
             new AmazonSQSClient(RegionEndpoint.GetBySystemName(options.Region)));
 
-        services.AddKeyedSingleton<SqsFilaCanal>(chave, (sp, _) => new SqsFilaCanal(sp.GetRequiredService<IAmazonSQS>(), iOptions));
+        services.AddKeyedSingleton<SqsFilaCanal>(chave, (sp, _) =>
+            new SqsFilaCanal(sp.GetRequiredService<IAmazonSQS>(), iOptions, sp.GetRequiredService<ILogger<SqsFilaCanal>>()));
 
         services.AddKeyedSingleton<IFilaPublisher<VideoEtapaMensagem>>(chave, (sp, key) =>
             new SqsFilaPublisher<VideoEtapaMensagem>(sp.GetRequiredService<IAmazonSQS>(), sp.GetRequiredKeyedService<SqsFilaCanal>(key)));
