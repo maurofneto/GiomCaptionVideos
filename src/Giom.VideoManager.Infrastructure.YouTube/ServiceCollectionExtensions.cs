@@ -55,51 +55,6 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>
-    /// Registra ICaptionService conforme Transcription:Provider, decorado com telemetria
-    /// (tempo/sucesso — nenhum desses providers cobra por chamada, então nunca reporta custo).
-    /// Valores aceitos: YouTubeCaption, YtDlpCaption, YouTubeTranscript (padrão — sem quota, sem processo externo).
-    /// </summary>
-    public static IServiceCollection AddYouTubeCaptionService(this IServiceCollection services, IConfiguration config)
-    {
-        var provider = config["Transcription:Provider"] ?? "YouTubeTranscript";
-
-        switch (provider)
-        {
-            case "YtDlpCaption":
-                services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
-                services.AddSingleton<YtDlpCaptionService>();
-                services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
-                    sp.GetRequiredService<YtDlpCaptionService>(),
-                    sp.GetRequiredService<ITelemetriaService>(),
-                    sp.GetRequiredService<ITracingService>(),
-                    sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-                break;
-
-            case "YouTubeCaption":
-                services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
-                services.AddSingleton<YouTubeCaptionService>();
-                services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
-                    sp.GetRequiredService<YouTubeCaptionService>(),
-                    sp.GetRequiredService<ITelemetriaService>(),
-                    sp.GetRequiredService<ITracingService>(),
-                    sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-                break;
-
-            default: // YouTubeTranscript
-                services.Configure<YouTubeTranscriptOptions>(config.GetSection("YouTubeTranscript"));
-                services.AddSingleton<YouTubeTranscriptService>();
-                services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
-                    sp.GetRequiredService<YouTubeTranscriptService>(),
-                    sp.GetRequiredService<ITelemetriaService>(),
-                    sp.GetRequiredService<ITracingService>(),
-                    sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
-                break;
-        }
-
-        return services;
-    }
-
     private static async Task<UserCredential> GetGoogleCredential(GoogleCredentialOptions options)
     {
         if (string.IsNullOrWhiteSpace(options.ClientId))

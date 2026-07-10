@@ -1,5 +1,6 @@
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Application.Pipeline;
@@ -12,10 +13,15 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// decide retry/DLQ), só que tipado pra EtapaConcluidaMensagem em vez de VideoEtapaMensagem — os
 /// dois shapes carregam campos diferentes o suficiente (Etapa vs nenhum) pra não valer a pena
 /// forçar um generic só por reuso.
+/// Depende do PipelineHandler diretamente (não de um Func genérico como EtapaQueueConsumer) —
+/// só existe UM orquestrador, nunca é reaproveitado com handlers diferentes por chamador, então
+/// não precisa de indireção nenhuma. Isso, mais [FromKeyedServices] na chave fixa "etapa-concluida",
+/// deixa a classe inteira construível via injeção de construtor comum — sem factory, sem "new" no
+/// ServiceCollection (ver AddPipelineOrquestrador).
 /// </summary>
 public class EtapaConcluidaQueueConsumer(
-    IFilaConsumer<EtapaConcluidaMensagem> filaConsumer,
-    Func<EtapaConcluidaMensagem, CancellationToken, Task> processar,
+    [FromKeyedServices("etapa-concluida")] IFilaConsumer<EtapaConcluidaMensagem> filaConsumer,
+    PipelineHandler pipelineHandler,
     ITracingService tracingService,
     ISessionContext sessionContext,
     ILogger<EtapaConcluidaQueueConsumer> logger)
@@ -45,7 +51,7 @@ public class EtapaConcluidaQueueConsumer(
 
             try
             {
-                await processar(mensagem, token);
+                await pipelineHandler.ProcessarAsync(mensagem, token);
             }
             catch (Exception ex)
             {

@@ -29,8 +29,14 @@ public class PipelineHandler(
         if (!_options.Canais.TryGetValue(video.ChannelId, out var canal))
             throw new InvalidOperationException($"Canal desconhecido pro orquestrador: ChannelId={video.ChannelId} ({video.ChannelTitle}) — falta em Topologia:Canais");
 
-        if (!_options.Topologia.TryGetValue(canal, out var porEtapa) || !porEtapa.TryGetValue(mensagem.Etapa, out var proximasEtapas))
-            throw new InvalidOperationException($"Topologia não configurada pro canal {canal}, etapa {mensagem.Etapa}");
+        if (!_options.Topologia.TryGetValue(canal, out var porEtapa))
+            throw new InvalidOperationException($"Canal {canal} não tem topologia configurada em Topologia:Topologia");
+
+        // Uma etapa terminal ("etapa": [] no JSON) não sobra nenhuma chave flatten na
+        // IConfiguration — o binder nem chega a criar a entrada no dicionário. "Não encontrada"
+        // e "lista vazia" são indistinguíveis vindo de appsettings.json, então tratamos as duas
+        // como terminal (sem isso, toda etapa final da topologia real lançava aqui).
+        var proximasEtapas = porEtapa.GetValueOrDefault(mensagem.Etapa, []);
 
         if (proximasEtapas.Length == 0)
         {

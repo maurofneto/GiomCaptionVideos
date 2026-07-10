@@ -149,15 +149,31 @@ public class PipelineHandlerTests
     }
 
     [Fact]
-    public async Task EtapaSemTopologiaConfigurada_Lanca()
+    public async Task EtapaSemEntradaNaTopologia_TrataComoTerminal()
     {
+        // Ministério não tem "categorizacao" na topologia (não usa essa etapa) — mesmo caso que
+        // uma etapa com "[]" explícito no JSON: o binder do IConfiguration não distingue "chave
+        // ausente" de "array vazio" (nenhum dos dois sobra na flatten), então o orquestrador
+        // trata os dois como terminal em vez de lançar.
         var ambiente = new Ambiente();
         var video = CriarVideo(ChannelIdMinisterio);
 
-        // Ministério não tem "categorizacao" na topologia (não usa essa etapa) — mensagem
-        // inesperada, deve propagar (bug real, não deveria acontecer) em vez de ser ignorada
-        // silenciosamente.
+        await ambiente.CriarHandler().ProcessarAsync(new EtapaConcluidaMensagem(video, "categorizacao", null, null), CancellationToken.None);
+
+        Assert.NotNull(video.ProcessedAt);
+    }
+
+    [Fact]
+    public async Task CanalSemEntradaNaTopologia_Lanca()
+    {
+        // Diferente do caso acima: aqui o canal inteiro está ausente de Topologia:Topologia
+        // (não é uma questão de array vazio vs. chave ausente numa sub-seção) — isso é sempre
+        // configuração incompleta de verdade, deve propagar.
+        var ambiente = new Ambiente();
+        ambiente.Topologia.Canais["outro-canal"] = "SemTopologia";
+        var video = CriarVideo("outro-canal");
+
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            ambiente.CriarHandler().ProcessarAsync(new EtapaConcluidaMensagem(video, "categorizacao", null, null), CancellationToken.None));
+            ambiente.CriarHandler().ProcessarAsync(new EtapaConcluidaMensagem(video, "transcricao", null, null), CancellationToken.None));
     }
 }

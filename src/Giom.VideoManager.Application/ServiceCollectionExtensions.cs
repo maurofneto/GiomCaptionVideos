@@ -61,12 +61,10 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<Options.TopologiaOptions>(config.GetSection("Topologia"));
         services.AddSingleton<PipelineHandler>();
-        services.AddSingleton(sp => new EtapaConcluidaQueueConsumer(
-            sp.GetRequiredKeyedService<IFilaConsumer<EtapaConcluidaMensagem>>("etapa-concluida"),
-            (mensagem, ct) => sp.GetRequiredService<PipelineHandler>().ProcessarAsync(mensagem, ct),
-            sp.GetRequiredService<ITracingService>(),
-            sp.GetRequiredService<ISessionContext>(),
-            sp.GetRequiredService<ILogger<EtapaConcluidaQueueConsumer>>()));
+        // Sem factory: EtapaConcluidaQueueConsumer resolve a fila keyed via [FromKeyedServices]
+        // no próprio construtor e depende do PipelineHandler diretamente (não de um Func) — o
+        // container constrói sozinho, sem "new" aqui.
+        services.AddSingleton<EtapaConcluidaQueueConsumer>();
         return services;
     }
 
