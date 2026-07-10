@@ -111,7 +111,7 @@ public static class ServiceCollectionExtensions
                     ClientId = clientId,
                     ClientSecret = config[$"{canal.SecretsKey}:Google:ClientSecret"] ?? string.Empty,
                     RefreshToken = config[$"{canal.SecretsKey}:Google:RefreshToken"],
-                    ApplicationName = $"Giom {canal.Nome} Processor",
+                    ApplicationName = $"{ApplicationNameFormatter.ParaAscii(canal.Nome)} Processor",
                     User = user
                 };
 
