@@ -31,7 +31,8 @@ using var host = Host.CreateDefaultBuilder(args)
     {
         var config = ctx.Configuration;
 
-        services.AddEmbeddingService(config);      // SupabaseEdgeFunction — retrieval (RAG)
+        services.AddPersistence(config);           // Supabase — OpenAIEmbeddingService depende de IVideoChunkRepository (só usado na indexação, mas exigido pelo construtor)
+        services.AddEmbeddingService(config);      // Embedding:FallbackChain (OpenAI) — retrieval (RAG), embedding da pergunta calculado aqui e filtrado por origem no Supabase
         services.AddIncertezaDetectorService(config); // Heuristica (padrão) — usado pelo agente pra marcar telemetria
         services.AddGuardRails(config);            // GuardRails:Habilitados — segurança/confiabilidade sobre pergunta e resposta
         services.AddAgentService(config);          // Claude

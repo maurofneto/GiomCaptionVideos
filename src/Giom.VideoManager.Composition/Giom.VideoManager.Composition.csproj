@@ -5,6 +5,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Application\Giom.VideoManager.Application.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure\Giom.VideoManager.Infrastructure.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Anthropic\Giom.VideoManager.Infrastructure.Anthropic.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Grok\Giom.VideoManager.Infrastructure.Grok.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Helicone\Giom.VideoManager.Infrastructure.Helicone.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.OpenAI\Giom.VideoManager.Infrastructure.OpenAI.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.YouTube\Giom.VideoManager.Infrastructure.YouTube.csproj" />
@@ -16,6 +17,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Supabase\Giom.VideoManager.Infrastructure.Supabase.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sentry\Giom.VideoManager.Infrastructure.Sentry.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sqs\Giom.VideoManager.Infrastructure.Sqs.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Voyage\Giom.VideoManager.Infrastructure.Voyage.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.RabbitMq\Giom.VideoManager.Infrastructure.RabbitMq.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets\Giom.VideoManager.Infrastructure.Secrets.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Aws\Giom.VideoManager.Infrastructure.Secrets.Aws.csproj" />

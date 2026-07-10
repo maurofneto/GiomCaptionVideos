@@ -1,12 +1,12 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Resiliencia;
 using Giom.VideoManager.Infrastructure.Supabase;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace Giom.VideoManager.Infrastructure.OpenAI;
 
@@ -28,21 +28,28 @@ public class DirectEmbeddingOptions
 ///
 /// Busca semântica delega à Edge Function buscar-similar (leve — 1 embedding + 1 query).
 /// </summary>
-public class DirectEmbeddingService : IEmbeddingService
+public class OpenAIEmbeddingService : IEmbeddingService
 {
+    /// <summary>
+    /// Tag gravada em cada chunk e enviada em toda busca — o Supabase só compara embeddings da
+    /// MESMA origem (Feature #101), já que vetores de provedores diferentes não são comparáveis
+    /// por similaridade de cosseno entre si.
+    /// </summary>
+    private const string Origem = "OpenAI";
+
     private readonly DirectEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
-    private readonly ILogger<DirectEmbeddingService> _logger;
+    private readonly ILogger<OpenAIEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly HttpClient _openAi;
     private readonly HttpClient _supabaseFunctions;
 
-    public DirectEmbeddingService(
+    public OpenAIEmbeddingService(
         IOptions<DirectEmbeddingOptions> options,
         IOptions<SupabaseOptions> supabaseOptions,
         IVideoChunkRepository chunkRepository,
         IHttpClientFactory httpClientFactory,
-        ILogger<DirectEmbeddingService> logger,
+        ILogger<OpenAIEmbeddingService> logger,
         IContextoTelemetria contextoTelemetria)
     {
         _options         = options.Value;
@@ -88,7 +95,7 @@ public class DirectEmbeddingService : IEmbeddingService
             video.Id, conteudo.Length,
             conteudo.Length > 300 ? conteudo[..300] : conteudo);
 
-        var chunks = SplitIntoChunks(conteudo);
+        var chunks = TextChunker.Dividir(conteudo, _options.ChunkSize, _options.ChunkOverlap);
         _logger.LogInformation("{VideoId} — {Chunks} chunks de {Chars} chars",
             video.Id, chunks.Count, conteudo.Length);
 
@@ -108,14 +115,17 @@ public class DirectEmbeddingService : IEmbeddingService
                 Titulo     = video.Title,
                 ChunkIndex = i,
                 Conteudo   = mem.ToString(),
-                Embedding  = embeddings[i]
+                Embedding  = embeddings[i],
+                Origem     = Origem
             }), ct);
 
         _logger.LogInformation("{VideoId} — {Chunks} chunks indexados com sucesso", video.Id, chunks.Count);
     }
 
     // =========================================================
-    // Busca — delega para a Edge Function buscar-similar
+    // Busca — embeda a pergunta aqui mesmo (client-side) e delega o resto (RRF híbrido,
+    // diversidade por aula) pra Edge Function buscar-similar, passando embedding+origem
+    // (Feature #101) — o Supabase filtra por origem antes de comparar vetores.
     // =========================================================
 
     public async Task<BuscaSemanticaResultado> BuscarAsync(
@@ -126,7 +136,10 @@ public class DirectEmbeddingService : IEmbeddingService
         double threshold = 0.35,
         CancellationToken ct = default)
     {
-        var payload = new { pergunta, area, limite, threshold, canal_id = canalId };
+        var (embeddings, _) = await GenerateEmbeddingsAsync([pergunta.AsMemory()], ct);
+        var embedding = embeddings[0];
+
+        var payload = new { pergunta, embedding, origem = Origem, area, limite, threshold, canal_id = canalId };
         var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
 
         var response = await _supabaseFunctions.PostAsync("functions/v1/buscar-similar", content, ct);
@@ -164,65 +177,6 @@ public class DirectEmbeddingService : IEmbeddingService
     // =========================================================
     // Helpers privados
     // =========================================================
-
-    // Retorna spans sobre a string original — zero cópias intermediárias.
-    // Cada ReadOnlyMemory<char> é apenas (ponteiro + offset + length) sobre `text`.
-    private List<ReadOnlyMemory<char>> SplitIntoChunks(string text)
-    {
-        var chunks = new List<ReadOnlyMemory<char>>();
-        var mem    = text.AsMemory();
-        int start  = 0;
-
-        while (start < text.Length)
-        {
-            int end = start + _options.ChunkSize;
-
-            if (end < text.Length)
-                end = FindGoodBreak(text, end);
-            else
-                end = text.Length;
-
-            // Trim sem alocar: avança/recua os índices dentro do span
-            var slice = mem.Slice(start, end - start);
-            var span  = slice.Span;
-            int trimStart = 0;
-            while (trimStart < span.Length && char.IsWhiteSpace(span[trimStart])) trimStart++;
-            int trimEnd = span.Length;
-            while (trimEnd > trimStart && char.IsWhiteSpace(span[trimEnd - 1])) trimEnd--;
-
-            if (trimEnd > trimStart)
-                chunks.Add(slice.Slice(trimStart, trimEnd - trimStart));
-
-            // Garante progresso mínimo de 1 char — evita loop infinito quando
-            // FindGoodBreak recua muito e end - ChunkOverlap <= start anterior.
-            int nextStart = end - _options.ChunkOverlap;
-            start = nextStart > start ? nextStart : end;
-            if (start >= text.Length) break;
-        }
-
-        return chunks;
-    }
-
-    // Opera sobre Span — sem alocar substring temporária.
-    private static int FindGoodBreak(string text, int around)
-    {
-        int sliceStart = Math.Max(0, around - 200);
-        int sliceEnd   = Math.Min(text.Length, around + 200);
-        var span       = text.AsSpan(sliceStart, sliceEnd - sliceStart);
-        int offset     = sliceStart;
-
-        int paraBreak = span.LastIndexOf("\n\n".AsSpan(), StringComparison.Ordinal);
-        if (paraBreak != -1) return offset + paraBreak + 2;
-
-        int lineBreak = span.LastIndexOf('\n');
-        if (lineBreak != -1) return offset + lineBreak + 1;
-
-        // Regex ainda precisa de string — mas só é chamada como fallback raro
-        var sentenceMatch = Regex.Match(span.ToString(), @"[.!?]\s");
-        if (sentenceMatch.Success) return offset + sentenceMatch.Index + 2;
-
-        return around;
-    }
 
     private async Task<(List<float[]> Embeddings, int TokensTotais)> GenerateEmbeddingsAsync(List<ReadOnlyMemory<char>> chunks, CancellationToken ct)
     {

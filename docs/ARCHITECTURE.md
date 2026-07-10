@@ -104,7 +104,7 @@ são convergidas via `SetQueueAttributes` (não recriadas).
 (ou o `Retry-After` que o provedor informou), porque cota estourada não é "tenta de novo em
 10 segundos que resolve": é fato consumado até o provedor liberar de novo. Cada adapter (
 `ResilientYouTubeApiService`, `ClaudeResumoService`/`ClaudeCategorizacaoService`,
-`DirectEmbeddingService`) mapeia o formato de erro do SEU provedor pra
+`OpenAIEmbeddingService`) mapeia o formato de erro do SEU provedor pra
 `RateLimitExcedidoException`, sem a fila conhecer nada de YouTube/Claude/OpenAI. Na última
 tentativa, loga `Error` (vira alerta no Sentry pelo sink já existente) e zera a visibilidade
 pra mover pra DLQ ainda nesta run.

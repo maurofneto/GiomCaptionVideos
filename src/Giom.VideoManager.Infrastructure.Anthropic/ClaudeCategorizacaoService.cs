@@ -6,6 +6,7 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Infrastructure.Observabilidade;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
