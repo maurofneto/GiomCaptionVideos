@@ -40,6 +40,14 @@ mcp__azure-devops__update_pull_request
   description / title / status / addWorkItemIds / addReviewers ...
 ```
 
+## Work items: só pelo relacionamento, nunca por texto na descrição
+
+`workItemIds` (create) / `addWorkItemIds` (update) já criam o link real do PR com o work item
+— aparece na aba "Work items" do PR e no work item também. **Não escrever uma linha tipo
+"Related work items: #X, #Y" na descrição** — isso é texto redundante que só consome espaço
+(a descrição tem limite de 4000 caracteres, ver abaixo) sem adicionar nada que o relacionamento
+já não mostre. Linkar sempre via `addWorkItemIds`/`workItemIds`, nunca por menção em texto.
+
 ## PR empilhado: "retarget automático" NÃO é automático de verdade
 
 O `docs/GIT_WORKFLOW.md` descrevia isso como algo que acontece sozinho quando a PR-base
@@ -71,9 +79,17 @@ e `repository.id`. `targetRefName`/`sourceRefName` só aceitam esse formato, nã
 A API do Azure DevOps **rejeita** (`400 Invalid argument value`) uma descrição que termina
 **exatamente** numa menção tipo `#40` sem nada depois — o parser de menção deles quebra nesse
 caso específico de fim de string, independente de qual cliente (MCP, REST, CLI) você usa pra
-escrever. Sempre feche a descrição com uma quebra de linha extra depois da linha
-`Related work items: #X, #Y`. Se a atualização falhar com esse erro genérico e a descrição
+escrever. Se a descrição terminar com esse tipo de menção por qualquer motivo, feche com uma
+quebra de linha extra depois dela. Se a atualização falhar com esse erro genérico e a descrição
 parecer válida, essa é a primeira coisa a checar.
+
+## Limite de 4000 caracteres na descrição
+
+A API rejeita (`Invalid argument value`) descrição com mais de 4000 caracteres. Textos como a
+lista de work items relacionados (ver seção acima — usar o relacionamento, não texto) já não
+competem por esse espaço; mesmo assim, PRs com "O que foi alterado" extenso podem estourar —
+priorizar o essencial (o que mudou e por quê) e cortar detalhe secundário antes de tentar de
+novo.
 
 ## Depois de criar/atualizar
 

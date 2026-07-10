@@ -11,8 +11,9 @@ variables:
   # AWS_REGION/ECR_REGISTRY vêm do group giom-aws (não variam por branch — mesma conta/registro
   # pra dev e prod). AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY continuam como variáveis secretas
   # do pipeline (Pipelines > Edit > Variables), NÃO ficam neste arquivo nem em variable group.
-  # User: giom-ci-deploy, permissão só de push nos repositórios giom-instituto/giom-ministerio
-  # e ecs:UpdateService nos dois services do AgenteInstituto.
+  # User: giom-ci-deploy, permissão de push em qualquer repositório ECR "giom-*" (wildcard —
+  # evita ter que editar a policy toda vez que um worker novo ganha repositório próprio, ver
+  # Feature #104) e ecs:UpdateService só nos dois services do AgenteInstituto.
   - group: giom-aws
   #
   # branch dev publica recursos -dev (imagem :dev, service giom-agenteinstituto-dev-service);
