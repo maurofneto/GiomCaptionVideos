@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Auth.OAuth2.Flows;
@@ -84,13 +85,56 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Monta um YouTubeService a partir de uma credencial já resolvida (ClientId/ClientSecret/
-    /// RefreshToken) — usado pelo bootstrap multi-canal (AddIngestaoMultiCanal) pra registrar um
-    /// YouTubeService keyed por canal. Extraído de AddYouTubeCredential (que resolve só UMA
-    /// credencial fixa por processo, do appsettings) pra reaproveitar a mesma lógica de auth
-    /// com N credenciais diferentes, uma por canal, buscadas do SSM em runtime.
+    /// Resolve a credencial Google e registra um YouTubeService keyed por canal (US #105) — cada
+    /// CanalIngestaoConfig pode ter Client Secret/Refresh Token diferentes, buscados de
+    /// "{SecretsKey}:Google:ClientSecret"/"RefreshToken" em IConfiguration (convenção do
+    /// bootstrap multi-canal, ver Composition.AddIngestaoMultiCanal). Mantém todo detalhe de
+    /// credencial Google (GoogleCredentialOptions, YouTubeService) dentro deste adapter —
+    /// Composition só passa a lista de canais e recebe de volta só os que autenticaram OK.
+    /// Falha ao resolver credencial de UM canal não derruba os demais — loga e pula esse canal.
     /// </summary>
-    public static YouTubeService BuildYouTubeService(GoogleCredentialOptions options)
+    public static IReadOnlyList<CanalIngestaoConfig> AddYouTubeCredenciaisPorCanal(
+        this IServiceCollection services, IConfiguration config, IReadOnlyList<CanalIngestaoConfig> canais)
+    {
+        var clientId = config["Google:ClientId"] ?? string.Empty;
+        var user = config["Google:User"] ?? "user";
+        var canaisValidos = new List<CanalIngestaoConfig>();
+
+        foreach (var canal in canais)
+        {
+            try
+            {
+                var options = new GoogleCredentialOptions
+                {
+                    ClientId = clientId,
+                    ClientSecret = config[$"{canal.SecretsKey}:Google:ClientSecret"] ?? string.Empty,
+                    RefreshToken = config[$"{canal.SecretsKey}:Google:RefreshToken"],
+                    ApplicationName = $"Giom {canal.Nome} Processor",
+                    User = user
+                };
+
+                var youtubeService = BuildYouTubeService(options);
+                services.AddKeyedSingleton(canal.ChannelId, youtubeService);
+                canaisValidos.Add(canal);
+            }
+            catch (Exception ex)
+            {
+                // Sem ILogger disponível ainda nesse ponto do bootstrap (mesma limitação de
+                // GetGoogleCredential, síncrono em ConfigureServices) — loga no Console mesmo.
+                Console.Error.WriteLine($"[AddYouTubeCredenciaisPorCanal] Falha ao resolver credencial do canal {canal.Nome} ({canal.ChannelId}) — pulando. {ex.Message}");
+            }
+        }
+
+        return canaisValidos;
+    }
+
+    /// <summary>
+    /// Monta um YouTubeService a partir de uma credencial já resolvida (ClientId/ClientSecret/
+    /// RefreshToken) — extraído de AddYouTubeCredential (que resolve só UMA credencial fixa por
+    /// processo, do appsettings) pra reaproveitar a mesma lógica de auth com N credenciais
+    /// diferentes (ver AddYouTubeCredenciaisPorCanal).
+    /// </summary>
+    private static YouTubeService BuildYouTubeService(GoogleCredentialOptions options)
     {
         var credential = GetGoogleCredential(options).GetAwaiter().GetResult();
         return new YouTubeService(new BaseClientService.Initializer

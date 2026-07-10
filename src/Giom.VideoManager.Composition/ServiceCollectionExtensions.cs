@@ -278,51 +278,26 @@ public static class ServiceCollectionExtensions
     /// depois que o container termina de montar, já que CanalIngestaoVideoHandler precisa de
     /// dependências registradas por OUTROS Add* nesta mesma composição (AddFilaVideoEtapa,
     /// AddTelemetriaService, AddTracingService), que podem rodar antes ou depois deste método.
-    /// Credencial Google de cada canal vem de "{secrets_key}:Google:ClientSecret"/"RefreshToken"
-    /// em IConfiguration — não busca no SSM aqui: com Secrets:Aws:Path apontando pra
-    /// "/giom/{env}/canais/", o bulk-load recursivo já feito em ConfigureAppConfiguration
-    /// (AddSecretsProvider) carrega "/giom/{env}/canais/instituto/Google/ClientSecret" etc.
-    /// direto pra dentro do IConfiguration, sem precisar de uma chamada SSM pontual extra por
-    /// canal (AwsParameterStoreSecretsProvider.Load() já é recursivo).
-    /// Falha ao resolver credencial de UM canal não derruba os demais — loga e pula esse canal.
+    /// Composition não conhece SupabaseCanalIngestaoRepository nem GoogleCredentialOptions/
+    /// YouTubeService diretamente — só a abstração ICanalIngestaoRepository (registrada por
+    /// AddSupabaseCanalIngestao) e o método do adapter YouTube que encapsula toda a credencial
+    /// (AddYouTubeCredenciaisPorCanal). Como a lista de canais precisa existir ANTES do
+    /// container terminar de montar (host.Services ainda não existe neste ponto), resolve
+    /// ICanalIngestaoRepository via um ServiceProvider temporário só pra essa leitura pontual —
+    /// o registro real (usado pelo container final) continua vindo de AddSupabaseCanalIngestao.
     /// </summary>
     public static IServiceCollection AddIngestaoMultiCanal(this IServiceCollection services, IConfiguration config)
     {
-        var supabaseOptions = config.GetSection("Supabase").Get<SupabaseOptions>() ?? new SupabaseOptions();
-        var canalRepository = new SupabaseCanalIngestaoRepository(Microsoft.Extensions.Options.Options.Create(supabaseOptions));
-        var canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+        services.AddSupabaseCanalIngestao(config);
 
-        var googleClientId = config["Google:ClientId"] ?? string.Empty;
-        var googleUser = config["Google:User"] ?? "user";
-
-        var canaisValidos = new List<CanalIngestaoConfig>();
-
-        foreach (var canal in canais)
+        IReadOnlyList<CanalIngestaoConfig> canais;
+        using (var bootstrapProvider = services.BuildServiceProvider())
         {
-            try
-            {
-                var googleOptions = new GoogleCredentialOptions
-                {
-                    ClientId = googleClientId,
-                    ClientSecret = config[$"{canal.SecretsKey}:Google:ClientSecret"] ?? string.Empty,
-                    RefreshToken = config[$"{canal.SecretsKey}:Google:RefreshToken"],
-                    ApplicationName = $"Giom {canal.Nome} Processor",
-                    User = googleUser
-                };
-
-                var youtubeService = Giom.VideoManager.Infrastructure.YouTube.ServiceCollectionExtensions.BuildYouTubeService(googleOptions);
-                services.AddKeyedSingleton(canal.ChannelId, youtubeService);
-                canaisValidos.Add(canal);
-            }
-            catch (Exception ex)
-            {
-                // Um canal com credencial quebrada não pode derrubar o Host.Build() inteiro pra
-                // todos os outros — sem ILogger disponível ainda nesse ponto do bootstrap, loga
-                // no Console mesmo (mesma limitação de GetGoogleCredential) e pula esse canal.
-                Console.Error.WriteLine($"[AddIngestaoMultiCanal] Falha ao resolver credencial do canal {canal.Nome} ({canal.ChannelId}) — pulando. {ex.Message}");
-            }
+            var canalRepository = bootstrapProvider.GetRequiredService<ICanalIngestaoRepository>();
+            canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
         }
 
+        var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais);
         services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
 
         services.AddSingleton<Func<string, IVideoHandler>>(sp =>
