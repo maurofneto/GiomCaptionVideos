@@ -370,4 +370,4 @@ FodyWeavers.xsd
 .claude/cache/
 
 # Config de servidores MCP locais — pode conter secrets (ex: PAT do Azure DevOps), nunca commitar
-.mcp.json
+.mcp.jsonsupabase/.temp/
