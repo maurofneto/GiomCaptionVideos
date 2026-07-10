@@ -18,6 +18,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Prompts\*.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Giom.VideoManager.Domain\Giom.VideoManager.Domain.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Application\Giom.VideoManager.Application.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Composition\Giom.VideoManager.Composition.csproj" />
