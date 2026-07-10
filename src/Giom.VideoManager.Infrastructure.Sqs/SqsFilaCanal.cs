@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Infrastructure.Sqs;
@@ -14,7 +15,7 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 /// SetQueueAttributes em vez de falhar. Singleton — resolve/cria uma vez por processo e
 /// cacheia, evitando uma chamada a mais por mensagem.
 /// </summary>
-public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options)
+public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options, ILogger<SqsFilaCanal> logger, TimeSpan? delayEntreTentativas = null)
 {
     private readonly SqsOptions _options = options.Value;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -22,6 +23,18 @@ public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options)
 
     /// <summary>Retenção da DLQ: 14 dias (máximo do SQS) — prazo pra investigar/reprocessar (Feature #35) antes de perder a mensagem.</summary>
     private const string RetencaoDlqSegundos = "1209600";
+
+    /// <summary>
+    /// Bug #103 (incidente 2026-07-09): o plano de controle do SQS já devolveu, na mesma janela
+    /// de segundos, "fila já existe" (CreateQueue) e "fila não existe" (GetQueueUrl) pra mesma
+    /// fila — uma inconsistência transitória do lado da AWS, não um erro real. Sem retry, isso
+    /// derrubava o processo inteiro no boot (e, por causa do Task.WhenAll — ver Bug #102 —,
+    /// levava junto os outros consumers saudáveis). 3 tentativas com um delay curto cobre esse
+    /// tipo de blip sem atrasar demais um boot saudável. Delay injetável (default 5s) só pra
+    /// permitir testes rápidos — produção sempre usa o default.
+    /// </summary>
+    private const int MaxTentativasResolucao = 3;
+    private readonly TimeSpan _delayEntreTentativas = delayEntreTentativas ?? TimeSpan.FromSeconds(5);
 
     public string NomeDlq => $"{_options.QueueName}-dlq";
 
@@ -34,16 +47,19 @@ public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options)
         {
             if (_queueUrl is not null) return _queueUrl;
 
-            var dlqArn = await GarantirDlqAsync(ct);
-
-            _queueUrl = await CriarOuConvergirAsync(_options.QueueName, new Dictionary<string, string>
+            _queueUrl = await ComRetryAsync(async () =>
             {
-                [QueueAttributeName.VisibilityTimeout] = _options.VisibilityTimeout.ToString(),
-                [QueueAttributeName.RedrivePolicy] = JsonSerializer.Serialize(new
+                var dlqArn = await GarantirDlqAsync(ct);
+
+                return await CriarOuConvergirAsync(_options.QueueName, new Dictionary<string, string>
                 {
-                    deadLetterTargetArn = dlqArn,
-                    maxReceiveCount = _options.MaxReceiveCount.ToString()
-                })
+                    [QueueAttributeName.VisibilityTimeout] = _options.VisibilityTimeout.ToString(),
+                    [QueueAttributeName.RedrivePolicy] = JsonSerializer.Serialize(new
+                    {
+                        deadLetterTargetArn = dlqArn,
+                        maxReceiveCount = _options.MaxReceiveCount.ToString()
+                    })
+                }, ct);
             }, ct);
 
             return _queueUrl;
@@ -51,6 +67,23 @@ public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options)
         finally
         {
             _lock.Release();
+        }
+    }
+
+    private async Task<string> ComRetryAsync(Func<Task<string>> acao, CancellationToken ct)
+    {
+        for (var tentativa = 1; ; tentativa++)
+        {
+            try
+            {
+                return await acao();
+            }
+            catch (Exception ex) when (tentativa < MaxTentativasResolucao)
+            {
+                logger.LogWarning(ex, "Falha ao resolver/criar a fila {Fila} (tentativa {Tentativa}/{Max}) — tentando de novo em {Delay}s",
+                    _options.QueueName, tentativa, MaxTentativasResolucao, _delayEntreTentativas.TotalSeconds);
+                await Task.Delay(_delayEntreTentativas, ct);
+            }
         }
     }
 
