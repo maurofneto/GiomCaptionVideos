@@ -10,6 +10,11 @@ public static class ServiceCollectionExtensions
     /// <summary>Registrado como ITelemetriaSink (não ITelemetriaService) — CompositeTelemetriaService agrega todo ITelemetriaSink automaticamente via DI.</summary>
     public static IServiceCollection AddSentryTelemetria(this IServiceCollection services)
     {
+        // SentryTelemetriaService depende de ISessionContext — registra aqui (idempotente) em
+        // vez de depender de outro Add* (ex: AddSummaryService) registrar de carona. Workers só
+        // de ingestão (ex: Instituto.Worker pós-#104) não chamam nenhum provider de IA, então
+        // essa carona deixou de existir.
+        services.AddSessionContext();
         services.AddSingleton<ITelemetriaSink, SentryTelemetriaService>();
         return services;
     }
@@ -27,6 +32,9 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddSentryTracing(this IServiceCollection services, IConfiguration config)
     {
+        // SentryTracingService também depende de ISessionContext — mesmo motivo do
+        // AddSentryTelemetria acima.
+        services.AddSessionContext();
         services.AddSingleton<ITracingService, SentryTracingService>();
         // Sem factory: IConfiguration já é registrado pelo Generic Host — o construtor da
         // hosted service resolve sozinho.
