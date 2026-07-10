@@ -68,6 +68,15 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
 
+      # US #105 — Ingestao.Worker substitui Instituto.Worker/Ministerio.Worker (canal_ingestao
+      # no Supabase decide quais canais processar numa run só). Os dois antigos continuam no
+      # pipeline por enquanto — retirada é o passo de cutover final, depois de validar em
+      # dev/prod lado a lado.
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-ingestao
+          dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
+
       - template: pipelines/templates/build-push-image.yml
         parameters:
           serviceName: giom-instituto
