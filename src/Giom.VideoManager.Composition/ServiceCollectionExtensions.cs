@@ -1,6 +1,8 @@
 using Giom.VideoManager.Application;
+using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Feedback;
@@ -266,6 +268,66 @@ public static class ServiceCollectionExtensions
     /// <summary>VideoSource:Provider — YouTube (padrão, único por enquanto).</summary>
     public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
         => services.AddYouTubeVideoSource(config);
+
+    /// <summary>
+    /// Bootstrap multi-canal pra ingestão unificada (US #105, Ingestao.Worker) — lê os canais
+    /// ativos do Supabase (tabela canal_ingestao) SÍNCRONO durante ConfigureServices (mesmo
+    /// padrão já aceito nesse código pra GetGoogleCredential(...).GetAwaiter().GetResult() em
+    /// AddYouTubeCredential), registra um YouTubeService keyed por canal e um
+    /// Func&lt;string, IVideoHandler&gt; resolvido preguiçosamente na primeira chamada — só
+    /// depois que o container termina de montar, já que CanalIngestaoVideoHandler precisa de
+    /// dependências registradas por OUTROS Add* nesta mesma composição (AddFilaVideoEtapa,
+    /// AddTelemetriaService, AddTracingService), que podem rodar antes ou depois deste método.
+    /// Composition não conhece SupabaseCanalIngestaoRepository nem GoogleCredentialOptions/
+    /// YouTubeService diretamente — só a abstração ICanalIngestaoRepository (registrada por
+    /// AddSupabaseCanalIngestao) e o método do adapter YouTube que encapsula toda a credencial
+    /// (AddYouTubeCredenciaisPorCanal). Como a lista de canais precisa existir ANTES do
+    /// container terminar de montar (host.Services ainda não existe neste ponto), resolve
+    /// ICanalIngestaoRepository via um ServiceProvider temporário só pra essa leitura pontual —
+    /// o registro real (usado pelo container final) continua vindo de AddSupabaseCanalIngestao.
+    /// </summary>
+    public static IServiceCollection AddIngestaoMultiCanal(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddSupabaseCanalIngestao(config);
+
+        IReadOnlyList<CanalIngestaoConfig> canaisValidos;
+        using (var bootstrapProvider = services.BuildServiceProvider())
+        {
+            var canalRepository = bootstrapProvider.GetRequiredService<ICanalIngestaoRepository>();
+            var canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+
+            // Logger vem do mesmo provider de bootstrap (já tem Serilog+Sentry configurados por
+            // UseSerilog, registrado antes deste ConfigureServices no Host builder) — nada de
+            // Console.WriteLine pra erro de credencial por canal. Resolvido e usado dentro do
+            // using: o logger não precisa sobreviver ao descarte do provider temporário, só
+            // durante esta chamada síncrona.
+            var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Giom.VideoManager.Composition.AddIngestaoMultiCanal");
+            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+        }
+
+        services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
+
+        services.AddSingleton<Func<string, IVideoHandler>>(sp =>
+        {
+            var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
+            var sessionContext = sp.GetRequiredService<ISessionContext>();
+            var tracingService = sp.GetRequiredService<ITracingService>();
+            var canalPorId = canaisValidos.ToDictionary(c => c.ChannelId);
+            var cache = new Dictionary<string, IVideoHandler>();
+
+            return channelId =>
+            {
+                if (!cache.TryGetValue(channelId, out var handler))
+                {
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], transcricaoPublisher, sessionContext, tracingService);
+                    cache[channelId] = handler;
+                }
+                return handler;
+            };
+        });
+
+        return services;
+    }
 
     /// <summary>
     /// ConversaHistorico:Provider — InMemory (padrão), Supabase, MongoDB. Decorado com

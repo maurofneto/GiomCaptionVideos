@@ -37,6 +37,7 @@ public class ChannelProcessorTests
         public Mock<IVideoHandler> Handler { get; } = new();
         public FakeTracingService Tracing { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
+        public FakeActiveChannelContext ActiveChannel { get; } = new();
         public Mock<IHostEnvironment> HostEnvironment { get; } = new();
         public FakeLogger<ChannelProcessor> Logger { get; } = new();
         public ProcessingOptions Opcoes { get; set; } = new() { DelayBetweenPagesMs = 0, DelayBetweenVideosMs = 0, MaxVideosPerRun = 100 };
@@ -53,7 +54,7 @@ public class ChannelProcessorTests
         }
 
         public ChannelProcessor CriarProcessor() => new(
-            VideoSource.Object, Progresso.Object, Handler.Object, Tracing, SessionContext, HostEnvironment.Object, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
+            VideoSource.Object, Progresso.Object, _ => Handler.Object, Tracing, SessionContext, ActiveChannel, HostEnvironment.Object, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
     }
 
     [Fact]
@@ -164,6 +165,50 @@ public class ChannelProcessorTests
         await ambiente.CriarProcessor().RunAsync([canalQueFalha, canalOk], CancellationToken.None);
 
         ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(vd => vd.Id == "v1"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunAsync_ComDoisCanais_ResolveUmIVideoHandlerDiferentePorChannelId()
+    {
+        // US #105: com N canais numa run só, cada um pode ter seu próprio IVideoHandler
+        // (regra de relevância diferente) — o resolver é chamado com o channel_id certo, não
+        // reaproveita o handler de um canal pro outro.
+        var ambiente = new Ambiente();
+        var canalA = new ChannelConfig("UCa", null, "Canal A");
+        var canalB = new ChannelConfig("UCb", null, "Canal B");
+        var handlerA = new Mock<IVideoHandler>();
+        var handlerB = new Mock<IVideoHandler>();
+        handlerA.Setup(h => h.IsRelevant(It.IsAny<Video>())).Returns(true);
+        handlerB.Setup(h => h.IsRelevant(It.IsAny<Video>())).Returns(true);
+        handlerA.Setup(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        handlerB.Setup(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        ambiente.VideoSource
+            .Setup(v => v.GetUploadPlaylistIdAsync(It.Is<ChannelConfig>(c => c.ChannelId == "UCa"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("playlist-a");
+        ambiente.VideoSource
+            .Setup(v => v.GetUploadPlaylistIdAsync(It.Is<ChannelConfig>(c => c.ChannelId == "UCb"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("playlist-b");
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync("playlist-a", It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaylistPage([CriarVideo("va", DateTime.UtcNow)], NextPageToken: null));
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync("playlist-b", It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaylistPage([CriarVideo("vb", DateTime.UtcNow)], NextPageToken: null));
+
+        var processor = new ChannelProcessor(
+            ambiente.VideoSource.Object, ambiente.Progresso.Object,
+            channelId => channelId switch { "UCa" => handlerA.Object, "UCb" => handlerB.Object, _ => throw new InvalidOperationException(channelId) },
+            ambiente.Tracing, ambiente.SessionContext, ambiente.ActiveChannel, ambiente.HostEnvironment.Object, ambiente.Logger,
+            Microsoft.Extensions.Options.Options.Create(ambiente.Opcoes));
+
+        await processor.RunAsync([canalA, canalB], CancellationToken.None);
+
+        handlerA.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "va"), It.IsAny<CancellationToken>()), Times.Once);
+        handlerA.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "vb"), It.IsAny<CancellationToken>()), Times.Never);
+        handlerB.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "vb"), It.IsAny<CancellationToken>()), Times.Once);
+        handlerB.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "va"), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(["UCa", "UCb"], ambiente.ActiveChannel.Definidos);
     }
 
     [Fact]

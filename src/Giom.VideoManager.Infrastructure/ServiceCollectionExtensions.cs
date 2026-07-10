@@ -54,6 +54,20 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Canal ativo (AsyncLocal) sendo processado na run atual — ver US #105/IActiveChannelContext.
+    /// Idempotente, mesmo padrão de AddSessionContext.
+    /// </summary>
+    public static IServiceCollection AddActiveChannelContext(this IServiceCollection services)
+    {
+        if (services.Any(d => d.ServiceType == typeof(ActiveChannelContext)))
+            return services;
+
+        services.AddSingleton<ActiveChannelContext>();
+        services.AddSingleton<IActiveChannelContext>(sp => sp.GetRequiredService<ActiveChannelContext>());
+        return services;
+    }
+
+    /// <summary>
     /// Registra o orquestrador de guardrails — os IGuardRail individuais são registrados à
     /// parte (ver AddGuardRails na Composition, guiado por GuardRails:Habilitados). Idempotente,
     /// mesmo padrão de AddContextoTelemetria.

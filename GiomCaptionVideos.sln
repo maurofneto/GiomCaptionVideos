@@ -91,6 +91,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Embedding
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Orquestracao.Worker", "src\Giom.VideoManager.Orquestracao.Worker\Giom.VideoManager.Orquestracao.Worker.csproj", "{72DB8305-488D-4F1F-A1EE-AAB825AC9C44}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Ingestao.Worker", "src\Giom.VideoManager.Ingestao.Worker\Giom.VideoManager.Ingestao.Worker.csproj", "{26396025-8F32-4AD8-8B3B-824D789B8969}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -569,6 +573,18 @@ Global
 		{72DB8305-488D-4F1F-A1EE-AAB825AC9C44}.Release|x64.Build.0 = Release|Any CPU
 		{72DB8305-488D-4F1F-A1EE-AAB825AC9C44}.Release|x86.ActiveCfg = Release|Any CPU
 		{72DB8305-488D-4F1F-A1EE-AAB825AC9C44}.Release|x86.Build.0 = Release|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Debug|x64.Build.0 = Debug|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Debug|x86.Build.0 = Debug|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|Any CPU.Build.0 = Release|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|x64.ActiveCfg = Release|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|x64.Build.0 = Release|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|x86.ActiveCfg = Release|Any CPU
+		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -613,6 +629,7 @@ Global
 		{12531E04-9B15-422C-A23B-C6A690FC9F4B} = {8B445307-26AA-4784-A14B-E507FD5DEFD6}
 		{D2821703-7B98-4038-B790-813DF18A5411} = {8B445307-26AA-4784-A14B-E507FD5DEFD6}
 		{72DB8305-488D-4F1F-A1EE-AAB825AC9C44} = {8B445307-26AA-4784-A14B-E507FD5DEFD6}
+		{26396025-8F32-4AD8-8B3B-824D789B8969} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C7A72C10-8571-4565-BE89-8679CD2F3695}

@@ -30,6 +30,20 @@ using Serilog;
 // real: publica na fila de Transcrição, os 4 workers de etapa (fakes por dentro) processam e
 // avisam "concluí", e o PipelineHandler (mesmo orquestrador dos workers de produção) decide o
 // fan-out — tudo dentro de 1 processo só, mas usando exatamente a mesma composição.
+//
+// US #105 — 2 canais de teste (hardcoded aqui, não lidos de canal_ingestao real no Supabase,
+// pra manter o tool 100% sintético/isolado) exercitando o Func<string, IVideoHandler> novo do
+// ChannelProcessor e os 2 RelevanciaTipo (LiveUnlisted e TituloContem) na mesma run.
+var canaisDeTeste = new[]
+{
+    new CanalIngestaoConfig("fake-instituto-teste", null, "Instituto Giom (Teste E2E)", Mine: true, Ativo: true,
+        RelevanciaTipo: RelevanciaTipo.LiveUnlisted, RelevanciaValores: [], MaxVideosPerRun: 5,
+        DelayBetweenVideosMs: 0, DelayBetweenPagesMs: 0, SecretsKey: "teste-instituto"),
+    new CanalIngestaoConfig("fake-ministerio-teste", null, "Ministério Giom (Teste E2E)", Mine: false, Ativo: true,
+        RelevanciaTipo: RelevanciaTipo.TituloContem, RelevanciaValores: ["CULTO", "GIOM*", "MINISTÉRIO"], MaxVideosPerRun: 5,
+        DelayBetweenVideosMs: 0, DelayBetweenPagesMs: 0, SecretsKey: "teste-ministerio"),
+};
+
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
@@ -74,14 +88,33 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
         services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
         services.AddSessionContext();
+        services.AddActiveChannelContext(); // US #105 — ChannelProcessor agora exige isso no construtor; FakeVideoSource ignora, mas precisa estar registrado
         services.AddTelemetriaService(config);     // Supabase + Sentry + alerta de gasto
         services.AddTracingService(config);         // Sentry Performance
         services.AddObservabilidadeExterna(config); // Helicone Sessions/Properties
         services.AddChannelProcessor(config);
 
-        // Ingestão — só publica na fila de Transcrição (Feature #104).
-        services.AddSingleton<InstitutoPipelineHandler>();
-        services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        // Ingestão — US #105: um CanalIngestaoVideoHandler por canal de teste (não mais
+        // InstitutoPipelineHandler fixo), resolvido preguiçosamente igual AddIngestaoMultiCanal
+        // faz em produção — só publica na fila de Transcrição (Feature #104).
+        services.AddSingleton<Func<string, IVideoHandler>>(sp =>
+        {
+            var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
+            var sessionContext = sp.GetRequiredService<ISessionContext>();
+            var tracingService = sp.GetRequiredService<ITracingService>();
+            var canalPorId = canaisDeTeste.ToDictionary(c => c.ChannelId);
+            var cache = new Dictionary<string, IVideoHandler>();
+
+            return channelId =>
+            {
+                if (!cache.TryGetValue(channelId, out var handler))
+                {
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], transcricaoPublisher, sessionContext, tracingService);
+                    cache[channelId] = handler;
+                }
+                return handler;
+            };
+        });
 
         // Handlers de etapa genéricos (mesmas classes dos workers de produção) — os Fake*Service
         // acima entram no lugar dos providers reais via injeção normal.
@@ -113,10 +146,9 @@ using var host = Host.CreateDefaultBuilder(args)
     })
     .Build();
 
-var canalDeTeste = new[]
-{
-    new ChannelConfig("supabase-instituto-teste", null, "Instituto Giom (Teste de Observabilidade)", Mine: true),
-};
+var canalDeTeste = canaisDeTeste.Select(c => new ChannelConfig(
+    c.ChannelId, c.PlaylistId, c.Nome, c.Mine,
+    c.MaxVideosPerRun, c.DelayBetweenVideosMs, c.DelayBetweenPagesMs)).ToArray();
 
 // StartAsync/StopAsync (não só resolver os serviços direto) — sem isso o IHostedService que
 // inicializa o Sentry/OpenTelemetry (registrado em AddSentryTracing) nunca roda, e nada é
