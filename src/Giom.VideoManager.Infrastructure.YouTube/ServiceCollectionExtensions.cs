@@ -91,10 +91,12 @@ public static class ServiceCollectionExtensions
     /// bootstrap multi-canal, ver Composition.AddIngestaoMultiCanal). Mantém todo detalhe de
     /// credencial Google (GoogleCredentialOptions, YouTubeService) dentro deste adapter —
     /// Composition só passa a lista de canais e recebe de volta só os que autenticaram OK.
-    /// Falha ao resolver credencial de UM canal não derruba os demais — loga e pula esse canal.
+    /// Falha ao resolver credencial de UM canal não derruba os demais — loga (via
+    /// <paramref name="logger"/>, chega em Serilog/Sentry como qualquer outro log) e pula esse
+    /// canal.
     /// </summary>
     public static IReadOnlyList<CanalIngestaoConfig> AddYouTubeCredenciaisPorCanal(
-        this IServiceCollection services, IConfiguration config, IReadOnlyList<CanalIngestaoConfig> canais)
+        this IServiceCollection services, IConfiguration config, IReadOnlyList<CanalIngestaoConfig> canais, ILogger logger)
     {
         var clientId = config["Google:ClientId"] ?? string.Empty;
         var user = config["Google:User"] ?? "user";
@@ -119,9 +121,7 @@ public static class ServiceCollectionExtensions
             }
             catch (Exception ex)
             {
-                // Sem ILogger disponível ainda nesse ponto do bootstrap (mesma limitação de
-                // GetGoogleCredential, síncrono em ConfigureServices) — loga no Console mesmo.
-                Console.Error.WriteLine($"[AddYouTubeCredenciaisPorCanal] Falha ao resolver credencial do canal {canal.Nome} ({canal.ChannelId}) — pulando. {ex.Message}");
+                logger.LogError(ex, "Falha ao resolver credencial do canal {CanalNome} ({ChannelId}) — pulando", canal.Nome, canal.ChannelId);
             }
         }
 

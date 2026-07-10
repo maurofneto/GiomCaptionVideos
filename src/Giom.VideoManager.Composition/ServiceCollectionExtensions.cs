@@ -290,14 +290,21 @@ public static class ServiceCollectionExtensions
     {
         services.AddSupabaseCanalIngestao(config);
 
-        IReadOnlyList<CanalIngestaoConfig> canais;
+        IReadOnlyList<CanalIngestaoConfig> canaisValidos;
         using (var bootstrapProvider = services.BuildServiceProvider())
         {
             var canalRepository = bootstrapProvider.GetRequiredService<ICanalIngestaoRepository>();
-            canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+            var canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+
+            // Logger vem do mesmo provider de bootstrap (já tem Serilog+Sentry configurados por
+            // UseSerilog, registrado antes deste ConfigureServices no Host builder) — nada de
+            // Console.WriteLine pra erro de credencial por canal. Resolvido e usado dentro do
+            // using: o logger não precisa sobreviver ao descarte do provider temporário, só
+            // durante esta chamada síncrona.
+            var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Giom.VideoManager.Composition.AddIngestaoMultiCanal");
+            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
         }
 
-        var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais);
         services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
 
         services.AddSingleton<Func<string, IVideoHandler>>(sp =>
