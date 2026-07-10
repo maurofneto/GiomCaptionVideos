@@ -111,12 +111,7 @@ public static class ServiceCollectionExtensions
                     ClientId = clientId,
                     ClientSecret = config[$"{canal.SecretsKey}:Google:ClientSecret"] ?? string.Empty,
                     RefreshToken = config[$"{canal.SecretsKey}:Google:RefreshToken"],
-                    // ApplicationName vira header HTTP (User-Agent) no cliente Google — precisa
-                    // ser ASCII. canal.Nome é texto de exibição ("Ministério Giom", com acento) e
-                    // quebra o cliente com FormatException; canal.SecretsKey é o slug ASCII
-                    // ("instituto"/"ministerio"), igual ao ApplicationName fixo que os workers
-                    // antigos usavam ("Giom Ministerio Processor").
-                    ApplicationName = $"Giom {canal.SecretsKey} Processor",
+                    ApplicationName = $"{ApplicationNameFormatter.ParaAscii(canal.Nome)} Processor",
                     User = user
                 };
 
