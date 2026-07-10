@@ -47,6 +47,26 @@ jobs:
           AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
           AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
+      # Migrations + Edge Functions ANTES do deploy da imagem nova — o código novo (esta PR, por
+      # exemplo, dependia da coluna "origem" em video_chunk) não deve subir antes do schema
+      # existir. SUPABASE_PROJECT_REF vem do variable group por branch (giom-dev =
+      # fajrstyqgogmqzceujjt, giom-prod = rhjsjfbegtusucunkgav — precisam ser cadastrados lá,
+      # ainda não existem). SUPABASE_ACCESS_TOKEN é secreto do pipeline (Pipelines > Edit >
+      # Variables, "Keep this value secret") — gerado em supabase.com/dashboard/account/tokens,
+      # nunca neste arquivo. `supabase db push` só aplica migrations em supabase/migrations/
+      # ainda não registradas (idempotente) — não recria nem reaplica o que já rodou.
+      - script: |
+          npm install -g supabase
+        displayName: 'Instalar Supabase CLI'
+
+      - script: |
+          supabase link --project-ref $(SUPABASE_PROJECT_REF)
+          supabase db push
+          supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
+        displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
+        env:
+          SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
+
       - template: pipelines/templates/build-push-image.yml
         parameters:
           serviceName: giom-instituto

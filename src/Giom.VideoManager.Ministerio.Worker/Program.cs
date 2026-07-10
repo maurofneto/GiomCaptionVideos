@@ -77,8 +77,24 @@ await processor.RunAsync(channels);
 // Feature #33 — 2 consumers (Transcrição/Resumo) rodando concorrentes, não em sequência: o
 // objetivo é o Resumo começar assim que o PRIMEIRO vídeo estiver transcrito, não esperar o lote
 // inteiro terminar. Ministério não tem Categorização/Embedding.
+//
+// Bug #102 (incidente 2026-07-09): Task.WhenAll propaga a PRIMEIRA exceção de qualquer consumer
+// e derruba o processo inteiro — ConsumirEtapaIsoladamente captura por consumer, uma etapa
+// falhar não derruba a outra.
 await Task.WhenAll(
-    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("transcricao").ConsumirAsync(),
-    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("resumo").ConsumirAsync());
+    ConsumirEtapaIsoladamente("transcricao"),
+    ConsumirEtapaIsoladamente("resumo"));
 
 await host.StopAsync();
+
+async Task ConsumirEtapaIsoladamente(string chave)
+{
+    try
+    {
+        await host.Services.GetRequiredKeyedService<EtapaQueueConsumer>(chave).ConsumirAsync();
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Consumer de etapa {Etapa} falhou e foi encerrado — as demais etapas continuam rodando normalmente nesta run", chave);
+    }
+}

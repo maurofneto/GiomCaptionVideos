@@ -91,10 +91,27 @@ await processor.RunAsync(channels);
 // transcrito, não esperar o lote inteiro da Transcrição terminar (isso anularia o ganho da US
 // #41/#43). Transcrição não é caso especial — é só mais uma etapa keyed ("transcricao"), mesmo
 // EtapaQueueConsumer genérico usado pelas demais — já pronto, registrado por AddEtapaConsumer.
+//
+// Bug #102 (incidente 2026-07-09): Task.WhenAll propaga a PRIMEIRA exceção de qualquer consumer
+// e derruba o processo inteiro — se só a fila de "categorizacao" tivesse um blip no boot, os
+// outros 3 consumers saudáveis morriam junto. ConsumirEtapaIsoladamente captura por consumer:
+// uma etapa falhar não derruba as demais.
 await Task.WhenAll(
-    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("transcricao").ConsumirAsync(),
-    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("resumo").ConsumirAsync(),
-    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("categorizacao").ConsumirAsync(),
-    host.Services.GetRequiredKeyedService<EtapaQueueConsumer>("embedding").ConsumirAsync());
+    ConsumirEtapaIsoladamente("transcricao"),
+    ConsumirEtapaIsoladamente("resumo"),
+    ConsumirEtapaIsoladamente("categorizacao"),
+    ConsumirEtapaIsoladamente("embedding"));
 
 await host.StopAsync();
+
+async Task ConsumirEtapaIsoladamente(string chave)
+{
+    try
+    {
+        await host.Services.GetRequiredKeyedService<EtapaQueueConsumer>(chave).ConsumirAsync();
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Consumer de etapa {Etapa} falhou e foi encerrado — as demais etapas continuam rodando normalmente nesta run", chave);
+    }
+}
