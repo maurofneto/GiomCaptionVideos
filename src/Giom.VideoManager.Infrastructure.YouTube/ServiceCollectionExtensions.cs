@@ -27,11 +27,18 @@ public class GoogleCredentialOptions
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registra o YouTubeService autenticado com OAuth do usuário e o IVideoSourceService
-    /// usado para descobrir vídeos novos nos canais monitorados.
+    /// Registra o YouTubeService autenticado com OAuth do usuário — usado tanto por quem
+    /// descobre vídeos novos (AddYouTubeVideoSource) quanto por quem só busca legenda
+    /// (YouTubeCaptionService, ver AddTranscriptionService na Composition). Separado de
+    /// AddYouTubeVideoSource pra não obrigar um worker de etapa (ex: Transcricao.Worker) a
+    /// registrar IVideoSourceService só pra ganhar a credencial. Idempotente — pode ser chamado
+    /// por mais de um Add* na mesma composição.
     /// </summary>
-    public static IServiceCollection AddYouTubeVideoSource(this IServiceCollection services, IConfiguration config)
+    public static IServiceCollection AddYouTubeCredential(this IServiceCollection services, IConfiguration config)
     {
+        if (services.Any(d => d.ServiceType == typeof(YouTubeService)))
+            return services;
+
         services.Configure<GoogleCredentialOptions>(config.GetSection("Google"));
 
         services.AddSingleton(provider =>
@@ -51,6 +58,13 @@ public static class ServiceCollectionExtensions
             });
         });
 
+        return services;
+    }
+
+    /// <summary>Registra a credencial (ver AddYouTubeCredential) + o IVideoSourceService usado para descobrir vídeos novos nos canais monitorados.</summary>
+    public static IServiceCollection AddYouTubeVideoSource(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddYouTubeCredential(config);
         services.AddSingleton<IVideoSourceService, YouTubeVideoSourceService>();
         return services;
     }

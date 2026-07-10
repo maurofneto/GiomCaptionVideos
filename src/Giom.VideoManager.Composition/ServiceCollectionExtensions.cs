@@ -65,6 +65,11 @@ public static class ServiceCollectionExtensions
             switch (nome)
             {
                 case "YouTubeCaption":
+                    // YouTubeCaptionService depende do YouTubeService (credencial OAuth) — não
+                    // pressupõe que quem chamou AddTranscriptionService também chamou
+                    // AddVideoSourceService (workers de etapa, ex: Transcricao.Worker, não
+                    // descobrem vídeo, só processam a etapa).
+                    services.AddYouTubeCredential(config);
                     services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
                     services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>(nome);
                     break;
