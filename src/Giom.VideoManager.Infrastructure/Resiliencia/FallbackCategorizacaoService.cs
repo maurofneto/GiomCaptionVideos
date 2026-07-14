@@ -17,6 +17,9 @@ public sealed class FallbackCategorizacaoService(
     {
         var cadeia = await configService.ObterCadeiaAsync(video.ChannelId, "categorizacao", ct);
 
+        logger.LogInformation("Cadeia de categorizacao resolvida pra canal {ChannelId}: {Count} provedor(es) [{Provedores}]",
+            video.ChannelId, cadeia.Count, string.Join(",", cadeia.Select(c => $"{c.Provedor}(origem={c.Origem})")));
+
         var elos = cadeia
             .Select(config => (config.Provedor, (Func<CancellationToken, Task<IReadOnlyList<CategoriaTeologica>>>)(token =>
             {
