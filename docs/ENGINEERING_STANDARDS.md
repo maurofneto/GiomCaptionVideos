@@ -42,13 +42,13 @@
   PR (checklist do template de PR cobra isso explicitamente).
 - SQS/serviços sem SDK de fake oficial simples: cobrir com testes unitários pontuais
   (serialização, mapeamento de opções) + validação manual end-to-end via
-  `tools/Giom.VideoManager.ObservabilidadeTeste` (vídeos fake, sem depender do YouTube real).
+  `tests/Giom.VideoManager.SmokeTests` (vídeos fake, sem depender do YouTube real).
 
 ## Secrets
 
 - **Nunca** commitar valor real de secret. `appsettings.json` só tem placeholder em branco
   com comentário apontando o path SSM real (`/giom/{dev,prod}/.../Chave`).
-- Exceção deliberada: `tools/Giom.VideoManager.ObservabilidadeTeste` é dev-only e pode ter
+- Exceção deliberada: `tests/Giom.VideoManager.SmokeTests` é dev-only e pode ter
   valores reais de dev commitados (queue name, URLs públicas) — nunca segredo de prod.
 - Ao lidar com um token/segredo colado em chat ou API de terceiro (ex: token de API do
   Sentry): nunca ecoar o valor em nenhuma resposta; guardar só em arquivo de scratchpad fora

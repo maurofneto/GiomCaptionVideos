@@ -3,7 +3,7 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 
-namespace Giom.VideoManager.ObservabilidadeTeste;
+namespace Giom.VideoManager.SmokeTests;
 
 /// <summary>
 /// Gera uma "legenda" sintética (texto fixo, repetido até um tamanho realista) — sem YouTube,

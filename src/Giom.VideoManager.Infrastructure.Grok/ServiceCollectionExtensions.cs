@@ -44,7 +44,6 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddGrokSummary(this IServiceCollection services, IConfiguration config)
     {
-        services.AddPromptLoader();
         services.AddGrokHttpClient();
         services.AddContextoTelemetria();
         services.AddSessionContext();
@@ -55,7 +54,6 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddGrokCategorizacao(this IServiceCollection services, IConfiguration config)
     {
-        services.AddPromptLoader();
         services.AddGrokHttpClient();
         services.AddContextoTelemetria();
         services.AddSessionContext();

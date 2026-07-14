@@ -21,6 +21,9 @@ public interface ISessionContext
 /// ou resumo+categorização de um mesmo vídeo) numa plataforma externa de observabilidade.
 /// RequestId é gerado pelo chamador (não pela plataforma externa) especificamente pra permitir
 /// reportar feedback depois sem precisar capturar nada da resposta do provedor de IA.
+/// UsarObservabilidade (US #106) é decidido por quem resolve a EtapaProvedorConfig da chamada
+/// (ex.: FallbackResumoService) e propagado por aqui — o adapter concreto de IA (Claude/Grok/
+/// OpenAI) nunca lê esse campo, só a plataforma externa (via handler HTTP) decide o que fazer.
 /// </summary>
 public record SessaoObservabilidade(
     string SessionId,
@@ -28,4 +31,5 @@ public record SessaoObservabilidade(
     string SessionPath,
     string? UserId = null,
     IReadOnlyDictionary<string, string>? Propriedades = null,
-    string? RequestId = null);
+    string? RequestId = null,
+    bool UsarObservabilidade = false);

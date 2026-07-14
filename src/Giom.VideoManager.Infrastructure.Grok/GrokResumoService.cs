@@ -3,7 +3,7 @@ using System.Text;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,9 +21,10 @@ public class GrokResumoOptions
 /// <summary>
 /// Gera resumo via xAI Grok — elo de fallback (Feature #101) atrás de Claude. API compatível com
 /// o formato de chat completions da OpenAI (sem SDK .NET oficial da xAI — HTTP cru, mesmo estilo
-/// de OpenAIEmbeddingService). Reaproveita o mesmo prompt de resumo.md via PromptLoader.
+/// de OpenAIEmbeddingService). Prompt e Model/MaxTokens vêm de EtapaProvedorConfig, resolvida por
+/// canal (US #106) — ver ClaudeResumoService pro raciocínio completo.
 /// </summary>
-public class GrokResumoService : IResumoService
+public class GrokResumoService : IResumoProvedorService
 {
     private readonly HttpClient _http;
     private readonly GrokResumoOptions _options;
@@ -31,9 +32,8 @@ public class GrokResumoService : IResumoService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
     private readonly ITracingService _tracingService;
-    private readonly string _systemPrompt;
 
-    public GrokResumoService(IOptions<GrokResumoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<GrokResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
+    public GrokResumoService(IOptions<GrokResumoOptions> options, IHttpClientFactory httpClientFactory, ILogger<GrokResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
     {
         _options = options.Value;
         _logger = logger;
@@ -42,10 +42,9 @@ public class GrokResumoService : IResumoService
         _tracingService = tracingService;
         _http = httpClientFactory.CreateClient("grok");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        _systemPrompt = prompts.Load("resumo.md");
     }
 
-    public async Task<Resumo?> GerarResumoAsync(Video video, CancellationToken ct = default)
+    public async Task<Resumo?> GerarResumoAsync(Video video, EtapaProvedorConfig config, CancellationToken ct = default)
     {
         var textoLimpo = video.Transcricao?.ConteudoLimpo;
         if (string.IsNullOrWhiteSpace(textoLimpo))
@@ -54,13 +53,16 @@ public class GrokResumoService : IResumoService
         _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("resumo", video));
         using var span = _tracingService.IniciarEtapaAtual("resumo");
 
+        var modelo = config.Model ?? _options.Model;
+        var maxTokens = config.MaxTokens ?? _options.MaxTokens;
+
         var payload = new
         {
-            model = _options.Model,
-            max_tokens = _options.MaxTokens,
+            model = modelo,
+            max_tokens = maxTokens,
             messages = new object[]
             {
-                new { role = "system", content = _systemPrompt },
+                new { role = "system", content = config.Prompt },
                 new { role = "user", content = textoLimpo }
             }
         };
@@ -85,7 +87,7 @@ public class GrokResumoService : IResumoService
 
         _contextoTelemetria.Registrar(
             provedor: "Grok",
-            modelo: _options.Model,
+            modelo: modelo,
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason });

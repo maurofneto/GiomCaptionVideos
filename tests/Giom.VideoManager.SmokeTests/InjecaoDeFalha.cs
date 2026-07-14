@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Giom.VideoManager.ObservabilidadeTeste;
+namespace Giom.VideoManager.SmokeTests;
 
 /// <summary>
 /// Atribui, de forma determinística, um cenário de falha a cada combinação {etapa}:{video.Id}

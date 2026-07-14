@@ -3,7 +3,7 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 
-namespace Giom.VideoManager.ObservabilidadeTeste;
+namespace Giom.VideoManager.SmokeTests;
 
 /// <summary>
 /// Gera um "resumo" sintético (sem chamar Claude) — só pra exercitar a etapa de Resumo do

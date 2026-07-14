@@ -51,7 +51,8 @@ public class HeliconeHeadersHandlerTests
             SessionId: "video-123",
             SessionName: "Escatologia: A Ressurreição e o Juízo Final",
             SessionPath: "/pipeline/resumo",
-            Propriedades: new Dictionary<string, string> { ["Canal"] = "Instituto Teológico Giom" }));
+            Propriedades: new Dictionary<string, string> { ["Canal"] = "Instituto Teológico Giom" },
+            UsarObservabilidade: true));
 
         var handler = new HeliconeHeadersHandler(contexto) { InnerHandler = new HandlerFinalQueSempreRespondeOk() };
         using var client = new HttpClient(handler);
@@ -71,7 +72,8 @@ public class HeliconeHeadersHandlerTests
             SessionPath: "/pipeline/resumo",
             UserId: "user-1",
             RequestId: "req-1",
-            Propriedades: new Dictionary<string, string> { ["Tipo"] = "resumo" }));
+            Propriedades: new Dictionary<string, string> { ["Tipo"] = "resumo" },
+            UsarObservabilidade: true));
 
         HttpRequestMessage? capturado = null;
         var handler = new HeliconeHeadersHandler(contexto) { InnerHandler = new HandlerCapturaRequisicao(r => capturado = r) };

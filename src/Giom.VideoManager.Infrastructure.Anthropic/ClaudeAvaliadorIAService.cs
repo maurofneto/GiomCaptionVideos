@@ -56,7 +56,8 @@ public class ClaudeAvaliadorIAService : IAvaliadorIAService
             SessionId: Guid.NewGuid().ToString(),
             SessionName: "GuardRail IA",
             SessionPath: "/guardrail/avaliacao-ia",
-            Propriedades: new Dictionary<string, string> { ["Tipo"] = "guardrail_ia" }));
+            Propriedades: new Dictionary<string, string> { ["Tipo"] = "guardrail_ia" },
+            UsarObservabilidade: _options.UseHelicone));
 
         var systemPrompt = $$"""
             {{instrucao}}

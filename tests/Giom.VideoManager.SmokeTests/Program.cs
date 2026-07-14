@@ -10,8 +10,7 @@ using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Telemetria;
-using Giom.VideoManager.Instituto.Worker;
-using Giom.VideoManager.ObservabilidadeTeste;
+using Giom.VideoManager.SmokeTests;
 using Giom.VideoManager.Resumo.Worker;
 using Giom.VideoManager.Transcricao.Worker;
 using Microsoft.Extensions.Logging;
@@ -31,15 +30,17 @@ using Serilog;
 // avisam "concluí", e o PipelineHandler (mesmo orquestrador dos workers de produção) decide o
 // fan-out — tudo dentro de 1 processo só, mas usando exatamente a mesma composição.
 //
-// US #105 — 2 canais de teste (hardcoded aqui, não lidos de canal_ingestao real no Supabase,
-// pra manter o tool 100% sintético/isolado) exercitando o Func<string, IVideoHandler> novo do
-// ChannelProcessor e os 2 RelevanciaTipo (LiveUnlisted e TituloContem) na mesma run.
+// US #106 — ChannelId REAL do Instituto/Ministério (antes "fake-instituto-teste"/
+// "fake-ministerio-teste"): etapa_provedor_config tem FK pra canal_ingestao(channel_id), então
+// só um ChannelId real resolve config por canal (prompt/UsarObservabilidade) de verdade — ver
+// FakeVideoSource, que continua gerando vídeo/legenda 100% sintéticos (Video.Id = "teste-{guid}",
+// nunca colide com dado real; filtrável depois por "id LIKE 'teste-%'").
 var canaisDeTeste = new[]
 {
-    new CanalIngestaoConfig("fake-instituto-teste", null, "Instituto Giom (Teste E2E)", Mine: true, Ativo: true,
+    new CanalIngestaoConfig(FakeVideoSource.ChannelIdInstituto, null, "Instituto Giom (Teste E2E)", Mine: true, Ativo: true,
         RelevanciaTipo: RelevanciaTipo.LiveUnlisted, RelevanciaValores: [], MaxVideosPerRun: 5,
         DelayBetweenVideosMs: 0, DelayBetweenPagesMs: 0, SecretsKey: "teste-instituto"),
-    new CanalIngestaoConfig("fake-ministerio-teste", null, "Ministério Giom (Teste E2E)", Mine: false, Ativo: true,
+    new CanalIngestaoConfig(FakeVideoSource.ChannelIdMinisterio, null, "Ministério Giom (Teste E2E)", Mine: false, Ativo: true,
         RelevanciaTipo: RelevanciaTipo.TituloContem, RelevanciaValores: ["CULTO", "GIOM*", "MINISTÉRIO"], MaxVideosPerRun: 5,
         DelayBetweenVideosMs: 0, DelayBetweenPagesMs: 0, SecretsKey: "teste-ministerio"),
 };
@@ -85,7 +86,12 @@ using var host = Host.CreateDefaultBuilder(args)
             services.AddSummaryService(config);
         else
             services.AddSingleton<IResumoService, FakeResumoService>();
-        services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
+        // Categorização: mesmo mecanismo do Resumo acima — com Categorizacao:FallbackChain
+        // configurado, usa a cadeia REAL (US #106, EtapaProvedorConfig por canal).
+        if (config.GetSection("Categorizacao:FallbackChain").Exists())
+            services.AddCategorizacaoService(config);
+        else
+            services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
         services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
         services.AddSessionContext();
         services.AddActiveChannelContext(); // US #105 — ChannelProcessor agora exige isso no construtor; FakeVideoSource ignora, mas precisa estar registrado
@@ -158,9 +164,10 @@ await host.StartAsync();
 // Torna visível qual perfil/modo de resumo esta run está usando — sem isso não dá pra saber, só
 // pelo log, se a cadeia real de fallback (appsettings.teste-fallback.json) foi carregada ou não.
 var configFinal = host.Services.GetRequiredService<IConfiguration>();
-Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Resumo={ModoResumo}, MaxVideosPerRun={Max}",
+Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Resumo={ModoResumo}, Categorizacao={ModoCategorizacao}, MaxVideosPerRun={Max}",
     Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "(nulo → Development)",
     configFinal.GetSection("Resumo:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Resumo:FallbackChain").Get<string[]>() ?? [])}]" : "FakeResumoService",
+    configFinal.GetSection("Categorizacao:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Categorizacao:FallbackChain").Get<string[]>() ?? [])}]" : "FakeCategorizacaoService",
     configFinal["ProcessingOptions:MaxVideosPerRun"]);
 
 var processor = host.Services.GetRequiredService<ChannelProcessor>();

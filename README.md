@@ -39,8 +39,7 @@ src/
 tests/
   Giom.VideoManager.Testes.Comuns       — fakes/test doubles compartilhados
   Giom.VideoManager.*.Tests             — testes unitários por projeto (Application, Infrastructure, Anthropic, Helicone, OpenAI, Telegram)
-tools/
-  Giom.VideoManager.ObservabilidadeTeste — tool de validação end-to-end com vídeos fake, sem depender do YouTube real
+  Giom.VideoManager.SmokeTests          — smoke test end-to-end com vídeos fake, sem depender do YouTube real
 ```
 
 ### Adapters (`Infrastructure.*`) e o que cada um resolve
@@ -88,8 +87,8 @@ ASPNETCORE_ENVIRONMENT=Development dotnet run
 cd src/Giom.VideoManager.AgenteInstituto.Worker
 ASPNETCORE_ENVIRONMENT=Development dotnet run
 
-# Validação end-to-end sem depender do YouTube real (vídeos fake)
-cd tools/Giom.VideoManager.ObservabilidadeTeste
+# Smoke test end-to-end sem depender do YouTube real (vídeos fake)
+cd tests/Giom.VideoManager.SmokeTests
 dotnet run
 ```
 

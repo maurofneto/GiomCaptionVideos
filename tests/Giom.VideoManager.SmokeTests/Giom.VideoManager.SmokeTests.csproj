@@ -29,14 +29,7 @@
     <ProjectReference Include="..\..\src\Giom.VideoManager.Domain\Giom.VideoManager.Domain.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Application\Giom.VideoManager.Application.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Composition\Giom.VideoManager.Composition.csproj" />
-    <!-- SupabaseOptions (Url/SecretKey) — SupabaseVideoSource/SupabaseCaptionService reaproveitam
-         a mesma config e o mesmo HttpClient "supabase" que AddPersistence já registra. -->
-    <ProjectReference Include="..\..\src\Giom.VideoManager.Infrastructure.Supabase\Giom.VideoManager.Infrastructure.Supabase.csproj" />
-    <!-- Reaproveita o InstitutoVideoHandler real (mesma orquestração legenda->resumo->
-         categorização->embedding) — só a fonte de vídeos/legendas vem do Supabase, não do YouTube. -->
-    <ProjectReference Include="..\..\src\Giom.VideoManager.Instituto.Worker\Giom.VideoManager.Instituto.Worker.csproj" />
-    <!-- Feature #104 — handlers de etapa genéricos (não mais os IEtapaXHandler embutidos no
-         InstitutoPipelineHandler, que encolheu pra só ingestão). -->
+    <!-- Handlers de etapa genéricos (Feature #104) — mesmas classes dos workers de produção. -->
     <ProjectReference Include="..\..\src\Giom.VideoManager.Transcricao.Worker\Giom.VideoManager.Transcricao.Worker.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Resumo.Worker\Giom.VideoManager.Resumo.Worker.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Categorizacao.Worker\Giom.VideoManager.Categorizacao.Worker.csproj" />

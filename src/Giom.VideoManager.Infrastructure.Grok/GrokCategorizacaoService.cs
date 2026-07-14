@@ -4,7 +4,7 @@ using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,10 +20,10 @@ public class GrokCategorizacaoOptions
 }
 
 /// <summary>
-/// Classifica via xAI Grok — elo de fallback (Feature #101) atrás de Claude. Mesmo prompt
-/// (categorizacao.md) e mesmo parsing de JSON que ClaudeCategorizacaoService.
+/// Classifica via xAI Grok — elo de fallback (Feature #101) atrás de Claude. Prompt e
+/// Model/MaxTokens vêm de EtapaProvedorConfig, resolvida por canal (US #106).
 /// </summary>
-public class GrokCategorizacaoService : ICategorizacaoService
+public class GrokCategorizacaoService : ICategorizacaoProvedorService
 {
     private readonly HttpClient _http;
     private readonly GrokCategorizacaoOptions _options;
@@ -31,9 +31,8 @@ public class GrokCategorizacaoService : ICategorizacaoService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
     private readonly ITracingService _tracingService;
-    private readonly string _systemPrompt;
 
-    public GrokCategorizacaoService(IOptions<GrokCategorizacaoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<GrokCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
+    public GrokCategorizacaoService(IOptions<GrokCategorizacaoOptions> options, IHttpClientFactory httpClientFactory, ILogger<GrokCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
     {
         _options = options.Value;
         _logger = logger;
@@ -42,10 +41,9 @@ public class GrokCategorizacaoService : ICategorizacaoService
         _tracingService = tracingService;
         _http = httpClientFactory.CreateClient("grok");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        _systemPrompt = prompts.Load("categorizacao.md");
     }
 
-    public async Task<IReadOnlyList<CategoriaTeologica>> ClassificarAsync(Video video, CancellationToken ct = default)
+    public async Task<IReadOnlyList<CategoriaTeologica>> ClassificarAsync(Video video, EtapaProvedorConfig config, CancellationToken ct = default)
     {
         var resumo = video.Resumo?.Descricao ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resumo)) return [];
@@ -53,13 +51,16 @@ public class GrokCategorizacaoService : ICategorizacaoService
         _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("categorizacao", video));
         using var span = _tracingService.IniciarEtapaAtual("categorizacao");
 
+        var modelo = config.Model ?? _options.Model;
+        var maxTokens = config.MaxTokens ?? _options.MaxTokens;
+
         var payload = new
         {
-            model = _options.Model,
-            max_tokens = _options.MaxTokens,
+            model = modelo,
+            max_tokens = maxTokens,
             messages = new object[]
             {
-                new { role = "system", content = _systemPrompt },
+                new { role = "system", content = config.Prompt },
                 new { role = "user", content = resumo }
             }
         };
@@ -84,7 +85,7 @@ public class GrokCategorizacaoService : ICategorizacaoService
 
         _contextoTelemetria.Registrar(
             provedor: "Grok",
-            modelo: _options.Model,
+            modelo: modelo,
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason });

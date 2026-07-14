@@ -7,16 +7,17 @@ namespace Giom.VideoManager.Infrastructure.Helicone;
 /// <summary>
 /// Traduz o SessaoObservabilidade genérico (ISessionContext) — anunciado por quem chama a API,
 /// sem saber que é o Helicone quem está do outro lado — em headers HTTP específicos do
-/// Helicone, em cada requisição. Fica na pipeline do HttpClient "anthropic" (via
-/// AddHttpMessageHandler) — roda em toda chamada, mas só adiciona headers se algum contexto de
-/// sessão realmente foi definido.
+/// Helicone, em cada requisição. Fica na pipeline dos HttpClient "anthropic"/"openai"/"grok"
+/// (via AddHttpMessageHandler) — roda em toda chamada, mas só adiciona headers quando
+/// UsarObservabilidade (US #106) está true: sem isso, chamadas que nunca vão passar pelo
+/// gateway do Helicone (ver HeliconeRoteamentoHandler) carregariam headers Helicone-* à toa.
 /// </summary>
 public class HeliconeHeadersHandler(ISessionContext contexto) : DelegatingHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var sessao = contexto.Atual;
-        if (sessao is not null)
+        if (sessao is { UsarObservabilidade: true })
         {
             // SessionName e as Propriedades vêm de dados de negócio (ex.: título do vídeo,
             // nome do canal) — quase sempre acentuados em português. HttpRequestHeaders exige
