@@ -3,7 +3,7 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 
-namespace Giom.VideoManager.ObservabilidadeTeste;
+namespace Giom.VideoManager.SmokeTests;
 
 /// <summary>
 /// Gera chunks com vetores sintéticos (determinísticos, sem chamar OpenAI) e persiste de

@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Giom.VideoManager.Observabilidade - Teste": {
+    "Giom.VideoManager.SmokeTests": {
       "commandName": "Project",
       "environmentVariables": {
         "DOTNET_ENVIRONMENT": "teste"

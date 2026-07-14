@@ -3,7 +3,7 @@ using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 
-namespace Giom.VideoManager.ObservabilidadeTeste;
+namespace Giom.VideoManager.SmokeTests;
 
 /// <summary>
 /// Substitui a busca real no YouTube por vídeos 100% sintéticos — sem nenhuma leitura no
@@ -12,9 +12,16 @@ namespace Giom.VideoManager.ObservabilidadeTeste;
 /// A PERSISTÊNCIA continua indo pro Supabase de dev de verdade (via AddPersistence) — é isso que
 /// valida span/telemetria/Helicone ponta a ponta, o propósito real desta ferramenta (Board #96).
 /// Só o CONTEÚDO de entrada (legenda/resumo/categoria/embedding) não depende mais de dado real.
+/// US #106 — canaisDeTeste (Program.cs) usa os ChannelId REAIS do Instituto/Ministério (não mais
+/// "fake-instituto-teste"/"fake-ministerio-teste"): etapa_provedor_config tem FK pra
+/// canal_ingestao(channel_id), só assim a config por canal (prompt/UsarObservabilidade) resolve
+/// de verdade — o vídeo em si continua 100% sintético, só o ChannelId é real.
 /// </summary>
 public class FakeVideoSource : IVideoSourceService
 {
+    public const string ChannelIdInstituto = "UCyyXFx2xHdzfavx6H6Q8zJw";
+    public const string ChannelIdMinisterio = "UCyHMyZH5oon8jW7y_yMRstQ";
+
     private static readonly string[] TitulosInstituto =
     [
         "GIOM | Ceia do Senhor | Domingo | 18h",
@@ -47,10 +54,10 @@ public class FakeVideoSource : IVideoSourceService
 
     public Task<PlaylistPage> GetPlaylistPageAsync(string playlistId, int maxResults, string? pageToken, CancellationToken ct = default)
     {
-        var ehMinisterio = playlistId == "fake-playlist-fake-ministerio-teste";
+        var channelId = playlistId["fake-playlist-".Length..];
+        var ehMinisterio = channelId == ChannelIdMinisterio;
         var titulos = ehMinisterio ? TitulosMinisterio : TitulosInstituto;
-        var channelId = ehMinisterio ? "fake-ministerio-teste" : "fake-instituto-teste";
-        var channelTitle = ehMinisterio ? "Ministério Giom (Teste E2E)" : "Instituto Giom (Teste E2E)";
+        var channelTitle = ehMinisterio ? "Ministério Giom" : "Instituto Giom";
 
         var agora = DateTime.UtcNow;
         var videos = Enumerable.Range(0, maxResults).Select(i => new Video

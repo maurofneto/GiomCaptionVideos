@@ -69,4 +69,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICanalIngestaoRepository, SupabaseCanalIngestaoRepository>();
         return services;
     }
+
+    /// <summary>Registro de IEtapaProvedorConfigRepository (US #106) — leitura da tabela etapa_provedor_config.</summary>
+    public static IServiceCollection AddSupabaseEtapaProvedorConfig(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSingleton<IEtapaProvedorConfigRepository, SupabaseEtapaProvedorConfigRepository>();
+        return services;
+    }
 }

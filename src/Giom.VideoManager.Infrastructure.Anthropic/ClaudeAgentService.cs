@@ -66,7 +66,8 @@ public class ClaudeAgentService : IAgentService
             SessionPath: "/bot/pergunta",
             UserId: chatId,
             Propriedades: new Dictionary<string, string> { ["Tipo"] = "bot_resposta" },
-            RequestId: requestId));
+            RequestId: requestId,
+            UsarObservabilidade: _options.UseHelicone));
 
         var mensagens = new List<Message>();
 

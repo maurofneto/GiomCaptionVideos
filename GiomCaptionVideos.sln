@@ -69,9 +69,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastru
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Helicone.Tests", "tests\Giom.VideoManager.Infrastructure.Helicone.Tests\Giom.VideoManager.Infrastructure.Helicone.Tests.csproj", "{76709D85-530D-4406-BF29-96A6BB4C7158}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "5-Ferramentas", "5-Ferramentas", "{F0EDD5E9-982A-C3DF-2B25-01D2C15F2637}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.ObservabilidadeTeste", "tools\Giom.VideoManager.ObservabilidadeTeste\Giom.VideoManager.ObservabilidadeTeste.csproj", "{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.SmokeTests", "tests\Giom.VideoManager.SmokeTests\Giom.VideoManager.SmokeTests.csproj", "{ABB447D4-B0A7-4183-92B4-4CA83FF48F20}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Sqs", "src\Giom.VideoManager.Infrastructure.Sqs\Giom.VideoManager.Infrastructure.Sqs.csproj", "{977E5969-9D9C-4E8B-BF8D-5528E9124E20}"
 EndProject
@@ -91,9 +89,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Embedding
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Orquestracao.Worker", "src\Giom.VideoManager.Orquestracao.Worker\Giom.VideoManager.Orquestracao.Worker.csproj", "{72DB8305-488D-4F1F-A1EE-AAB825AC9C44}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Ingestao.Worker", "src\Giom.VideoManager.Ingestao.Worker\Giom.VideoManager.Ingestao.Worker.csproj", "{26396025-8F32-4AD8-8B3B-824D789B8969}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Redis", "src\Giom.VideoManager.Infrastructure.Redis\Giom.VideoManager.Infrastructure.Redis.csproj", "{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -585,6 +583,18 @@ Global
 		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|x64.Build.0 = Release|Any CPU
 		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|x86.ActiveCfg = Release|Any CPU
 		{26396025-8F32-4AD8-8B3B-824D789B8969}.Release|x86.Build.0 = Release|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Debug|x64.Build.0 = Debug|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Debug|x86.Build.0 = Debug|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Release|x64.ActiveCfg = Release|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Release|x64.Build.0 = Release|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Release|x86.ActiveCfg = Release|Any CPU
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -619,7 +629,7 @@ Global
 		{68B51C3D-784F-4125-BD78-77B3ED388098} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
 		{50E1989D-7892-43D7-A789-35AE5538F713} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
 		{76709D85-530D-4406-BF29-96A6BB4C7158} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
-		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20} = {F0EDD5E9-982A-C3DF-2B25-01D2C15F2637}
+		{ABB447D4-B0A7-4183-92B4-4CA83FF48F20} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
 		{977E5969-9D9C-4E8B-BF8D-5528E9124E20} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{D92DD32F-0B3C-4600-869E-7BFF9A39690D} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{1BF97D25-174C-45EC-8B7C-7A5EC3A30A9F} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
@@ -629,7 +639,8 @@ Global
 		{12531E04-9B15-422C-A23B-C6A690FC9F4B} = {8B445307-26AA-4784-A14B-E507FD5DEFD6}
 		{D2821703-7B98-4038-B790-813DF18A5411} = {8B445307-26AA-4784-A14B-E507FD5DEFD6}
 		{72DB8305-488D-4F1F-A1EE-AAB825AC9C44} = {8B445307-26AA-4784-A14B-E507FD5DEFD6}
-		{26396025-8F32-4AD8-8B3B-824D789B8969} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{26396025-8F32-4AD8-8B3B-824D789B8969} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
+		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C7A72C10-8571-4565-BE89-8679CD2F3695}

@@ -3,7 +3,7 @@ using System.Text;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,9 +20,10 @@ public class OpenAiResumoOptions
 
 /// <summary>
 /// Gera resumo via OpenAI chat completions — último elo da cadeia de fallback (Feature #101),
-/// atrás de Claude e Grok. Mesmo prompt (resumo.md) via PromptLoader.
+/// atrás de Claude e Grok. Prompt e Model/MaxTokens vêm de EtapaProvedorConfig, resolvida por
+/// canal (US #106) — ver ClaudeResumoService pro raciocínio completo.
 /// </summary>
-public class OpenAiResumoService : IResumoService
+public class OpenAiResumoService : IResumoProvedorService
 {
     private readonly HttpClient _http;
     private readonly OpenAiResumoOptions _options;
@@ -30,9 +31,8 @@ public class OpenAiResumoService : IResumoService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
     private readonly ITracingService _tracingService;
-    private readonly string _systemPrompt;
 
-    public OpenAiResumoService(IOptions<OpenAiResumoOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<OpenAiResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
+    public OpenAiResumoService(IOptions<OpenAiResumoOptions> options, IHttpClientFactory httpClientFactory, ILogger<OpenAiResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
     {
         _options = options.Value;
         _logger = logger;
@@ -41,10 +41,9 @@ public class OpenAiResumoService : IResumoService
         _tracingService = tracingService;
         _http = httpClientFactory.CreateClient("openai");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        _systemPrompt = prompts.Load("resumo.md");
     }
 
-    public async Task<Resumo?> GerarResumoAsync(Video video, CancellationToken ct = default)
+    public async Task<Resumo?> GerarResumoAsync(Video video, EtapaProvedorConfig config, CancellationToken ct = default)
     {
         var textoLimpo = video.Transcricao?.ConteudoLimpo;
         if (string.IsNullOrWhiteSpace(textoLimpo))
@@ -53,13 +52,16 @@ public class OpenAiResumoService : IResumoService
         _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("resumo", video));
         using var span = _tracingService.IniciarEtapaAtual("resumo");
 
+        var modelo = config.Model ?? _options.Model;
+        var maxTokens = config.MaxTokens ?? _options.MaxTokens;
+
         var payload = new
         {
-            model = _options.Model,
-            max_tokens = _options.MaxTokens,
+            model = modelo,
+            max_tokens = maxTokens,
             messages = new object[]
             {
-                new { role = "system", content = _systemPrompt },
+                new { role = "system", content = config.Prompt },
                 new { role = "user", content = textoLimpo }
             }
         };
@@ -84,7 +86,7 @@ public class OpenAiResumoService : IResumoService
 
         _contextoTelemetria.Registrar(
             provedor: "OpenAI",
-            modelo: _options.Model,
+            modelo: modelo,
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason });

@@ -9,7 +9,9 @@ using Giom.VideoManager.Infrastructure.Feedback;
 using Giom.VideoManager.Infrastructure.Grok;
 using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Infrastructure.Observabilidade;
 using Giom.VideoManager.Infrastructure.Telemetria;
+using Giom.VideoManager.Infrastructure.Redis;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
@@ -102,81 +104,88 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Resumo — cadeia de fallback (Feature #101), configurável via Resumo:FallbackChain
-    /// (default: Claude → Grok → OpenAI). Mesmo mecanismo de Keyed Service + FallbackChain de
-    /// AddTranscriptionService — ver comentário lá. Valores aceitos: Claude, Grok, OpenAI,
-    /// SummarizeTech.
+    /// Resolve a cadeia de config de execução de IA por canal (US #106) — prompt +
+    /// Model/MaxTokens/UsarObservabilidade + a ORDEM do fallback, tudo numa linha por
+    /// (canal, etapa, provedor). Duas origens (EtapaProvedorConfig:Provider):
+    /// "Repository" (default, Supabase) ou "Arquivo" (Prompts/*.md + FallbackChain do
+    /// appsettings, o caminho de hoje). Decorada com cache — "Memory" (default, por processo,
+    /// suficiente pros workers de etapa que drenam fila e saem) ou "Redis" (compartilhado entre
+    /// instâncias, ver EtapaProvedorConfig:Cache:Redis). Idempotente — chamada por
+    /// AddSummaryService e AddCategorizacaoService, que podem coexistir no mesmo worker.
+    /// </summary>
+    public static IServiceCollection AddEtapaProvedorConfigService(this IServiceCollection services, IConfiguration config)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IEtapaProvedorConfigService)))
+            return services;
+
+        var provider = config["EtapaProvedorConfig:Provider"] ?? "Repository";
+        if (provider == "Arquivo")
+        {
+            services.AddPromptLoader();
+            services.AddSingleton<IEtapaProvedorConfigService, ArquivoEtapaProvedorConfigService>();
+        }
+        else
+        {
+            services.AddSupabaseEtapaProvedorConfig(config);
+            services.AddSingleton<IEtapaProvedorConfigService, RepositorioEtapaProvedorConfigService>();
+        }
+
+        var cacheProvider = config["EtapaProvedorConfig:Cache:Provider"] ?? "Memory";
+        if (cacheProvider == "Redis")
+            services.AddRedisCacheEtapaProvedorConfig(config);
+        else
+            services.Decorate<IEtapaProvedorConfigService, CacheEtapaProvedorConfigService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Resumo — cadeia de fallback por canal (US #106; antes Feature #101, cadeia global fixa
+    /// via Resumo:FallbackChain). Cada provedor (Claude/Grok/OpenAI) é registrado Keyed como
+    /// IResumoProvedorService — não decide mais sozinho seu prompt/config, recebe por parâmetro
+    /// (ver ClaudeResumoService). FallbackResumoService (único IResumoService público) resolve a
+    /// cadeia certa do canal em runtime via IEtapaProvedorConfigService. SummarizeTech fica de
+    /// fora desta migração — não usa prompt/config por canal (nenhum canal ativo o referencia
+    /// hoje) e continua só disponível se registrado manualmente noutro lugar, se algum dia
+    /// reativado.
     /// </summary>
     public static IServiceCollection AddSummaryService(this IServiceCollection services, IConfiguration config)
     {
-        var cadeiaNomes = config.GetSection("Resumo:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
+        services.AddEtapaProvedorConfigService(config);
 
-        foreach (var nome in cadeiaNomes)
-        {
-            switch (nome)
-            {
-                case "Grok":
-                    services.AddGrokSummary(config);
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<GrokResumoService>());
-                    break;
-                case "OpenAI":
-                    services.AddOpenAiSummary(config);
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<OpenAiResumoService>());
-                    break;
-                case "SummarizeTech":
-                    services.AddSummarizeTechSummary();
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<SummarizeTechResumoService>());
-                    break;
-                default: // Claude
-                    services.AddClaudeSummary(config);
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<ClaudeResumoService>());
-                    break;
-            }
-        }
+        services.AddGrokSummary(config);
+        services.AddKeyedSingleton<IResumoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokResumoService>());
 
-        services.AddSingleton<IResumoService>(sp =>
-        {
-            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IResumoService>(nome))).ToList();
-            return new FallbackResumoService(cadeia, sp.GetRequiredService<ILogger<FallbackResumoService>>());
-        });
+        services.AddOpenAiSummary(config);
+        services.AddKeyedSingleton<IResumoProvedorService>("OpenAI", (sp, _) => sp.GetRequiredService<OpenAiResumoService>());
+
+        services.AddClaudeSummary(config);
+        services.AddKeyedSingleton<IResumoProvedorService>("Claude", (sp, _) => sp.GetRequiredService<ClaudeResumoService>());
+
+        services.AddSingleton<IResumoService, FallbackResumoService>();
         services.Decorate<IResumoService, TelemetriaResumoService>();
 
         return services;
     }
 
     /// <summary>
-    /// Categorização — cadeia de fallback (Feature #101), configurável via
-    /// Categorizacao:FallbackChain (default: Claude → Grok → OpenAI). Mesmo mecanismo de
+    /// Categorização — cadeia de fallback por canal (US #106). Mesmo mecanismo de
     /// AddSummaryService.
     /// </summary>
     public static IServiceCollection AddCategorizacaoService(this IServiceCollection services, IConfiguration config)
     {
-        var cadeiaNomes = config.GetSection("Categorizacao:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
+        services.AddEtapaProvedorConfigService(config);
 
-        foreach (var nome in cadeiaNomes)
-        {
-            switch (nome)
-            {
-                case "Grok":
-                    services.AddGrokCategorizacao(config);
-                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
-                    break;
-                case "OpenAI":
-                    services.AddOpenAiCategorizacao(config);
-                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<OpenAiCategorizacaoService>());
-                    break;
-                default: // Claude
-                    services.AddClaudeCategorizacao(config);
-                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<ClaudeCategorizacaoService>());
-                    break;
-            }
-        }
+        services.AddGrokCategorizacao(config);
+        services.AddKeyedSingleton<ICategorizacaoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
 
-        services.AddSingleton<ICategorizacaoService>(sp =>
-        {
-            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<ICategorizacaoService>(nome))).ToList();
-            return new FallbackCategorizacaoService(cadeia, sp.GetRequiredService<ILogger<FallbackCategorizacaoService>>());
-        });
+        services.AddOpenAiCategorizacao(config);
+        services.AddKeyedSingleton<ICategorizacaoProvedorService>("OpenAI", (sp, _) => sp.GetRequiredService<OpenAiCategorizacaoService>());
+
+        services.AddClaudeCategorizacao(config);
+        services.AddKeyedSingleton<ICategorizacaoProvedorService>("Claude", (sp, _) => sp.GetRequiredService<ClaudeCategorizacaoService>());
+
+        services.AddSingleton<ICategorizacaoService, FallbackCategorizacaoService>();
         services.Decorate<ICategorizacaoService, TelemetriaCategorizacaoService>();
 
         return services;

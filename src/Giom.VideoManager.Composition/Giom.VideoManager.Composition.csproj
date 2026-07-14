@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sql\Giom.VideoManager.Infrastructure.Sql.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Mongo\Giom.VideoManager.Infrastructure.Mongo.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Supabase\Giom.VideoManager.Infrastructure.Supabase.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Redis\Giom.VideoManager.Infrastructure.Redis.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sentry\Giom.VideoManager.Infrastructure.Sentry.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sqs\Giom.VideoManager.Infrastructure.Sqs.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Voyage\Giom.VideoManager.Infrastructure.Voyage.csproj" />
