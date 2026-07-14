@@ -4,11 +4,15 @@ using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Instituto.Worker;
+using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+
+const string ChannelIdInstituto = "UCyyXFx2xHdzfavx6H6Q8zJw";
 
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
@@ -35,6 +39,11 @@ using var host = Host.CreateDefaultBuilder(args)
         var config = ctx.Configuration;
 
         services.AddVideoSourceService(config);
+        services.AddActiveChannelContext();        // US #105 — YouTubeVideoSourceService/ChannelProcessor passaram a exigir isso (AsyncLocal do canal ativo), mesmo pra 1 canal só
+        // US #105 — YouTubeVideoSourceService resolve o YouTubeService via GetRequiredKeyedService(channelId)
+        // (pensado pro Ingestao.Worker multi-canal); AddVideoSourceService só registra a versão sem chave
+        // (ainda usada por YouTubeCaptionService). Sem isso, a resolução keyed nunca acha nada.
+        services.AddKeyedSingleton(ChannelIdInstituto, (sp, _) => sp.GetRequiredService<YouTubeService>());
         services.AddPersistence(config);           // Supabase
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
@@ -46,7 +55,10 @@ using var host = Host.CreateDefaultBuilder(args)
         // Categorização/Embedding) saiu daqui — vive nos workers de etapa próprios, orquestrado
         // pelo PipelineHandler central. InstitutoPipelineHandler não implementa mais IEtapaXHandler.
         services.AddSingleton<InstitutoPipelineHandler>();
-        services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<InstitutoPipelineHandler>());
+        // US #105 — ChannelProcessor passou a exigir Func<string, IVideoHandler> (resolve o
+        // handler certo por canal, pensado pro Ingestao.Worker multi-canal); só 1 canal aqui, o
+        // resolver ignora o channelId e sempre devolve o mesmo InstitutoPipelineHandler.
+        services.AddSingleton<Func<string, IVideoHandler>>(sp => _ => sp.GetRequiredService<InstitutoPipelineHandler>());
 
         services.AddFilaVideoEtapa<VideoEtapaMensagem>("transcricao", config, "FilaTranscricao");
     })
@@ -55,7 +67,7 @@ using var host = Host.CreateDefaultBuilder(args)
 // Canais do Instituto Giom
 var channels = new[]
 {
-    new ChannelConfig("UCyyXFx2xHdzfavx6H6Q8zJw", null, "Instituto Giom", Mine: true),
+    new ChannelConfig(ChannelIdInstituto, null, "Instituto Giom", Mine: true),
 };
 
 // StartAsync/StopAsync (não só resolver os serviços direto) — sem isso o IHostedService que sobe
