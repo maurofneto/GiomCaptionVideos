@@ -23,6 +23,14 @@ public class GoogleCredentialOptions
 
     /// <summary>Presente só em produção (ex: ECS Fargate) — habilita o fluxo não-interativo.</summary>
     public string? RefreshToken { get; init; }
+
+    /// <summary>
+    /// Dev local só — se o RefreshToken fixo (config/SSM/arquivo local) estiver expirado/revogado
+    /// (Google devolve invalid_grant), cai pro fluxo interativo (abre navegador) em vez de só
+    /// propagar o erro. NUNCA true em produção/ECS Fargate — lá não tem navegador nem terminal
+    /// interativo, cair nesse caminho só trocaria uma falha rápida e clara por um travamento.
+    /// </summary>
+    public bool PermitirFluxoInterativoSeRefreshFalhar { get; init; }
 }
 
 public static class ServiceCollectionExtensions
@@ -162,6 +170,10 @@ public static class ServiceCollectionExtensions
 
         var clientSecrets = new ClientSecrets { ClientId = options.ClientId, ClientSecret = options.ClientSecret };
 
+        // Isolado por aplicação (Google:ApplicationName) — Instituto e Ministério usam Client
+        // Id/Secret diferentes, compartilhar o cache faz um sobrescrever o token do outro.
+        var dataStore = new FileDataStore($"Google.Apis.Auth.{options.ApplicationName}", true);
+
         // Modo não-interativo (produção/cloud) — reusa um refresh token já emitido, sem abrir
         // navegador. Necessário porque os workers rodam headless (ex: ECS Fargate).
         if (!string.IsNullOrWhiteSpace(options.RefreshToken))
@@ -169,16 +181,28 @@ public static class ServiceCollectionExtensions
             var flow = new GoogleAuthorizationCodeFlow(
                 new GoogleAuthorizationCodeFlow.Initializer { ClientSecrets = clientSecrets, Scopes = scopes });
 
-            var token = new TokenResponse { RefreshToken = options.RefreshToken };
-            return new UserCredential(flow, options.User, token);
+            var credential = new UserCredential(flow, options.User, new TokenResponse { RefreshToken = options.RefreshToken });
+
+            try
+            {
+                // O construtor não valida nada — o token morto só aparece na primeira chamada de
+                // API de verdade, no meio do processamento (visto em produção: invalid_grant lá
+                // no ChannelProcessor). Testa aqui, cedo, pra decidir entre propagar o erro (prod)
+                // ou cair pro fluxo interativo (dev, se PermitirFluxoInterativoSeRefreshFalhar).
+                await credential.RefreshTokenAsync(CancellationToken.None);
+                return credential;
+            }
+            catch (TokenResponseException) when (options.PermitirFluxoInterativoSeRefreshFalhar)
+            {
+                // Limpa o cache local antes de cair pro interativo — sem isso, AuthorizeAsync
+                // acharia esse MESMO token morto guardado no FileDataStore e devolveria ele de
+                // novo, sem nunca abrir o navegador.
+                await dataStore.DeleteAsync<TokenResponse>(options.User);
+            }
         }
 
-        // Modo interativo (dev local) — abre navegador na primeira vez, cacheia o refresh token
-        // num arquivo isolado por aplicação (Google:ApplicationName). Isolado porque Instituto e
-        // Ministério usam Client Id/Secret diferentes — compartilhar o cache faz um sobrescrever
-        // o token do outro.
-        var dataStore = new FileDataStore($"Google.Apis.Auth.{options.ApplicationName}", true);
-
+        // Modo interativo (dev local) — abre navegador (primeira vez, ou se o refresh token fixo
+        // acima falhou) e cacheia o token novo no FileDataStore.
         return await GoogleWebAuthorizationBroker.AuthorizeAsync(
             clientSecrets, scopes, options.User, CancellationToken.None, dataStore);
     }
