@@ -48,19 +48,33 @@ def _task_ja_em_andamento(family: str) -> bool:
 
 
 def _disparar_task(family: str, etapa: str) -> None:
-    resp = ecs.run_task(
-        cluster=CLUSTER_ARN,
-        taskDefinition=family,
-        capacityProviderStrategy=[{"capacityProvider": "FARGATE_SPOT", "weight": 1, "base": 0}],
-        networkConfiguration={
-            "awsvpcConfiguration": {
-                "subnets": SUBNETS,
-                "securityGroups": SECURITY_GROUPS,
-                "assignPublicIp": "ENABLED",
-            }
-        },
-        startedBy=f"lambda-watchman/{etapa}",
-    )
+    try:
+        resp = ecs.run_task(
+            cluster=CLUSTER_ARN,
+            taskDefinition=family,
+            capacityProviderStrategy=[{"capacityProvider": "FARGATE_SPOT", "weight": 1, "base": 0}],
+            networkConfiguration={
+                "awsvpcConfiguration": {
+                    "subnets": SUBNETS,
+                    "securityGroups": SECURITY_GROUPS,
+                    "assignPublicIp": "ENABLED",
+                }
+            },
+            startedBy=f"lambda-watchman/{etapa}",
+        )
+    except Exception as exc:
+        # RunTask pode LANÇAR (ex: ClientException "TaskDefinition not found" -- bug real achado
+        # em 2026-07-15, family com nome errado pro ambiente), não só devolver 200 com failures[]
+        # preenchido (ex: capacidade indisponível). Se deixasse propagar, a invocação inteira da
+        # Lambda falhava sem devolver batchItemFailures -- SQS trata isso como falha do BATCH
+        # inteiro, e a mensagem só reaparece depois do VisibilityTimeout natural (300s) em vez do
+        # reset explícito abaixo, queimando ApproximateReceiveCount sem o worker real nunca ter
+        # recebido a mensagem (mesma classe de sintoma do bug #113). Por isso sempre capturamos
+        # aqui -- a mensagem só é reprocessada no próximo poll (via reset de visibilidade abaixo,
+        # que roda de qualquer forma), nunca derruba a invocação inteira.
+        print(f"[watchman] RunTask lançou exceção pra {family}: {exc}")
+        return
+
     for falha in resp.get("failures", []):
         # RunTask pode devolver 200 com failures[] preenchido (ex: capacidade indisponível) --
         # não é uma exceção, só logamos; a mensagem volta pra fila e o próximo poll tenta de novo.
@@ -82,7 +96,13 @@ def handler(event, context):
             continue
 
         etapa, env = resolvido
-        family = f"giom-{etapa}-{env}-task"
+        # Bug real achado em 2026-07-15: a convenção de nome de task definition NÃO é simétrica
+        # entre ambientes -- dev tem sufixo "-dev" (giom-transcricao-dev-task), prod não tem
+        # sufixo nenhum (giom-transcricao-task, sem "-prod"). Usar f"giom-{etapa}-{env}-task" pra
+        # prod monta "giom-transcricao-prod-task", que nunca existiu -- RunTask lançava
+        # ClientException "TaskDefinition not found" a cada mensagem de fila prod, o que por sua
+        # vez (antes do fix acima) derrubava a invocação inteira sem processar nada de verdade.
+        family = f"giom-{etapa}-{env}-task" if env == "dev" else f"giom-{etapa}-task"
 
         ja_em_andamento = _task_ja_em_andamento(family)
         if not ja_em_andamento:
