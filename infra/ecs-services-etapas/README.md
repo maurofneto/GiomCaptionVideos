@@ -51,12 +51,17 @@ proporção definida com 0 tasks rodando). Por isso cada Service tem duas polici
 - **Step scaling "cold start" 0→1**: atrelada a um CloudWatch Alarm simples
   (`ApproximateNumberOfMessagesVisible > 0`, período de 60s) — só precisa disparar uma vez pra
   tirar o Service de 0.
-- **Target tracking** (regime normal): métrica `ApproximateNumberOfMessagesVisible` bruta
-  (não "mensagens por task" via metric math) — simplificação deliberada pra evitar depender de
-  Container Insights (que forneceria `RunningTaskCount`, indisponível se não habilitado no
-  cluster) e manter a config mais fácil de depurar. `TargetValue=5`, `ScaleOutCooldown=60s`,
-  `ScaleInCooldown=300s`. Se o comportamento de scale-out/scale-in não convergir bem na prática
-  (oscilação, sub/sobre-provisionamento), revisitar pra metric math por-task.
+- **Target tracking** (regime normal): **Metric Math** combinando
+  `ApproximateNumberOfMessagesVisible` (`AWS/SQS`) com `RunningTaskCount`
+  (`ECS/ContainerInsights`) — `backlog_per_task = m1 / IF(m2==0,1,m2)`. Usar a métrica bruta da
+  fila (sem dividir por task) inviabilizaria o Scale-In nativo da AWS: sem saber quantas tasks
+  já estão rodando, o target-tracking não tem como perceber que "mesma fila, metade das
+  mensagens, o dobro de tasks" já está sobre-provisionado. `TargetValue=5` (mensagens por
+  task), `ScaleOutCooldown=60s`, `ScaleInCooldown=300s`.
+  **Pré-requisito**: `RunningTaskCount` só existe como métrica de CloudWatch via **Container
+  Insights** (não é uma métrica padrão do namespace `AWS/ECS`) — `configurar-autoscaling.ps1`
+  garante isso habilitando Container Insights no cluster antes de configurar as policies
+  (idempotente).
 
 `maxCapacity`: 5 pra transcrição (I/O-bound — YouTube/Whisper), 3 pras demais (limitadas por
 rate-limit dos provedores de IA).

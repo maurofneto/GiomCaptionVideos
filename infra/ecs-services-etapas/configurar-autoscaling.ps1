@@ -3,12 +3,15 @@
 # partir de 0 task -- por isso cada Service ganha DUAS policies:
 #   1. Step scaling "cold start" 0->1, atrelada a um CloudWatch Alarm simples
 #      (ApproximateNumberOfMessagesVisible > 0) -- so precisa disparar uma vez.
-#   2. Target tracking pra manter o regime dali em diante (TargetValue = mensagens visiveis).
-# Simplificacao deliberada: a metrica de target-tracking usa ApproximateNumberOfMessagesVisible
-# bruto (nao "mensagens por task" via metric math) -- evita depender de Container Insights
-# (RunningTaskCount so fica disponivel via ECS/ContainerInsights, que pode nao estar habilitado
-# no cluster) e mantém a config bem mais simples de entender/depurar. Reavaliar se o
-# comportamento de scale-out/scale-in não convergir bem na pratica.
+#   2. Target tracking pra manter o regime dali em diante, via Metric Math combinando
+#      AWS/SQS (ApproximateNumberOfMessagesVisible) com RunningTaskCount (mensagens POR TASK,
+#      nao a contagem bruta da fila) -- e o que deixa o Scale-In nativo da AWS funcionar direito:
+#      sem dividir pelo numero de tasks rodando, o target-tracking nao tem como saber que "a
+#      mesma fila com metade das mensagens e o dobro de tasks" ja esta sobre-provisionada.
+# Nota: RunningTaskCount so existe como metrica de CloudWatch via Container Insights (namespace
+# ECS/ContainerInsights, dimensoes ClusterName+ServiceName) -- nao faz parte do AWS/ECS padrao.
+# Por isso o script garante Container Insights habilitado no cluster antes de configurar a
+# policy (idempotente -- update-cluster-settings e upsert).
 #
 # Idempotente: register-scalable-target, put-scaling-policy e put-metric-alarm sao upsert por
 # design da AWS -- reexecutar com os mesmos parametros nao duplica nem falha.
@@ -44,6 +47,13 @@ $filaPorEtapa = @{
     orquestracao  = "giom-videos-etapa-concluida$sufixoFila"
 }
 
+# Container Insights e pre-requisito pra RunningTaskCount existir como metrica de CloudWatch --
+# idempotente (update-cluster-settings converge pro valor pedido, nao falha se ja estiver assim).
+aws ecs update-cluster-settings `
+    --cluster $cluster `
+    --settings name=containerInsights,value=enabled `
+    --region $region | Out-Null
+
 $tmpDir = Join-Path $env:TEMP "giom-autoscaling-$Ambiente"
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 
@@ -62,19 +72,54 @@ foreach ($etapa in @("transcricao", "resumo", "categorizacao", "embedding", "orq
         --min-capacity 0 --max-capacity $max `
         --region $region | Out-Null
 
-    # --- Target tracking (regime normal) ---
+    # --- Target tracking (regime normal) — Metric Math: mensagens visiveis / task rodando ---
+    # m1 = ApproximateNumberOfMessagesVisible (AWS/SQS), m2 = RunningTaskCount
+    # (ECS/ContainerInsights, por Cluster+Service). backlog_per_task usa IF(m2==0,1,m2) pra
+    # nunca dividir por zero -- na pratica m2=0 so acontece na janela que o step-scaling
+    # cold-start (0->1) ja cobre, target-tracking so entra em regime com >=1 task rodando.
     $ttConfigPath = Join-Path $tmpDir "$etapa-tt.json"
     @{
-        TargetValue                 = 5.0
+        TargetValue = 5.0
         CustomizedMetricSpecification = @{
-            MetricName = "ApproximateNumberOfMessagesVisible"
-            Namespace  = "AWS/SQS"
-            Dimensions = @(@{ Name = "QueueName"; Value = $fila })
-            Statistic  = "Maximum"
+            Metrics = @(
+                @{
+                    Id         = "m1"
+                    MetricStat = @{
+                        Metric = @{
+                            MetricName = "ApproximateNumberOfMessagesVisible"
+                            Namespace  = "AWS/SQS"
+                            Dimensions = @(@{ Name = "QueueName"; Value = $fila })
+                        }
+                        Stat = "Maximum"
+                    }
+                    ReturnData = $false
+                },
+                @{
+                    Id         = "m2"
+                    MetricStat = @{
+                        Metric = @{
+                            MetricName = "RunningTaskCount"
+                            Namespace  = "ECS/ContainerInsights"
+                            Dimensions = @(
+                                @{ Name = "ClusterName"; Value = $cluster }
+                                @{ Name = "ServiceName"; Value = $servico }
+                            )
+                        }
+                        Stat = "Average"
+                    }
+                    ReturnData = $false
+                },
+                @{
+                    Id         = "backlog_per_task"
+                    Expression = "m1 / IF(m2==0,1,m2)"
+                    Label      = "MensagensPorTask"
+                    ReturnData = $true
+                }
+            )
         }
         ScaleOutCooldown = 60
         ScaleInCooldown  = 300
-    } | ConvertTo-Json -Depth 6 | Set-Content -Path $ttConfigPath -Encoding utf8
+    } | ConvertTo-Json -Depth 8 | Set-Content -Path $ttConfigPath -Encoding utf8
 
     aws application-autoscaling put-scaling-policy `
         --service-namespace ecs `
