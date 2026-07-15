@@ -13,6 +13,16 @@ Contrato com a Lambda: a mensagem NUNCA é apagada por aqui. Toda mensagem proce
 US #44/#45), não esta função. Isso preserva o mesmo princípio que corrigiu o bug dos EventBridge
 Pipes: o mecanismo de trigger só observa a fila, nunca compete pela mensagem com o worker real.
 
+CRÍTICO: o Event Source Mapping (SQS -> esta Lambda) PRECISA ser criado com
+`--function-response-types ReportBatchItemFailures` (ver criar-event-source-mappings.ps1). Sem
+essa flag, a AWS ignora completamente o dict `{"batchItemFailures": [...]}` que a função devolve
+-- qualquer invocação que termine sem lançar exceção é tratada como sucesso TOTAL do batch, e a
+AWS deleta a mensagem sozinha, mesmo que o código tenha explicitamente pedido "devolve pra fila,
+não processei de verdade". Bug real achado ao vivo em 2026-07-15: 5 mensagens reais em
+giom-videos-transcricao-prod sumiram sem nenhum worker (SqsFilaConsumer) jamais recebê-las e sem
+ir pra DLQ -- a Lambda "processava" sem erro, a AWS deletava por conta própria, e o contrato
+inteiro acima (mensagem nunca apagada aqui) ficava sem efeito nenhum na prática.
+
 Deploy: uma função POR AMBIENTE -- giom-fila-watchman-dev (só filas -dev) e giom-fila-watchman
 (prod, sem sufixo -- mesmo padrão assimétrico das task definitions ECS). Antes era uma função
 única cobrindo os dois ambientes via Event Source Mapping nas filas -dev e -prod ao mesmo tempo,
