@@ -16,14 +16,19 @@
         "arn:aws:sqs:us-east-1:798229612288:giom-videos-resumo-dev",
         "arn:aws:sqs:us-east-1:798229612288:giom-videos-categorizacao-dev",
         "arn:aws:sqs:us-east-1:798229612288:giom-videos-embedding-dev",
-        "arn:aws:sqs:us-east-1:798229612288:giom-videos-etapa-concluida-dev"
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-etapa-concluida-dev",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-transcricao-prod",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-resumo-prod",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-categorizacao-prod",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-embedding-prod",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-etapa-concluida-prod"
       ]
     },
     {
       "Sid": "EcsRunTask",
       "Effect": "Allow",
       "Action": "ecs:RunTask",
-      "Resource": "arn:aws:ecs:us-east-1:798229612288:task-definition/giom-*-dev-task*",
+      "Resource": "arn:aws:ecs:us-east-1:798229612288:task-definition/giom-*-task*",
       "Condition": {
         "ArnLike": { "ecs:cluster": "arn:aws:ecs:us-east-1:798229612288:cluster/giom-cluster" }
       }
