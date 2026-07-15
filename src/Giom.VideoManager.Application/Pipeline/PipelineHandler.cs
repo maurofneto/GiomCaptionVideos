@@ -16,6 +16,7 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// </summary>
 public class PipelineHandler(
     IVideoRepository videoRepository,
+    IVideoEtapaTerminalRepository etapaTerminalRepository,
     IOptions<TopologiaOptions> options,
     IServiceProvider serviceProvider,
     ILogger<PipelineHandler> logger)
@@ -40,6 +41,26 @@ public class PipelineHandler(
 
         if (proximasEtapas.Length == 0)
         {
+            // Bug #111: uma topologia com fan-out real (ex: Instituto: transcricao -> [resumo,
+            // embedding], onde embedding e resumo->categorizacao são DUAS folhas terminais
+            // separadas) só pode marcar ProcessedAt quando TODOS os ramos terminais concluírem —
+            // não só o primeiro a chegar aqui. Só entra nesse rastreamento se mensagem.Etapa for
+            // uma etapa terminal DE VERDADE (parte do universo conhecido da topologia do canal);
+            // uma etapa fora desse universo (ver EtapaSemEntradaNaTopologia_TrataComoTerminal) não
+            // tem como ser "esperada" em nenhum conjunto, então continua marcando na hora, como
+            // sempre foi.
+            var etapasTerminais = _options.ObterEtapasTerminais(canal);
+            if (etapasTerminais.Contains(mensagem.Etapa))
+            {
+                var concluidas = await etapaTerminalRepository.RegistrarConclusaoAsync(video.Id, mensagem.Etapa, ct);
+                if (!etapasTerminais.IsSubsetOf(concluidas))
+                {
+                    logger.LogInformation("{Canal} — ramo terminal {Etapa} concluído, aguardando outros ramos ({Concluidas}/{Total}): {Title}",
+                        canal, mensagem.Etapa, concluidas.Count, etapasTerminais.Count, video.Title);
+                    return;
+                }
+            }
+
             video.ProcessedAt = DateTime.UtcNow;
             await videoRepository.UpsertAsync(video, ct);
             logger.LogInformation("{Canal} — pipeline concluído (terminal em {Etapa}): {Title}", canal, mensagem.Etapa, video.Title);

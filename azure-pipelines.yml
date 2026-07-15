@@ -48,6 +48,21 @@ jobs:
           AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
           AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
+      # giom-fila-watchman (bug #113) é uma Lambda ÚNICA (não separada por dev/prod — os event
+      # source mappings dela já cobrem as filas -dev e -prod, ver regex _PADRAO_FILA no código)
+      # cujo deploy até agora era manual (aws lambda update-function-code na mão), perdendo
+      # versionamento real do que estava rodando em prod. Redeploy incondicional a cada run do
+      # pipeline (dev ou master) é seguro e barato — update-function-code é idempotente (mesmo
+      # zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende de build Docker.
+      - script: |
+          cd infra/lambda-fila-watchman
+          zip -q function.zip lambda_function.py
+          aws lambda update-function-code --function-name giom-fila-watchman --zip-file fileb://function.zip --region $(AWS_REGION)
+        displayName: 'Deploy Lambda watchman (giom-fila-watchman)'
+        env:
+          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+
       # Migrations + Edge Functions ANTES do deploy da imagem nova — o código novo (esta PR, por
       # exemplo, dependia da coluna "origem" em video_chunk) não deve subir antes do schema
       # existir. SUPABASE_PROJECT_REF vem do variable group por branch (giom-dev =

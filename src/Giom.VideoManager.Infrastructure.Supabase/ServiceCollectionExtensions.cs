@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IVideoRepository, SupabaseVideoRepository>();
         services.AddSingleton<IProgressoRepository, SupabaseProgressoRepository>();
         services.AddSingleton<IVideoChunkRepository, SupabaseVideoChunkRepository>();
+        services.AddSingleton<IVideoEtapaTerminalRepository, SupabaseVideoEtapaTerminalRepository>();
         return services;
     }
 
