@@ -12,6 +12,14 @@ Contrato com a Lambda: a mensagem NUNCA é apagada por aqui. Toda mensagem proce
 `batchItemFailures` -- quem consome de verdade é o SqsFilaConsumer do worker (retry/DLQ de
 US #44/#45), não esta função. Isso preserva o mesmo princípio que corrigiu o bug dos EventBridge
 Pipes: o mecanismo de trigger só observa a fila, nunca compete pela mensagem com o worker real.
+
+Deploy: uma função POR AMBIENTE -- giom-fila-watchman-dev (só filas -dev) e giom-fila-watchman
+(prod, sem sufixo -- mesmo padrão assimétrico das task definitions ECS). Antes era uma função
+única cobrindo os dois ambientes via Event Source Mapping nas filas -dev e -prod ao mesmo tempo,
+mas isso misturava logs e triggers de dev/prod no mesmo CloudWatch Log Group, dificultando
+diagnóstico (2026-07-15). O código continua o mesmo nas duas funções -- cada uma só tem Event
+Source Mapping nas filas do próprio ambiente, então a resolução de família por env (ver
+_disparar_task) nunca precisa lidar com o ambiente "errado" na prática.
 """
 
 import os

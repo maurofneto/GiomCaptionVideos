@@ -94,25 +94,28 @@ stages:
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
     jobs:
       - job: DeployLambda
-        displayName: 'Deploy giom-fila-watchman'
+        displayName: 'Deploy $(LAMBDA_WATCHMAN_NAME)'
         steps:
           - script: |
               command -v aws >/dev/null 2>&1 || pip install --user awscli
               echo "##vso[task.prependpath]$HOME/.local/bin"
             displayName: 'Garantir AWS CLI disponível'
 
-          # giom-fila-watchman (bug #113) é uma Lambda ÚNICA (não separada por dev/prod — os
-          # event source mappings dela já cobrem as filas -dev e -prod, ver regex _PADRAO_FILA no
-          # código) cujo deploy até agora era manual (aws lambda update-function-code na mão),
-          # perdendo versionamento real do que estava rodando em prod. Redeploy incondicional a
-          # cada run do pipeline (dev ou master) é seguro e barato — update-function-code é
-          # idempotente (mesmo zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende
-          # de build Docker, por isso roda em paralelo com Migrations/Deploy 1..9.
+          # giom-fila-watchman (bug #113) — uma função POR AMBIENTE (giom-fila-watchman-dev /
+          # giom-fila-watchman, sem sufixo em prod — mesmo padrão assimétrico das task definitions
+          # ECS), cada uma só com Event Source Mapping nas filas do próprio ambiente. Antes era uma
+          # única função cobrindo as duas, mas isso misturava logs e triggers de dev/prod no mesmo
+          # lugar, dificultando diagnóstico. LAMBDA_WATCHMAN_NAME vem do variable group por branch
+          # (giom-dev/giom-prod). Deploy até agora era manual (aws lambda update-function-code na
+          # mão), perdendo versionamento real do que estava rodando em prod. Redeploy incondicional
+          # a cada run do pipeline é seguro e barato — update-function-code é idempotente (mesmo
+          # zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende de build Docker, por
+          # isso roda em paralelo com Migrations/Deploy 1..9.
           - script: |
               cd infra/lambda-fila-watchman
               zip -q function.zip lambda_function.py
-              aws lambda update-function-code --function-name giom-fila-watchman --zip-file fileb://function.zip --region $(AWS_REGION)
-            displayName: 'Deploy Lambda watchman (giom-fila-watchman)'
+              aws lambda update-function-code --function-name $(LAMBDA_WATCHMAN_NAME) --zip-file fileb://function.zip --region $(AWS_REGION)
+            displayName: 'Deploy Lambda watchman ($(LAMBDA_WATCHMAN_NAME))'
             env:
               AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
               AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
