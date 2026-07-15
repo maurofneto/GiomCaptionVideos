@@ -13,7 +13,8 @@ variables:
   # do pipeline (Pipelines > Edit > Variables), NÃO ficam neste arquivo nem em variable group.
   # User: giom-ci-deploy, permissão de push em qualquer repositório ECR "giom-*" (wildcard —
   # evita ter que editar a policy toda vez que um worker novo ganha repositório próprio, ver
-  # Feature #104) e ecs:UpdateService só nos dois services do AgenteInstituto.
+  # Feature #104), ecs:UpdateService só nos dois services do AgenteInstituto e
+  # lambda:UpdateFunctionCode só na giom-fila-watchman.
   - group: giom-aws
   #
   # branch dev publica recursos -dev (imagem :dev, service giom-agenteinstituto-dev-service);
@@ -24,122 +25,150 @@ variables:
   #
   # Ambos os "if" abaixo comparam com igualdade explícita (nunca "!= dev") — sem isso, uma
   # branch qualquer (ex.: enfileirada manualmente pra validar este YAML) cairia no "senão" e
-  # seria tratada como prod, forçando deploy no service de produção sem querer. O job abaixo
-  # também só roda em dev/master (condition) — qualquer outra branch simplesmente não builda
-  # nem publica nada.
+  # seria tratada como prod, forçando deploy no service de produção sem querer. Cada stage abaixo
+  # também só roda em dev/master (condition) — qualquer outra branch simplesmente não builda nem
+  # publica nada. Variáveis declaradas aqui na raiz (grupos incluídos) ficam visíveis em TODAS as
+  # stages/jobs do pipeline, não precisa redeclarar por stage.
   - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
       - group: giom-dev
   - ${{ if eq(variables['Build.SourceBranchName'], 'master') }}:
       - group: giom-prod
 
-jobs:
-  - job: BuildAndDeploy
+# Dividido em stages (era um job único "BuildAndDeploy") pra dar visibilidade de cada etapa
+# direto na lista de execuções do pipeline, sem precisar abrir o log pra saber o que rodou —
+# cada stage aparece como um bloco separado no resumo do run, e a stage de imagens usa jobs em
+# paralelo (matrix), um por serviço, cada um visível individualmente.
+stages:
+  - stage: Migrations
+    displayName: 'Supabase — migrations + Edge Functions'
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
-    steps:
-      - script: |
-          command -v aws >/dev/null 2>&1 || pip install --user awscli
-          echo "##vso[task.prependpath]$HOME/.local/bin"
-        displayName: 'Garantir AWS CLI disponível'
+    jobs:
+      - job: AplicarMigrations
+        displayName: 'Aplicar migrations + Edge Functions'
+        steps:
+          # Migrations + Edge Functions ANTES do deploy da imagem nova — código novo que depende
+          # de schema novo (ex: coluna "origem" em video_chunk) não deve subir antes do schema
+          # existir. SUPABASE_PROJECT_REF vem do variable group por branch (giom-dev/giom-prod).
+          # SUPABASE_ACCESS_TOKEN é secreto do pipeline (Pipelines > Edit > Variables, "Keep this
+          # value secret"), nunca neste arquivo. `supabase db push` só aplica migrations ainda não
+          # registradas (idempotente).
+          - script: npm install -g supabase
+            displayName: 'Instalar Supabase CLI'
 
-      - script: |
-          aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-        displayName: 'Login no ECR'
-        env:
-          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+          - script: |
+              supabase link --project-ref $(SUPABASE_PROJECT_REF)
+              supabase db push
+              supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
+            displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
+            env:
+              SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
 
-      # giom-fila-watchman (bug #113) é uma Lambda ÚNICA (não separada por dev/prod — os event
-      # source mappings dela já cobrem as filas -dev e -prod, ver regex _PADRAO_FILA no código)
-      # cujo deploy até agora era manual (aws lambda update-function-code na mão), perdendo
-      # versionamento real do que estava rodando em prod. Redeploy incondicional a cada run do
-      # pipeline (dev ou master) é seguro e barato — update-function-code é idempotente (mesmo
-      # zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende de build Docker.
-      - script: |
-          cd infra/lambda-fila-watchman
-          zip -q function.zip lambda_function.py
-          aws lambda update-function-code --function-name giom-fila-watchman --zip-file fileb://function.zip --region $(AWS_REGION)
-        displayName: 'Deploy Lambda watchman (giom-fila-watchman)'
-        env:
-          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+  - stage: LambdaWatchman
+    displayName: 'Lambda watchman — giom-fila-watchman'
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: DeployLambda
+        displayName: 'Deploy giom-fila-watchman'
+        steps:
+          - script: |
+              command -v aws >/dev/null 2>&1 || pip install --user awscli
+              echo "##vso[task.prependpath]$HOME/.local/bin"
+            displayName: 'Garantir AWS CLI disponível'
 
-      # Migrations + Edge Functions ANTES do deploy da imagem nova — o código novo (esta PR, por
-      # exemplo, dependia da coluna "origem" em video_chunk) não deve subir antes do schema
-      # existir. SUPABASE_PROJECT_REF vem do variable group por branch (giom-dev =
-      # fajrstyqgogmqzceujjt, giom-prod = rhjsjfbegtusucunkgav — precisam ser cadastrados lá,
-      # ainda não existem). SUPABASE_ACCESS_TOKEN é secreto do pipeline (Pipelines > Edit >
-      # Variables, "Keep this value secret") — gerado em supabase.com/dashboard/account/tokens,
-      # nunca neste arquivo. `supabase db push` só aplica migrations em supabase/migrations/
-      # ainda não registradas (idempotente) — não recria nem reaplica o que já rodou.
-      - script: |
-          npm install -g supabase
-        displayName: 'Instalar Supabase CLI'
+          # giom-fila-watchman (bug #113) é uma Lambda ÚNICA (não separada por dev/prod — os
+          # event source mappings dela já cobrem as filas -dev e -prod, ver regex _PADRAO_FILA no
+          # código) cujo deploy até agora era manual (aws lambda update-function-code na mão),
+          # perdendo versionamento real do que estava rodando em prod. Redeploy incondicional a
+          # cada run do pipeline (dev ou master) é seguro e barato — update-function-code é
+          # idempotente (mesmo zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende
+          # de build Docker, por isso roda numa stage própria em paralelo com BuildImages.
+          - script: |
+              cd infra/lambda-fila-watchman
+              zip -q function.zip lambda_function.py
+              aws lambda update-function-code --function-name giom-fila-watchman --zip-file fileb://function.zip --region $(AWS_REGION)
+            displayName: 'Deploy Lambda watchman (giom-fila-watchman)'
+            env:
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
-      - script: |
-          supabase link --project-ref $(SUPABASE_PROJECT_REF)
-          supabase db push
-          supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
-        displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
-        env:
-          SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
+  - stage: BuildImages
+    displayName: 'Build e push das imagens Docker'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: Build
+        displayName: 'Build e push'
+        strategy:
+          # Cada serviço roda no seu próprio job/agente — aparece separado na lista de execuções
+          # (era só um step a mais dentro do job único "BuildAndDeploy" antes). US #105 —
+          # Ingestao.Worker substitui Instituto.Worker/Ministerio.Worker (canal_ingestao no
+          # Supabase decide quais canais processar numa run só) — os dois antigos continuam no
+          # pipeline por enquanto, retirada é o passo de cutover final. Feature #104 — workers de
+          # etapa (Transcrição/Resumo/Categorização/Embedding) + orquestrador: cada imagem é
+          # única (não duplicada por canal), disparada via run-task com config diferente por
+          # canal (não faz parte do build).
+          matrix:
+            Ingestao:
+              serviceName: giom-ingestao
+              dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
+            Instituto:
+              serviceName: giom-instituto
+              dockerfilePath: src/Giom.VideoManager.Instituto.Worker/Dockerfile
+            Ministerio:
+              serviceName: giom-ministerio
+              dockerfilePath: src/Giom.VideoManager.Ministerio.Worker/Dockerfile
+            AgenteInstituto:
+              serviceName: giom-agenteinstituto
+              dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
+            Transcricao:
+              serviceName: giom-transcricao
+              dockerfilePath: src/Giom.VideoManager.Transcricao.Worker/Dockerfile
+            Resumo:
+              serviceName: giom-resumo
+              dockerfilePath: src/Giom.VideoManager.Resumo.Worker/Dockerfile
+            Categorizacao:
+              serviceName: giom-categorizacao
+              dockerfilePath: src/Giom.VideoManager.Categorizacao.Worker/Dockerfile
+            Embedding:
+              serviceName: giom-embedding
+              dockerfilePath: src/Giom.VideoManager.Embedding.Worker/Dockerfile
+            Orquestracao:
+              serviceName: giom-orquestracao
+              dockerfilePath: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile
+        steps:
+          - script: |
+              command -v aws >/dev/null 2>&1 || pip install --user awscli
+              echo "##vso[task.prependpath]$HOME/.local/bin"
+            displayName: 'Garantir AWS CLI disponível'
 
-      # US #105 — Ingestao.Worker substitui Instituto.Worker/Ministerio.Worker (canal_ingestao
-      # no Supabase decide quais canais processar numa run só). Os dois antigos continuam no
-      # pipeline por enquanto — retirada é o passo de cutover final, depois de validar em
-      # dev/prod lado a lado.
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-ingestao
-          dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
+          - script: |
+              aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+            displayName: 'Login no ECR'
+            env:
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-instituto
-          dockerfilePath: src/Giom.VideoManager.Instituto.Worker/Dockerfile
+          - template: pipelines/templates/build-push-image.yml
+            parameters:
+              serviceName: $(serviceName)
+              dockerfilePath: $(dockerfilePath)
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-ministerio
-          dockerfilePath: src/Giom.VideoManager.Ministerio.Worker/Dockerfile
+  - stage: RedeployBot
+    displayName: 'Redeploy — GiomAgenteInstituto'
+    dependsOn: BuildImages
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: ForcarNovoDeploy
+        displayName: 'Forçar novo deploy'
+        steps:
+          - script: |
+              command -v aws >/dev/null 2>&1 || pip install --user awscli
+              echo "##vso[task.prependpath]$HOME/.local/bin"
+            displayName: 'Garantir AWS CLI disponível'
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-agenteinstituto
-          dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
-
-      # Feature #104 — workers de etapa (Transcrição/Resumo/Categorização/Embedding) +
-      # orquestrador. Cada imagem é única (não duplicada por canal) — Instituto e Ministério
-      # compartilham a mesma imagem, disparada via run-task com config diferente por canal
-      # (não faz parte do build). Requer os repositórios ECR giom-transcricao/giom-resumo/
-      # giom-categorizacao/giom-embedding/giom-orquestracao já criados.
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-transcricao
-          dockerfilePath: src/Giom.VideoManager.Transcricao.Worker/Dockerfile
-
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-resumo
-          dockerfilePath: src/Giom.VideoManager.Resumo.Worker/Dockerfile
-
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-categorizacao
-          dockerfilePath: src/Giom.VideoManager.Categorizacao.Worker/Dockerfile
-
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-embedding
-          dockerfilePath: src/Giom.VideoManager.Embedding.Worker/Dockerfile
-
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-orquestracao
-          dockerfilePath: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile
-
-      - script: |
-          aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)
-        displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
-        env:
-          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+          - script: |
+              aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)
+            displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
+            env:
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
