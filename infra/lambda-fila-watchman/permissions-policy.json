@@ -1,0 +1,53 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SqsWatch",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ChangeMessageVisibility"
+      ],
+      "Resource": [
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-transcricao-dev",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-resumo-dev",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-categorizacao-dev",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-embedding-dev",
+        "arn:aws:sqs:us-east-1:798229612288:giom-videos-etapa-concluida-dev"
+      ]
+    },
+    {
+      "Sid": "EcsRunTask",
+      "Effect": "Allow",
+      "Action": "ecs:RunTask",
+      "Resource": "arn:aws:ecs:us-east-1:798229612288:task-definition/giom-*-dev-task*",
+      "Condition": {
+        "ArnLike": { "ecs:cluster": "arn:aws:ecs:us-east-1:798229612288:cluster/giom-cluster" }
+      }
+    },
+    {
+      "Sid": "EcsListTasks",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PassRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::798229612288:role/giom-ecs-execution-role",
+        "arn:aws:iam::798229612288:role/giom-worker-task-role"
+      ]
+    },
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-1:798229612288:*"
+    }
+  ]
+}
