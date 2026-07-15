@@ -35,12 +35,37 @@ variables:
       - group: giom-prod
 
 # Dividido em stages (era um job único "BuildAndDeploy") pra dar visibilidade de cada etapa
-# direto na lista de execuções do pipeline, sem precisar abrir o log pra saber o que rodou —
-# cada stage aparece como um bloco separado no resumo do run, e a stage de imagens usa jobs em
-# paralelo (matrix), um por serviço, cada um visível individualmente.
+# direto na lista de execuções do pipeline — cada stage aparece como um bloco separado no
+# resumo/diagrama do run, sem precisar abrir log nenhum pra saber o que rodou ou o que quebrou
+# (foi assim que a causa raiz do build 113 só apareceu depois de abrir o log inteiro).
+#
+# Ordem: Build (gate — se dotnet test falhar, nada mais roda) -> Migrations + Lambda (paralelas,
+# ambas só dependem do Build) -> Deploy 1..9, um por imagem Docker, todas em paralelo (só
+# dependem de Migrations, porque código novo pode depender de schema novo) -> Deploy Bot
+# (força o restart do bot, só depois de TODAS as imagens publicadas).
 stages:
+  - stage: Build
+    displayName: 'Build'
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildETestar
+        displayName: 'dotnet build + test'
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Instalar .NET SDK'
+            inputs:
+              packageType: 'sdk'
+              version: '9.0.x'
+
+          - script: dotnet build GiomCaptionVideos.sln --configuration Release
+            displayName: 'dotnet build'
+
+          - script: dotnet test GiomCaptionVideos.sln --configuration Release --no-build
+            displayName: 'dotnet test'
+
   - stage: Migrations
-    displayName: 'Supabase — migrations + Edge Functions'
+    displayName: 'Migrations'
+    dependsOn: Build
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
     jobs:
       - job: AplicarMigrations
@@ -63,8 +88,9 @@ stages:
             env:
               SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
 
-  - stage: LambdaWatchman
-    displayName: 'Lambda watchman — giom-fila-watchman'
+  - stage: Lambda
+    displayName: 'Lambda'
+    dependsOn: Build
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
     jobs:
       - job: DeployLambda
@@ -81,7 +107,7 @@ stages:
           # perdendo versionamento real do que estava rodando em prod. Redeploy incondicional a
           # cada run do pipeline (dev ou master) é seguro e barato — update-function-code é
           # idempotente (mesmo zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende
-          # de build Docker, por isso roda numa stage própria em paralelo com BuildImages.
+          # de build Docker, por isso roda em paralelo com Migrations/Deploy 1..9.
           - script: |
               cd infra/lambda-fila-watchman
               zip -q function.zip lambda_function.py
@@ -91,71 +117,129 @@ stages:
               AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
               AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
-  - stage: BuildImages
-    displayName: 'Build e push das imagens Docker'
+  - stage: Deploy1
+    displayName: 'Deploy 1 — giom-ingestao'
     dependsOn: Migrations
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
     jobs:
-      - job: Build
+      - job: BuildEPush
         displayName: 'Build e push'
-        strategy:
-          # Cada serviço roda no seu próprio job/agente — aparece separado na lista de execuções
-          # (era só um step a mais dentro do job único "BuildAndDeploy" antes). US #105 —
-          # Ingestao.Worker substitui Instituto.Worker/Ministerio.Worker (canal_ingestao no
-          # Supabase decide quais canais processar numa run só) — os dois antigos continuam no
-          # pipeline por enquanto, retirada é o passo de cutover final. Feature #104 — workers de
-          # etapa (Transcrição/Resumo/Categorização/Embedding) + orquestrador: cada imagem é
-          # única (não duplicada por canal), disparada via run-task com config diferente por
-          # canal (não faz parte do build).
-          matrix:
-            Ingestao:
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-ingestao
               dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
-            Instituto:
+
+  - stage: Deploy2
+    displayName: 'Deploy 2 — giom-instituto'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-instituto
               dockerfilePath: src/Giom.VideoManager.Instituto.Worker/Dockerfile
-            Ministerio:
+
+  - stage: Deploy3
+    displayName: 'Deploy 3 — giom-ministerio'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-ministerio
               dockerfilePath: src/Giom.VideoManager.Ministerio.Worker/Dockerfile
-            AgenteInstituto:
+
+  - stage: Deploy4
+    displayName: 'Deploy 4 — giom-agenteinstituto'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-agenteinstituto
               dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
-            Transcricao:
+
+  # Feature #104 — workers de etapa (Transcrição/Resumo/Categorização/Embedding) + orquestrador.
+  # Cada imagem é única (não duplicada por canal) — Instituto e Ministério compartilham a mesma
+  # imagem, disparada via run-task com config diferente por canal (não faz parte do build).
+  - stage: Deploy5
+    displayName: 'Deploy 5 — giom-transcricao'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-transcricao
               dockerfilePath: src/Giom.VideoManager.Transcricao.Worker/Dockerfile
-            Resumo:
+
+  - stage: Deploy6
+    displayName: 'Deploy 6 — giom-resumo'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-resumo
               dockerfilePath: src/Giom.VideoManager.Resumo.Worker/Dockerfile
-            Categorizacao:
+
+  - stage: Deploy7
+    displayName: 'Deploy 7 — giom-categorizacao'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-categorizacao
               dockerfilePath: src/Giom.VideoManager.Categorizacao.Worker/Dockerfile
-            Embedding:
+
+  - stage: Deploy8
+    displayName: 'Deploy 8 — giom-embedding'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-embedding
               dockerfilePath: src/Giom.VideoManager.Embedding.Worker/Dockerfile
-            Orquestracao:
+
+  - stage: Deploy9
+    displayName: 'Deploy 9 — giom-orquestracao'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
               serviceName: giom-orquestracao
               dockerfilePath: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile
-        steps:
-          - script: |
-              command -v aws >/dev/null 2>&1 || pip install --user awscli
-              echo "##vso[task.prependpath]$HOME/.local/bin"
-            displayName: 'Garantir AWS CLI disponível'
 
-          - script: |
-              aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-            displayName: 'Login no ECR'
-            env:
-              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
-
-          - template: pipelines/templates/build-push-image.yml
-            parameters:
-              serviceName: $(serviceName)
-              dockerfilePath: $(dockerfilePath)
-
-  - stage: RedeployBot
-    displayName: 'Redeploy — GiomAgenteInstituto'
-    dependsOn: BuildImages
+  - stage: DeployBot
+    displayName: 'Deploy Bot'
+    dependsOn: [Deploy1, Deploy2, Deploy3, Deploy4, Deploy5, Deploy6, Deploy7, Deploy8, Deploy9]
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
     jobs:
       - job: ForcarNovoDeploy
