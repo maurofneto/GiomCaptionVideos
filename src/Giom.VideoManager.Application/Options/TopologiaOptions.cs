@@ -14,4 +14,21 @@ public class TopologiaOptions
 {
     public Dictionary<string, string> Canais { get; init; } = new();
     public Dictionary<string, Dictionary<string, string[]>> Topologia { get; init; } = new();
+
+    /// <summary>
+    /// Etapas terminais (lista vazia) da topologia de um canal — bug #111: um canal com fan-out
+    /// real (ex: Instituto: transcricao -> [resumo, embedding], onde embedding -> [] E
+    /// resumo -> categorizacao -> [] são duas folhas terminais separadas) tem MAIS de uma etapa
+    /// terminal, e todas precisam concluir antes do vídeo ser considerado processado. Calculado a
+    /// partir do próprio dicionário (chaves ∪ valores cujo GetValueOrDefault dá lista vazia) — não
+    /// hardcoded por canal, então continua correto se a topologia mudar no appsettings.
+    /// </summary>
+    public IReadOnlySet<string> ObterEtapasTerminais(string canal)
+    {
+        if (!Topologia.TryGetValue(canal, out var porEtapa))
+            return new HashSet<string>();
+
+        var todasEtapas = porEtapa.Keys.Concat(porEtapa.Values.SelectMany(v => v)).Distinct();
+        return todasEtapas.Where(etapa => porEtapa.GetValueOrDefault(etapa, []).Length == 0).ToHashSet();
+    }
 }

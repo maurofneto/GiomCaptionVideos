@@ -23,9 +23,24 @@ public class PipelineHandlerTests
 
     private static Video CriarVideo(string channelId) => new() { Id = "v1", Title = "Vídeo", ChannelId = channelId, ChannelTitle = "Canal" };
 
+    /// <summary>Simula video_etapa_terminal (bug #111) em memória — acumula por videoId as etapas terminais já registradas.</summary>
+    private sealed class FakeVideoEtapaTerminalRepository : IVideoEtapaTerminalRepository
+    {
+        private readonly Dictionary<string, HashSet<string>> _porVideo = new();
+
+        public Task<IReadOnlySet<string>> RegistrarConclusaoAsync(string videoId, string etapa, CancellationToken ct = default)
+        {
+            if (!_porVideo.TryGetValue(videoId, out var etapas))
+                _porVideo[videoId] = etapas = new HashSet<string>();
+            etapas.Add(etapa);
+            return Task.FromResult<IReadOnlySet<string>>(etapas);
+        }
+    }
+
     private sealed class Ambiente
     {
         public Mock<IVideoRepository> VideoRepository { get; } = new();
+        public FakeVideoEtapaTerminalRepository EtapaTerminalRepository { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> ResumoPublisher { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> EmbeddingPublisher { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> CategorizacaoPublisher { get; } = new();
@@ -64,6 +79,7 @@ public class PipelineHandlerTests
 
             return new PipelineHandler(
                 VideoRepository.Object,
+                EtapaTerminalRepository,
                 Microsoft.Extensions.Options.Options.Create(Topologia),
                 provider,
                 NullLogger<PipelineHandler>.Instance);
@@ -120,22 +136,58 @@ public class PipelineHandlerTests
     }
 
     [Fact]
-    public async Task CategorizacaoEEmbeddingInstituto_CadaUmaMarcaProcessedAtIndependente()
+    public async Task CategorizacaoOuEmbeddingIsolado_NaoMarcaProcessedAt_AguardaOOutroRamo()
     {
-        // Fan-out de Transcrição gera 2 ramos independentes (Resumo→Categorização e Embedding) —
-        // cada um marca ProcessedAt no seu próprio término, sem coordenar com o outro (mesmo
-        // comportamento que já existia nos handlers antigos, agora formalizado no orquestrador).
+        // Bug #111: fan-out de Transcrição gera 2 ramos terminais independentes (Resumo→
+        // Categorização e Embedding) — o vídeo só está de fato concluído quando AMBOS
+        // terminarem, não no primeiro que chegar.
         var ambiente = new Ambiente();
-        var videoCategorizacao = CriarVideo(ChannelIdInstituto);
-        var videoEmbedding = CriarVideo(ChannelIdInstituto);
+        var video = CriarVideo(ChannelIdInstituto);
         var handler = ambiente.CriarHandler();
 
-        await handler.ProcessarAsync(new EtapaConcluidaMensagem(videoCategorizacao, "categorizacao", null, null), CancellationToken.None);
-        await handler.ProcessarAsync(new EtapaConcluidaMensagem(videoEmbedding, "embedding", null, null), CancellationToken.None);
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(video, "categorizacao", null, null), CancellationToken.None);
 
-        Assert.NotNull(videoCategorizacao.ProcessedAt);
-        Assert.NotNull(videoEmbedding.ProcessedAt);
-        ambiente.VideoRepository.Verify(r => r.UpsertAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        Assert.Null(video.ProcessedAt);
+        ambiente.VideoRepository.Verify(r => r.UpsertAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CategorizacaoEEmbeddingDoMesmoVideo_SoMarcaProcessedAtQuandoAmbosConcluem()
+    {
+        var ambiente = new Ambiente();
+        var video = CriarVideo(ChannelIdInstituto);
+        var handler = ambiente.CriarHandler();
+
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(video, "categorizacao", null, null), CancellationToken.None);
+        Assert.Null(video.ProcessedAt);
+
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(video, "embedding", null, null), CancellationToken.None);
+        Assert.NotNull(video.ProcessedAt);
+        ambiente.VideoRepository.Verify(r => r.UpsertAsync(video, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CategorizacaoEEmbeddingDeVideosDiferentes_CadaUmSoMarcaAoConcluirOsDoisRamosProprios()
+    {
+        // Ramos de vídeos diferentes não interferem entre si — o rastreamento é por videoId.
+        var ambiente = new Ambiente();
+        var videoA = CriarVideo(ChannelIdInstituto);
+        videoA.Id = "video-a";
+        var videoB = CriarVideo(ChannelIdInstituto);
+        videoB.Id = "video-b";
+        var handler = ambiente.CriarHandler();
+
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(videoA, "categorizacao", null, null), CancellationToken.None);
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(videoB, "embedding", null, null), CancellationToken.None);
+
+        Assert.Null(videoA.ProcessedAt);
+        Assert.Null(videoB.ProcessedAt);
+
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(videoA, "embedding", null, null), CancellationToken.None);
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(videoB, "categorizacao", null, null), CancellationToken.None);
+
+        Assert.NotNull(videoA.ProcessedAt);
+        Assert.NotNull(videoB.ProcessedAt);
     }
 
     [Fact]

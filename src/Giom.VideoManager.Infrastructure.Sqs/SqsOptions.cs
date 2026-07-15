@@ -19,8 +19,15 @@ public class SqsOptions
     /// <summary>
     /// Quantas vezes uma mensagem pode ser recebida (tentada) antes do SQS movê-la sozinho pra
     /// DLQ irmã ({QueueName}-dlq) — vira o maxReceiveCount da RedrivePolicy da fila (US #44).
+    /// Era 3; subiu pra 6 depois do bug #113: a Lambda watchman (giom-fila-watchman) também faz
+    /// ReceiveMessage a cada poll (inerente ao Event Source Mapping) e isso incrementa o MESMO
+    /// ApproximateReceiveCount que o worker usa — se a Lambda "inspecionar" a mensagem (achar uma
+    /// task já rodando e não processá-la) 3 vezes antes do worker real conseguir recebê-la nem
+    /// uma vez, ela ia pra DLQ sem nunca ter sido processada de verdade. O buffer extra dá
+    /// margem pra essas inspeções sem enfraquecer demais a proteção contra mensagem realmente
+    /// envenenada.
     /// </summary>
-    public int MaxReceiveCount { get; init; } = 3;
+    public int MaxReceiveCount { get; init; } = 6;
 
     /// <summary>
     /// Segundos até uma mensagem que falhou (falha transitória comum) voltar a ficar visível pro
