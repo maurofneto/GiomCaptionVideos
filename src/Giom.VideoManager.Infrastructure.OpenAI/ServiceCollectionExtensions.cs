@@ -59,7 +59,6 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddOpenAiSummary(this IServiceCollection services, IConfiguration config)
     {
-        services.AddPromptLoader();
         services.AddOpenAiHttpClient();
         services.AddContextoTelemetria();
         services.AddSessionContext();
@@ -70,7 +69,6 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddOpenAiCategorizacao(this IServiceCollection services, IConfiguration config)
     {
-        services.AddPromptLoader();
         services.AddOpenAiHttpClient();
         services.AddContextoTelemetria();
         services.AddSessionContext();

@@ -11,8 +11,9 @@ variables:
   # AWS_REGION/ECR_REGISTRY vêm do group giom-aws (não variam por branch — mesma conta/registro
   # pra dev e prod). AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY continuam como variáveis secretas
   # do pipeline (Pipelines > Edit > Variables), NÃO ficam neste arquivo nem em variable group.
-  # User: giom-ci-deploy, permissão só de push nos repositórios giom-instituto/giom-ministerio
-  # e ecs:UpdateService nos dois services do AgenteInstituto.
+  # User: giom-ci-deploy, permissão de push em qualquer repositório ECR "giom-*" (wildcard —
+  # evita ter que editar a policy toda vez que um worker novo ganha repositório próprio, ver
+  # Feature #104) e ecs:UpdateService só nos dois services do AgenteInstituto.
   - group: giom-aws
   #
   # branch dev publica recursos -dev (imagem :dev, service giom-agenteinstituto-dev-service);
@@ -47,6 +48,21 @@ jobs:
           AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
           AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
+      # giom-fila-watchman (bug #113) é uma Lambda ÚNICA (não separada por dev/prod — os event
+      # source mappings dela já cobrem as filas -dev e -prod, ver regex _PADRAO_FILA no código)
+      # cujo deploy até agora era manual (aws lambda update-function-code na mão), perdendo
+      # versionamento real do que estava rodando em prod. Redeploy incondicional a cada run do
+      # pipeline (dev ou master) é seguro e barato — update-function-code é idempotente (mesmo
+      # zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende de build Docker.
+      - script: |
+          cd infra/lambda-fila-watchman
+          zip -q function.zip lambda_function.py
+          aws lambda update-function-code --function-name giom-fila-watchman --zip-file fileb://function.zip --region $(AWS_REGION)
+        displayName: 'Deploy Lambda watchman (giom-fila-watchman)'
+        env:
+          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+
       # Migrations + Edge Functions ANTES do deploy da imagem nova — o código novo (esta PR, por
       # exemplo, dependia da coluna "origem" em video_chunk) não deve subir antes do schema
       # existir. SUPABASE_PROJECT_REF vem do variable group por branch (giom-dev =
@@ -67,6 +83,15 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
 
+      # US #105 — Ingestao.Worker substitui Instituto.Worker/Ministerio.Worker (canal_ingestao
+      # no Supabase decide quais canais processar numa run só). Os dois antigos continuam no
+      # pipeline por enquanto — retirada é o passo de cutover final, depois de validar em
+      # dev/prod lado a lado.
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-ingestao
+          dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
+
       - template: pipelines/templates/build-push-image.yml
         parameters:
           serviceName: giom-instituto
@@ -81,6 +106,36 @@ jobs:
         parameters:
           serviceName: giom-agenteinstituto
           dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
+
+      # Feature #104 — workers de etapa (Transcrição/Resumo/Categorização/Embedding) +
+      # orquestrador. Cada imagem é única (não duplicada por canal) — Instituto e Ministério
+      # compartilham a mesma imagem, disparada via run-task com config diferente por canal
+      # (não faz parte do build). Requer os repositórios ECR giom-transcricao/giom-resumo/
+      # giom-categorizacao/giom-embedding/giom-orquestracao já criados.
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-transcricao
+          dockerfilePath: src/Giom.VideoManager.Transcricao.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-resumo
+          dockerfilePath: src/Giom.VideoManager.Resumo.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-categorizacao
+          dockerfilePath: src/Giom.VideoManager.Categorizacao.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-embedding
+          dockerfilePath: src/Giom.VideoManager.Embedding.Worker/Dockerfile
+
+      - template: pipelines/templates/build-push-image.yml
+        parameters:
+          serviceName: giom-orquestracao
+          dockerfilePath: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile
 
       - script: |
           aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)

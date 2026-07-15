@@ -3,12 +3,13 @@ using Giom.VideoManager.Domain.Entities;
 namespace Giom.VideoManager.Application.Handlers;
 
 /// <summary>
-/// Papéis por etapa do pipeline orientado a eventos (Feature #33, US #41/#42/#43) — cada canal
-/// implementa só as etapas que usa (Ministério não categoriza nem indexa embedding, por exemplo),
-/// sem precisar de método vazio à toa (ISP). Quem decide o que roda depois de cada etapa é o
-/// próprio handler concreto (InstitutoPipelineHandler/MinisterioPipelineHandler) — ele publica a
-/// próxima mensagem sabendo o ProcessingOptions do canal, por isso não há um método "próxima
-/// etapa" aqui: a orquestração vive no handler, não no consumer genérico que chama ProcessarAsync.
+/// Papéis por etapa do pipeline orientado a eventos e orquestrado (Feature #33 → Feature #104).
+/// Desde a #104, cada implementação concreta (ex: <c>ResumoEtapaHandler</c>) só faz o trabalho da
+/// própria etapa e publica <c>EtapaConcluidaMensagem</c> quando termina — não conhece a próxima
+/// etapa, não decide fan-out, não marca <c>ProcessedAt</c>. Quem decide "o que vem depois" é o
+/// <c>PipelineHandler</c> (orquestrador, único, não mais duplicado por canal), que escuta a fila
+/// de eventos de conclusão e resolve a topologia por canal. Por isso não há método "próxima etapa"
+/// aqui: a orquestração vive só no orquestrador, nunca no handler de etapa.
 /// </summary>
 public interface IEtapaTranscricaoHandler
 {

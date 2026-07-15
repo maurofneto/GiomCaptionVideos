@@ -52,6 +52,23 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registra o orquestrador central do pipeline (Feature #104) — PipelineHandler +
+    /// EtapaConcluidaQueueConsumer, lendo a topologia por canal de Topologia:Canais/
+    /// Topologia:Topologia. Único lugar que decide "o que vem depois de cada etapa" — nenhum
+    /// worker de etapa sabe disso.
+    /// </summary>
+    public static IServiceCollection AddPipelineOrquestrador(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<Options.TopologiaOptions>(config.GetSection("Topologia"));
+        services.AddSingleton<PipelineHandler>();
+        // Sem factory: EtapaConcluidaQueueConsumer resolve a fila keyed via [FromKeyedServices]
+        // no próprio construtor e depende do PipelineHandler diretamente (não de um Func) — o
+        // container constrói sozinho, sem "new" aqui.
+        services.AddSingleton<EtapaConcluidaQueueConsumer>();
+        return services;
+    }
+
+    /// <summary>
     /// Registra o orquestrador genérico do bot de chat — não conhece canal nem LLM concretos.
     /// Não registra IConversaHistoricoService — quem compõe o worker escolhe o provider via
     /// AddConversaHistorico (Composition) ou registra um diretamente.

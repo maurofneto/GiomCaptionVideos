@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Giom.VideoManager.SmokeTests": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "teste"
+      }
+    }
+  }
+}

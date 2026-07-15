@@ -1,13 +1,17 @@
 using Giom.VideoManager.Application;
+using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
 using Giom.VideoManager.Infrastructure.Feedback;
 using Giom.VideoManager.Infrastructure.Grok;
 using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Infrastructure.Observabilidade;
 using Giom.VideoManager.Infrastructure.Telemetria;
+using Giom.VideoManager.Infrastructure.Redis;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Mongo;
 using Giom.VideoManager.Infrastructure.OpenAI;
@@ -65,6 +69,11 @@ public static class ServiceCollectionExtensions
             switch (nome)
             {
                 case "YouTubeCaption":
+                    // YouTubeCaptionService depende do YouTubeService (credencial OAuth) — não
+                    // pressupõe que quem chamou AddTranscriptionService também chamou
+                    // AddVideoSourceService (workers de etapa, ex: Transcricao.Worker, não
+                    // descobrem vídeo, só processam a etapa).
+                    services.AddYouTubeCredential(config);
                     services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
                     services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>(nome);
                     break;
@@ -95,81 +104,88 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Resumo — cadeia de fallback (Feature #101), configurável via Resumo:FallbackChain
-    /// (default: Claude → Grok → OpenAI). Mesmo mecanismo de Keyed Service + FallbackChain de
-    /// AddTranscriptionService — ver comentário lá. Valores aceitos: Claude, Grok, OpenAI,
-    /// SummarizeTech.
+    /// Resolve a cadeia de config de execução de IA por canal (US #106) — prompt +
+    /// Model/MaxTokens/UsarObservabilidade + a ORDEM do fallback, tudo numa linha por
+    /// (canal, etapa, provedor). Duas origens (EtapaProvedorConfig:Provider):
+    /// "Repository" (default, Supabase) ou "Arquivo" (Prompts/*.md + FallbackChain do
+    /// appsettings, o caminho de hoje). Decorada com cache — "Memory" (default, por processo,
+    /// suficiente pros workers de etapa que drenam fila e saem) ou "Redis" (compartilhado entre
+    /// instâncias, ver EtapaProvedorConfig:Cache:Redis). Idempotente — chamada por
+    /// AddSummaryService e AddCategorizacaoService, que podem coexistir no mesmo worker.
+    /// </summary>
+    public static IServiceCollection AddEtapaProvedorConfigService(this IServiceCollection services, IConfiguration config)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IEtapaProvedorConfigService)))
+            return services;
+
+        var provider = config["EtapaProvedorConfig:Provider"] ?? "Repository";
+        if (provider == "Arquivo")
+        {
+            services.AddPromptLoader();
+            services.AddSingleton<IEtapaProvedorConfigService, ArquivoEtapaProvedorConfigService>();
+        }
+        else
+        {
+            services.AddSupabaseEtapaProvedorConfig(config);
+            services.AddSingleton<IEtapaProvedorConfigService, RepositorioEtapaProvedorConfigService>();
+        }
+
+        var cacheProvider = config["EtapaProvedorConfig:Cache:Provider"] ?? "Memory";
+        if (cacheProvider == "Redis")
+            services.AddRedisCacheEtapaProvedorConfig(config);
+        else
+            services.Decorate<IEtapaProvedorConfigService, CacheEtapaProvedorConfigService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Resumo — cadeia de fallback por canal (US #106; antes Feature #101, cadeia global fixa
+    /// via Resumo:FallbackChain). Cada provedor (Claude/Grok/OpenAI) é registrado Keyed como
+    /// IResumoProvedorService — não decide mais sozinho seu prompt/config, recebe por parâmetro
+    /// (ver ClaudeResumoService). FallbackResumoService (único IResumoService público) resolve a
+    /// cadeia certa do canal em runtime via IEtapaProvedorConfigService. SummarizeTech fica de
+    /// fora desta migração — não usa prompt/config por canal (nenhum canal ativo o referencia
+    /// hoje) e continua só disponível se registrado manualmente noutro lugar, se algum dia
+    /// reativado.
     /// </summary>
     public static IServiceCollection AddSummaryService(this IServiceCollection services, IConfiguration config)
     {
-        var cadeiaNomes = config.GetSection("Resumo:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
+        services.AddEtapaProvedorConfigService(config);
 
-        foreach (var nome in cadeiaNomes)
-        {
-            switch (nome)
-            {
-                case "Grok":
-                    services.AddGrokSummary(config);
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<GrokResumoService>());
-                    break;
-                case "OpenAI":
-                    services.AddOpenAiSummary(config);
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<OpenAiResumoService>());
-                    break;
-                case "SummarizeTech":
-                    services.AddSummarizeTechSummary();
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<SummarizeTechResumoService>());
-                    break;
-                default: // Claude
-                    services.AddClaudeSummary(config);
-                    services.AddKeyedSingleton<IResumoService>(nome, (sp, _) => sp.GetRequiredService<ClaudeResumoService>());
-                    break;
-            }
-        }
+        services.AddGrokSummary(config);
+        services.AddKeyedSingleton<IResumoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokResumoService>());
 
-        services.AddSingleton<IResumoService>(sp =>
-        {
-            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IResumoService>(nome))).ToList();
-            return new FallbackResumoService(cadeia, sp.GetRequiredService<ILogger<FallbackResumoService>>());
-        });
+        services.AddOpenAiSummary(config);
+        services.AddKeyedSingleton<IResumoProvedorService>("OpenAI", (sp, _) => sp.GetRequiredService<OpenAiResumoService>());
+
+        services.AddClaudeSummary(config);
+        services.AddKeyedSingleton<IResumoProvedorService>("Claude", (sp, _) => sp.GetRequiredService<ClaudeResumoService>());
+
+        services.AddSingleton<IResumoService, FallbackResumoService>();
         services.Decorate<IResumoService, TelemetriaResumoService>();
 
         return services;
     }
 
     /// <summary>
-    /// Categorização — cadeia de fallback (Feature #101), configurável via
-    /// Categorizacao:FallbackChain (default: Claude → Grok → OpenAI). Mesmo mecanismo de
+    /// Categorização — cadeia de fallback por canal (US #106). Mesmo mecanismo de
     /// AddSummaryService.
     /// </summary>
     public static IServiceCollection AddCategorizacaoService(this IServiceCollection services, IConfiguration config)
     {
-        var cadeiaNomes = config.GetSection("Categorizacao:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
+        services.AddEtapaProvedorConfigService(config);
 
-        foreach (var nome in cadeiaNomes)
-        {
-            switch (nome)
-            {
-                case "Grok":
-                    services.AddGrokCategorizacao(config);
-                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
-                    break;
-                case "OpenAI":
-                    services.AddOpenAiCategorizacao(config);
-                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<OpenAiCategorizacaoService>());
-                    break;
-                default: // Claude
-                    services.AddClaudeCategorizacao(config);
-                    services.AddKeyedSingleton<ICategorizacaoService>(nome, (sp, _) => sp.GetRequiredService<ClaudeCategorizacaoService>());
-                    break;
-            }
-        }
+        services.AddGrokCategorizacao(config);
+        services.AddKeyedSingleton<ICategorizacaoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
 
-        services.AddSingleton<ICategorizacaoService>(sp =>
-        {
-            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<ICategorizacaoService>(nome))).ToList();
-            return new FallbackCategorizacaoService(cadeia, sp.GetRequiredService<ILogger<FallbackCategorizacaoService>>());
-        });
+        services.AddOpenAiCategorizacao(config);
+        services.AddKeyedSingleton<ICategorizacaoProvedorService>("OpenAI", (sp, _) => sp.GetRequiredService<OpenAiCategorizacaoService>());
+
+        services.AddClaudeCategorizacao(config);
+        services.AddKeyedSingleton<ICategorizacaoProvedorService>("Claude", (sp, _) => sp.GetRequiredService<ClaudeCategorizacaoService>());
+
+        services.AddSingleton<ICategorizacaoService, FallbackCategorizacaoService>();
         services.Decorate<ICategorizacaoService, TelemetriaCategorizacaoService>();
 
         return services;
@@ -263,6 +279,66 @@ public static class ServiceCollectionExtensions
         => services.AddYouTubeVideoSource(config);
 
     /// <summary>
+    /// Bootstrap multi-canal pra ingestão unificada (US #105, Ingestao.Worker) — lê os canais
+    /// ativos do Supabase (tabela canal_ingestao) SÍNCRONO durante ConfigureServices (mesmo
+    /// padrão já aceito nesse código pra GetGoogleCredential(...).GetAwaiter().GetResult() em
+    /// AddYouTubeCredential), registra um YouTubeService keyed por canal e um
+    /// Func&lt;string, IVideoHandler&gt; resolvido preguiçosamente na primeira chamada — só
+    /// depois que o container termina de montar, já que CanalIngestaoVideoHandler precisa de
+    /// dependências registradas por OUTROS Add* nesta mesma composição (AddFilaVideoEtapa,
+    /// AddTelemetriaService, AddTracingService), que podem rodar antes ou depois deste método.
+    /// Composition não conhece SupabaseCanalIngestaoRepository nem GoogleCredentialOptions/
+    /// YouTubeService diretamente — só a abstração ICanalIngestaoRepository (registrada por
+    /// AddSupabaseCanalIngestao) e o método do adapter YouTube que encapsula toda a credencial
+    /// (AddYouTubeCredenciaisPorCanal). Como a lista de canais precisa existir ANTES do
+    /// container terminar de montar (host.Services ainda não existe neste ponto), resolve
+    /// ICanalIngestaoRepository via um ServiceProvider temporário só pra essa leitura pontual —
+    /// o registro real (usado pelo container final) continua vindo de AddSupabaseCanalIngestao.
+    /// </summary>
+    public static IServiceCollection AddIngestaoMultiCanal(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddSupabaseCanalIngestao(config);
+
+        IReadOnlyList<CanalIngestaoConfig> canaisValidos;
+        using (var bootstrapProvider = services.BuildServiceProvider())
+        {
+            var canalRepository = bootstrapProvider.GetRequiredService<ICanalIngestaoRepository>();
+            var canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+
+            // Logger vem do mesmo provider de bootstrap (já tem Serilog+Sentry configurados por
+            // UseSerilog, registrado antes deste ConfigureServices no Host builder) — nada de
+            // Console.WriteLine pra erro de credencial por canal. Resolvido e usado dentro do
+            // using: o logger não precisa sobreviver ao descarte do provider temporário, só
+            // durante esta chamada síncrona.
+            var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Giom.VideoManager.Composition.AddIngestaoMultiCanal");
+            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+        }
+
+        services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
+
+        services.AddSingleton<Func<string, IVideoHandler>>(sp =>
+        {
+            var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
+            var sessionContext = sp.GetRequiredService<ISessionContext>();
+            var tracingService = sp.GetRequiredService<ITracingService>();
+            var canalPorId = canaisValidos.ToDictionary(c => c.ChannelId);
+            var cache = new Dictionary<string, IVideoHandler>();
+
+            return channelId =>
+            {
+                if (!cache.TryGetValue(channelId, out var handler))
+                {
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], transcricaoPublisher, sessionContext, tracingService);
+                    cache[channelId] = handler;
+                }
+                return handler;
+            };
+        });
+
+        return services;
+    }
+
+    /// <summary>
     /// ConversaHistorico:Provider — InMemory (padrão), Supabase, MongoDB. Decorado com
     /// FeedbackExternoConversaHistoricoService — reenvia o voto 👍/👎 pra um serviço de feedback
     /// externo (Helicone) sem que o canal (Telegram, etc.) precise saber que isso existe.
@@ -324,16 +400,19 @@ public static class ServiceCollectionExtensions
     /// Fila de etapa (Feature #33 — Transcrição/Resumo/Categorização/Embedding, todas tratadas
     /// igual, sem caso especial) — registrada como Keyed Service (<paramref name="chave"/>, ex:
     /// "transcricao"/"resumo"), provider decidido dentro da própria seção raiz
-    /// (<paramref name="secaoRaiz"/>:Provider, ex: "FilaTranscricao:Provider"/"FilaResumo:Provider"). Cada
-    /// canal chama isso só pras etapas que usa — Ministério não chama pra
-    /// "categorizacao"/"embedding".
+    /// (<paramref name="secaoRaiz"/>:Provider, ex: "FilaTranscricao:Provider"/"FilaResumo:Provider").
+    /// Genérico em <typeparamref name="TMensagem"/> desde a Feature #104 — a fila de eventos de
+    /// conclusão (<c>EtapaConcluidaMensagem</c>) reaproveita este mesmo método com o tipo trocado.
+    /// Cada worker de etapa chama isso só pra própria fila (uma etapa, um worker) — não mais um
+    /// canal chamando várias vezes pras etapas que usa (ver Instituto.Worker/Ministerio.Worker,
+    /// que agora só chamam pra "transcricao").
     /// </summary>
-    public static IServiceCollection AddFilaVideoEtapa(this IServiceCollection services, string chave, IConfiguration config, string secaoRaiz)
+    public static IServiceCollection AddFilaVideoEtapa<TMensagem>(this IServiceCollection services, string chave, IConfiguration config, string secaoRaiz)
     {
         var provider = config[$"{secaoRaiz}:Provider"] ?? "Sqs";
         return provider == "RabbitMq"
-            ? services.AddRabbitMqFilaEtapa(chave, config, $"{secaoRaiz}:RabbitMq")
-            : services.AddSqsFilaEtapa(chave, config, $"{secaoRaiz}:Sqs");
+            ? services.AddRabbitMqFilaEtapa<TMensagem>(chave, config, $"{secaoRaiz}:RabbitMq")
+            : services.AddSqsFilaEtapa<TMensagem>(chave, config, $"{secaoRaiz}:Sqs");
     }
 
     /// <summary>

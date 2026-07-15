@@ -17,11 +17,14 @@ public static class ServiceCollectionExtensions
             return services;
 
         services.AddSingleton<AnthropicHttpClientMarker>();
-        // Helicone:ApiKey é compartilhada — cada Claude*Service decide individualmente se
-        // usa (via sua própria opção UseHelicone), ver AnthropicClientFactory. Só o roteamento
-        // (URL/auth do gateway) mora aqui — Sessions/Users/Feedback são genéricos (ver
-        // ISessionContext) e ficam no projeto Infrastructure.Helicone, que anexa seu próprio
-        // handler a este mesmo HttpClient "anthropic" quando registrado pela Composition.
+        // Helicone:ApiKey é compartilhada. ClaudeAgentService/ClaudeAvaliadorIAService (decisão
+        // fixa no startup, via sua própria opção UseHelicone) ainda usam AnthropicClientFactory
+        // pra rotear na construção do client — ver AnthropicClientFactory. ClaudeResumoService/
+        // ClaudeCategorizacaoService (US #106) NÃO usam mais isso: a decisão varia por chamada
+        // (config por canal), então o roteamento saiu daqui e virou responsabilidade do
+        // transporte HTTP — Infrastructure.Helicone anexa um DelegatingHandler genérico a este
+        // mesmo HttpClient "anthropic" (e também a "openai"/"grok") que lê o ISessionContext
+        // ambiente por requisição, não mais fixado num client específico.
         services.Configure<HeliconeOptions>(config.GetSection("Helicone"));
 
         services.AddHttpClient("anthropic")
@@ -61,7 +64,6 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddClaudeSummary(this IServiceCollection services, IConfiguration config)
     {
-        services.AddPromptLoader();
         services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
         services.AddSessionContext();
@@ -73,7 +75,6 @@ public static class ServiceCollectionExtensions
     /// <summary>Ver comentário de AddClaudeSummary — mesmo raciocínio (tipo concreto, decisão de composição na Composition).</summary>
     public static IServiceCollection AddClaudeCategorizacao(this IServiceCollection services, IConfiguration config)
     {
-        services.AddPromptLoader();
         services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
         services.AddSessionContext();

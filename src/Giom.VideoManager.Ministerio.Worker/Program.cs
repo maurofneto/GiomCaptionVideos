@@ -4,11 +4,15 @@ using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Ministerio.Worker;
+using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+
+const string ChannelIdMinisterio = "UCyHMyZH5oon8jW7y_yMRstQ";
 
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
@@ -35,35 +39,33 @@ using var host = Host.CreateDefaultBuilder(args)
         var config = ctx.Configuration;
 
         services.AddVideoSourceService(config);
+        services.AddActiveChannelContext();        // US #105 — YouTubeVideoSourceService/ChannelProcessor passaram a exigir isso (AsyncLocal do canal ativo), mesmo pra 1 canal só
+        // US #105 — YouTubeVideoSourceService resolve o YouTubeService via GetRequiredKeyedService(channelId)
+        // (pensado pro Ingestao.Worker multi-canal); AddVideoSourceService só registra a versão sem chave
+        // (ainda usada por YouTubeCaptionService). Sem isso, a resolução keyed nunca acha nada.
+        services.AddKeyedSingleton(ChannelIdMinisterio, (sp, _) => sp.GetRequiredService<YouTubeService>());
         services.AddPersistence(config);
-        services.AddTranscriptionService(config);  // YouTubeCaption por padrão
-        services.AddSummaryService(config);        // Claude por padrão
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
         services.AddTracingService(config);         // Sentry Performance — quebra de tempo por página/vídeo
-        services.AddObservabilidadeExterna(config); // Helicone — Sessions/Properties (resumo)
         services.AddChannelProcessor(config);
 
-        // Dono da própria topologia de descoberta (IVideoHandler), sem FilaVideoHandler genérico.
+        // Feature #104 — Ministerio.Worker só cuida de ingestão desde a #104: filtra relevância e
+        // publica na fila única de Transcrição (compartilhada com o Instituto). Processamento de
+        // etapa saiu daqui — vive nos workers de etapa, orquestrado pelo PipelineHandler central.
         services.AddSingleton<MinisterioPipelineHandler>();
-        services.AddSingleton<IVideoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
-        services.AddSingleton<IEtapaTranscricaoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
-        services.AddSingleton<IEtapaResumoHandler>(sp => sp.GetRequiredService<MinisterioPipelineHandler>());
+        // US #105 — ChannelProcessor passou a exigir Func<string, IVideoHandler> (resolve o
+        // handler certo por canal, pensado pro Ingestao.Worker multi-canal); só 1 canal aqui, o
+        // resolver ignora o channelId e sempre devolve o mesmo MinisterioPipelineHandler.
+        services.AddSingleton<Func<string, IVideoHandler>>(sp => _ => sp.GetRequiredService<MinisterioPipelineHandler>());
 
-        // Filas + consumers de etapa (Feature #33 — US #41/#42/#43): Transcrição não é caso
-        // especial, usa o mesmo mecanismo das demais. Ministério só tem Transcrição+Resumo, não
-        // implementa Categorização/Embedding (ISP).
-        services.AddFilaVideoEtapa("transcricao", config, "FilaTranscricao");
-        services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
-
-        services.AddFilaVideoEtapa("resumo", config, "FilaResumo");
-        services.AddEtapaConsumer<IEtapaResumoHandler>("resumo", "video.resumo", (h, v, ct) => h.ProcessarAsync(v, ct));
+        services.AddFilaVideoEtapa<VideoEtapaMensagem>("transcricao", config, "FilaTranscricao");
     })
     .Build();
 
 // Canais do Ministério Giom
 var channels = new[]
 {
-    new ChannelConfig("UCyHMyZH5oon8jW7y_yMRstQ", null, "Ministério Giom", Mine: false),
+    new ChannelConfig(ChannelIdMinisterio, null, "Ministério Giom", Mine: false),
 };
 
 // StartAsync/StopAsync (não só resolver os serviços direto) — sem isso o IHostedService que sobe
@@ -74,27 +76,4 @@ await host.StartAsync();
 var processor = host.Services.GetRequiredService<ChannelProcessor>();
 await processor.RunAsync(channels);
 
-// Feature #33 — 2 consumers (Transcrição/Resumo) rodando concorrentes, não em sequência: o
-// objetivo é o Resumo começar assim que o PRIMEIRO vídeo estiver transcrito, não esperar o lote
-// inteiro terminar. Ministério não tem Categorização/Embedding.
-//
-// Bug #102 (incidente 2026-07-09): Task.WhenAll propaga a PRIMEIRA exceção de qualquer consumer
-// e derruba o processo inteiro — ConsumirEtapaIsoladamente captura por consumer, uma etapa
-// falhar não derruba a outra.
-await Task.WhenAll(
-    ConsumirEtapaIsoladamente("transcricao"),
-    ConsumirEtapaIsoladamente("resumo"));
-
 await host.StopAsync();
-
-async Task ConsumirEtapaIsoladamente(string chave)
-{
-    try
-    {
-        await host.Services.GetRequiredKeyedService<EtapaQueueConsumer>(chave).ConsumirAsync();
-    }
-    catch (Exception ex)
-    {
-        Log.Error(ex, "Consumer de etapa {Etapa} falhou e foi encerrado — as demais etapas continuam rodando normalmente nesta run", chave);
-    }
-}

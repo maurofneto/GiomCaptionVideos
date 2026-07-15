@@ -28,6 +28,7 @@ public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, 
     public async Task ConsumirAsync(Func<TMensagem, CancellationToken, Task> handler, CancellationToken ct = default)
     {
         var queueUrl = await canal.ResolverQueueUrlAsync(ct);
+        logger.LogInformation("Iniciando drenagem da fila {Fila} ({QueueUrl})", _options.QueueName, queueUrl);
 
         while (!ct.IsCancellationRequested)
         {
@@ -40,18 +41,28 @@ public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, 
                 MessageSystemAttributeNames = [MessageSystemAttributeName.ApproximateReceiveCount]
             }, ct);
 
-            if (resposta.Messages is not { Count: > 0 }) break;
+            if (resposta.Messages is not { Count: > 0 })
+            {
+                logger.LogInformation("Fila {Fila} vazia — encerrando drenagem", _options.QueueName);
+                break;
+            }
+
+            logger.LogInformation("Recebidas {Count} mensagem(ns) da fila {Fila}", resposta.Messages.Count, _options.QueueName);
 
             foreach (var mensagemSqs in resposta.Messages)
             {
                 try
                 {
+                    logger.LogInformation("Processando mensagem {MessageId} da fila {Fila}", mensagemSqs.MessageId, _options.QueueName);
+
                     var mensagem = JsonSerializer.Deserialize<TMensagem>(mensagemSqs.Body)
                         ?? throw new InvalidOperationException($"Mensagem SQS desserializou como null: {mensagemSqs.MessageId}");
 
                     await handler(mensagem, ct);
 
                     await cliente.DeleteMessageAsync(queueUrl, mensagemSqs.ReceiptHandle, ct);
+
+                    logger.LogInformation("Mensagem {MessageId} processada e removida da fila {Fila}", mensagemSqs.MessageId, _options.QueueName);
                 }
                 catch (Exception ex)
                 {

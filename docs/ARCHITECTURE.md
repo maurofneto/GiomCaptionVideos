@@ -52,43 +52,61 @@ sozinha se não existir, via `SqsFilaCanal.ResolverQueueUrlAsync`, idempotente) 
 (`transcricao`, `resumo`, `categorizacao`, `embedding`), todas carregando o mesmo tipo de
 mensagem — `VideoEtapaMensagem(Video, SessaoObservabilidade?, TraceParent)` — e todas
 consumidas pelo mesmo `EtapaQueueConsumer` genérico (reaplica sessão/trace, chama o
-delegate da etapa, relança erro pro retry). Dependências reais entre etapas (não é corrente
-linear): Resumo depende de Transcrição; Categorização depende de Resumo; **Embedding depende
-só de Transcrição** (indexa a transcrição completa, não o resumo) — por isso Transcrição faz
-**fan-out** pra Resumo e Embedding em paralelo.
+delegate da etapa, relança erro pro retry).
+
+### Orquestração central (Feature #104) — event-driven orquestrado, não mais choreografado
+
+Até a Feature #104, cada etapa **decidia sozinha** o que publicar em seguida (choreografia —
+a lógica de sequenciamento ficava espalhada, duplicada entre `InstitutoPipelineHandler` e
+`MinisterioPipelineHandler`, um handler por canal implementando todas as interfaces de etapa
+que fazia sentido pro seu `ProcessingOptions`). Isso também significava rodar **2 execuções
+separadas** (uma por canal) pra fazer, na prática, o mesmo tipo de trabalho.
+
+Desde a #104: cada worker de etapa (`Transcricao.Worker`, `Resumo.Worker`,
+`Categorizacao.Worker`, `Embedding.Worker`) só **recebe, processa e avisa que terminou** —
+publica `EtapaConcluidaMensagem(Video, Etapa, Sessao, TraceParent)` numa fila única de eventos
+(`giom-videos-etapa-concluida-{env}`) e não sabe nada sobre canal nem sobre o que vem depois.
+Quem decide é o **`PipelineHandler`** (orquestrador central, único — não mais duplicado por
+canal), hospedado no novo `Orquestracao.Worker`: escuta a fila de eventos e resolve a
+topologia por canal (`TopologiaOptions.Topologia[canal][etapa]` → lista de próximas etapas;
+lista vazia = terminal, marca `ProcessedAt`).
 
 ```
-video.transcricao ─┬─> video.resumo ──> video.categorizacao
-                    └─> video.embedding
+video.transcricao ──> [processa] ──> etapa-concluida("transcricao")
+                                            │
+                                            ▼
+                                     PipelineHandler
+                              (só ele sabe: Instituto → [resumo, embedding]
+                                            Ministério → [resumo])
+                                            │
+                              ┌─────────────┴─────────────┐
+                              ▼                            ▼
+                       video.resumo                 video.embedding
 ```
 
-**DI — Keyed Services (.NET 9)**: cada etapa é uma chave (`"transcricao"`, `"resumo"`...) que
-identifica publisher/consumer/canal daquele estágio, sem precisar de uma classe por canal.
-`Composition.AddFilaVideoEtapa(chave, config, secaoRaiz)` decide Sqs/RabbitMq lendo
-`{secaoRaiz}:Provider`; `Application.AddEtapaConsumer<THandler>(chave, nomeSpan, processar)`
-registra o `EtapaQueueConsumer` pronto, resolvendo `THandler` só na hora de processar
-(`Program.cs` de cada worker cai pra 2 linhas por etapa: `AddFilaVideoEtapa` +
-`AddEtapaConsumer`).
+As 4 filas de etapa passam a ser **únicas, compartilhadas entre os canais** (não mais uma por
+canal) — `Video.ChannelId` já identifica de quem é o vídeo, e o `PipelineHandler` é o único
+lugar que precisa saber disso. Isso elimina a duplicação de execução (1 worker por etapa no
+total, não 1 por canal × etapa) sem misturar secrets/billing entre canais nos providers de IA
+(a única credencial que de fato divergia entre Instituto/Ministério — `ClaudeResumo` — foi
+unificada; as demais já eram o mesmo valor ou nem existiam pro Ministério).
 
-**`InstitutoPipelineHandler` / `MinisterioPipelineHandler`** — único handler ativo por canal.
-Cada um é dono da própria topologia de descoberta (`IVideoHandler.IsRelevant`/`HandleAsync`)
-**e** implementa as interfaces de etapa que faz sentido pro seu `ProcessingOptions`
-(`IEtapaTranscricaoHandler`/`IEtapaResumoHandler`/`IEtapaCategorizacaoHandler`/
-`IEtapaEmbeddingHandler` — Ministério só as duas primeiras, ISP). Não existe mais um
-`FilaVideoHandler` genérico impondo a mesma descoberta pra todo canal — cada orquestrador
-decide sozinho o que publicar em seguida.
+**`InstitutoPipelineHandler` / `MinisterioPipelineHandler`** — desde a #104, encolheram pra só
+ingestão: implementam `IVideoHandler` (`IsRelevant` + `HandleAsync`, que publica na fila única
+de Transcrição) e mais nada. Não implementam nenhuma interface `IEtapaXHandler` — essas vivem
+nos workers de etapa, em classes genéricas (`TranscricaoEtapaHandler`, `ResumoEtapaHandler`,
+etc.) que não conhecem canal nenhum.
 
 **Histórico/rollback**: `InstitutoVideoHandler`/`MinisterioVideoHandler` (processamento
 monolítico antigo, legenda→resumo→categorização→embedding numa chamada só) e
 `IVideoProcessador` continuam no repositório, intocados, mas **não registrados em nenhum
 DI** — só documentação viva de como era antes da Feature #33, caso um rollback precise deles.
-`FilaVideoHandler` e `VideoQueueConsumer` (a versão anterior, especial pra transcrição) foram
-removidos de vez, substituídos pelo mecanismo genérico acima.
 
-**Topologia de execução**: publish e consume dos 4 consumers acontecem na mesma
-execução/processo, **concorrentes** (`Task.WhenAll`, não sequencial) — Resumo/Embedding
-começam assim que o primeiro vídeo é transcrito, sem esperar o lote inteiro de Transcrição
-terminar. Ainda é `run-task` sob demanda, sem worker de longa duração por etapa.
+**Topologia de execução**: cada worker de etapa é 1 processo, 1 consumer só (não mais
+`Task.WhenAll` de várias etapas no mesmo processo) — `run-task` sob demanda, sem worker de
+longa duração. O fan-out (Resumo/Embedding começarem assim que o primeiro vídeo é transcrito)
+continua acontecendo, só que via mensagens passando pelo `PipelineHandler` em vez de uma
+chamada direta dentro do mesmo processo.
 
 ### DLQ e retry (Feature #34)
 

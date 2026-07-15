@@ -4,25 +4,33 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Google.Apis.Services;
 using Google.Apis.YouTube.v3;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Xml;
 
 namespace Giom.VideoManager.Infrastructure.YouTube;
 
 /// <summary>
-/// Implementação de IVideoSourceService usando a YouTube Data API v3.
+/// Implementação de IVideoSourceService usando a YouTube Data API v3. Desde a US #105, resolve
+/// o YouTubeService keyed pelo canal ativo (IActiveChannelContext, AsyncLocal) em vez de um
+/// campo fixo — um único worker pode processar N canais numa run, cada um com credencial
+/// Google diferente (ver AddYouTubeVideoSourceMultiCanal). GetPlaylistPageAsync não recebe o
+/// canal como parâmetro (a interface não muda), mas o AsyncLocal já está definido desde
+/// GetUploadPlaylistIdAsync/ChannelProcessor e continua valendo por toda a paginação.
 /// </summary>
-public class YouTubeVideoSourceService : IVideoSourceService
+public class YouTubeVideoSourceService(
+    IServiceProvider serviceProvider,
+    IActiveChannelContext activeChannelContext)
+    : IVideoSourceService
 {
-    private readonly ResilientYouTubeApiService _api;
-    private readonly YouTubeService _youtube;
-    private readonly ILogger<YouTubeVideoSourceService> _logger;
-
-    public YouTubeVideoSourceService(YouTubeService youtube, ILogger<YouTubeVideoSourceService> logger)
+    private (YouTubeService Youtube, ResilientYouTubeApiService Api) Resolver()
     {
-        _youtube = youtube;
-        _logger = logger;
-        _api = new ResilientYouTubeApiService(youtube, Microsoft.Extensions.Logging.Abstractions.NullLogger<ResilientYouTubeApiService>.Instance);
+        var channelId = activeChannelContext.Atual
+            ?? throw new InvalidOperationException("IActiveChannelContext.Atual não definido — ChannelProcessor deveria ter chamado Definir() antes de usar IVideoSourceService.");
+
+        var youtube = serviceProvider.GetRequiredKeyedService<YouTubeService>(channelId);
+        var api = new ResilientYouTubeApiService(youtube, Microsoft.Extensions.Logging.Abstractions.NullLogger<ResilientYouTubeApiService>.Instance);
+        return (youtube, api);
     }
 
     public async Task<string> GetUploadPlaylistIdAsync(ChannelConfig config, CancellationToken ct = default)
@@ -30,25 +38,28 @@ public class YouTubeVideoSourceService : IVideoSourceService
         if (!string.IsNullOrEmpty(config.PlaylistId))
             return config.PlaylistId;
 
-        var request = _youtube.Channels.List("contentDetails");
+        var (youtube, api) = Resolver();
+        var request = youtube.Channels.List("contentDetails");
         if (config.Mine)
             request.Mine = true;
         else
             request.Id = config.ChannelId;
 
-        var response = await _api.ListChannelsAsync(request);
+        var response = await api.ListChannelsAsync(request);
         return response.Items?.FirstOrDefault()?.ContentDetails?.RelatedPlaylists?.Uploads ?? string.Empty;
     }
 
     public async Task<PlaylistPage> GetPlaylistPageAsync(string playlistId, int maxResults, string? pageToken, CancellationToken ct = default)
     {
-        var request = _youtube.PlaylistItems.List("contentDetails,snippet,status");
+        var (youtube, api) = Resolver();
+
+        var request = youtube.PlaylistItems.List("contentDetails,snippet,status");
         request.PlaylistId = playlistId;
         request.MaxResults = maxResults;
         if (!string.IsNullOrEmpty(pageToken))
             request.PageToken = pageToken;
 
-        var response = await _api.ListPlaylistItemsAsync(request);
+        var response = await api.ListPlaylistItemsAsync(request);
 
         if (response.Items == null || response.Items.Count == 0)
             return new PlaylistPage([], null);
@@ -58,9 +69,9 @@ public class YouTubeVideoSourceService : IVideoSourceService
             .Where(id => !string.IsNullOrEmpty(id))
             .ToList();
 
-        var detailsRequest = _youtube.Videos.List("contentDetails,snippet,status,liveStreamingDetails");
+        var detailsRequest = youtube.Videos.List("contentDetails,snippet,status,liveStreamingDetails");
         detailsRequest.Id = string.Join(",", videoIds);
-        var detailsResponse = await _api.ListVideosAsync(detailsRequest);
+        var detailsResponse = await api.ListVideosAsync(detailsRequest);
         var details = detailsResponse.Items ?? [];
 
         var videos = response.Items

@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IVideoRepository, SupabaseVideoRepository>();
         services.AddSingleton<IProgressoRepository, SupabaseProgressoRepository>();
         services.AddSingleton<IVideoChunkRepository, SupabaseVideoChunkRepository>();
+        services.AddSingleton<IVideoEtapaTerminalRepository, SupabaseVideoEtapaTerminalRepository>();
         return services;
     }
 
@@ -54,6 +55,27 @@ public static class ServiceCollectionExtensions
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
         services.AddSupabaseHttpClient();
         services.AddSingleton<ITelemetriaSink, SupabaseTelemetriaService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registro normal de ICanalIngestaoRepository (US #105) pra quem quiser injetar via DI. O
+    /// bootstrap do Ingestao.Worker (AddIngestaoMultiCanal, Composition) constrói uma instância
+    /// direto — precisa da lista de canais ANTES do container terminar de montar, pra registrar
+    /// as credenciais Google keyed por canal.
+    /// </summary>
+    public static IServiceCollection AddSupabaseCanalIngestao(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSingleton<ICanalIngestaoRepository, SupabaseCanalIngestaoRepository>();
+        return services;
+    }
+
+    /// <summary>Registro de IEtapaProvedorConfigRepository (US #106) — leitura da tabela etapa_provedor_config.</summary>
+    public static IServiceCollection AddSupabaseEtapaProvedorConfig(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSingleton<IEtapaProvedorConfigRepository, SupabaseEtapaProvedorConfigRepository>();
         return services;
     }
 }

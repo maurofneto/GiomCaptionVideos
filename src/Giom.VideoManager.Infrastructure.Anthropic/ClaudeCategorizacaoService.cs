@@ -4,8 +4,7 @@ using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure;
-using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,19 +17,17 @@ public class ClaudeCategorizacaoOptions
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "claude-haiku-4-5-20251001";
     public int MaxTokens { get; init; } = 512;
-
-    /// <summary>Roteia as chamadas pelo gateway do Helicone (custo/latência/tokens por chamada) — requer Helicone:ApiKey configurada.</summary>
-    public bool UseHelicone { get; init; } = false;
 }
 
 /// <summary>
-/// Classifica o resumo em até 3 áreas da Teologia Sistemática usando Claude — modelo
-/// configurável via ClaudeCategorizacao:Model, independente do resumo ou do bot.
-/// System prompt carregado de Prompts/categorizacao.md e cacheado via PromptCaching.
+/// Classifica o resumo em até 3 áreas da Teologia Sistemática usando Claude. Prompt e
+/// Model/MaxTokens vêm de <see cref="EtapaProvedorConfig"/>, resolvida por canal (US #106) — ver
+/// ClaudeResumoService pro raciocínio completo (mesmo padrão, incluindo por que este serviço não
+/// sabe nada sobre observabilidade/Helicone).
 /// Telemetria (tempo/sucesso/falha) é responsabilidade do decorator TelemetriaCategorizacaoService —
 /// aqui só contribuímos os metadados ricos (provedor/modelo/tokens) via IContextoTelemetria.
 /// </summary>
-public class ClaudeCategorizacaoService : ICategorizacaoService
+public class ClaudeCategorizacaoService : ICategorizacaoProvedorService
 {
     private readonly AnthropicClient _client;
     private readonly ClaudeCategorizacaoOptions _options;
@@ -38,20 +35,18 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
     private readonly ITracingService _tracingService;
-    private readonly string _systemPrompt;
 
-    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IOptions<HeliconeOptions> heliconeOptions, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
+    public ClaudeCategorizacaoService(IOptions<ClaudeCategorizacaoOptions> options, IHttpClientFactory httpClientFactory, ILogger<ClaudeCategorizacaoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _sessionContext = sessionContext;
         _tracingService = tracingService;
-        _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
-        _systemPrompt = prompts.Load("categorizacao.md");
+        _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
     }
 
-    public async Task<IReadOnlyList<CategoriaTeologica>> ClassificarAsync(Video video, CancellationToken ct = default)
+    public async Task<IReadOnlyList<CategoriaTeologica>> ClassificarAsync(Video video, EtapaProvedorConfig config, CancellationToken ct = default)
     {
         var resumo = video.Resumo?.Descricao ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resumo)) return [];
@@ -59,15 +54,18 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
         _sessionContext.Definir(_sessionContext.Atual.ParaEtapa("categorizacao", video));
         using var span = _tracingService.IniciarEtapaAtual("categorizacao");
 
+        var modelo = config.Model ?? _options.Model;
+        var maxTokens = config.MaxTokens ?? _options.MaxTokens;
+
         MessageResponse response;
         try
         {
             response = await _client.Messages.GetClaudeMessageAsync(new MessageParameters
             {
-                Model         = _options.Model,
-                MaxTokens     = _options.MaxTokens,
+                Model         = modelo,
+                MaxTokens     = maxTokens,
                 PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
-                System        = [new SystemMessage(_systemPrompt)],
+                System        = [new SystemMessage(config.Prompt)],
                 Messages      = [new Message { Role = RoleType.User, Content = [new TextContent { Text = resumo }] }]
             }, ct);
         }
@@ -82,16 +80,16 @@ public class ClaudeCategorizacaoService : ICategorizacaoService
 
         _contextoTelemetria.Registrar(
             provedor: "Claude",
-            modelo: _options.Model,
+            modelo: modelo,
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
-            custoEstimadoUsd: AnthropicPricingCalculator.Calcular(_options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens),
+            custoEstimadoUsd: AnthropicPricingCalculator.Calcular(modelo, response.Usage?.InputTokens, response.Usage?.OutputTokens),
             detalhes: new { stopReason = response.StopReason });
 
         if (string.IsNullOrWhiteSpace(json)) return [];
 
         if (response.StopReason == "max_tokens")
-            _logger.LogWarning("Categorização cortada por MaxTokens ({MaxTokens}) para {VideoId}", _options.MaxTokens, video.Id);
+            _logger.LogWarning("Categorização cortada por MaxTokens ({MaxTokens}) para {VideoId}", maxTokens, video.Id);
 
         _logger.LogInformation("Categorização gerada para {VideoId}", video.Id);
 
