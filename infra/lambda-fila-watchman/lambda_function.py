@@ -124,23 +124,28 @@ def handler(event, context):
 
         ja_em_andamento = _task_ja_em_andamento(family)
         if not ja_em_andamento:
+            # Acabamos de chamar RunTask — a task nova leva ~15-40s pra provisionar (Fargate) até
+            # começar seu próprio long-poll. Bug real achado ao vivo em 2026-07-15: resetar a
+            # visibilidade pra 0 AGORA (incondicional, versão anterior deste código) faz a mensagem
+            # ficar visível de novo antes da task nova sequer existir de verdade — a própria Lambda
+            # (que invoca em ~100ms, muito mais rápido que a task provisiona) volta a receber a
+            # MESMA mensagem em invocações seguintes e repete o ciclo, "vencendo a corrida" contra
+            # o worker real e queimando o ApproximateReceiveCount sozinha (3 mensagens foram pra
+            # DLQ sem nenhuma task real jamais ter processado, mesmo já com RunTask funcionando).
+            # Por isso NÃO resetamos aqui — deixamos o VisibilityTimeout natural (300s, bem mais
+            # que suficiente pra task subir e fazer seu próprio long-poll).
             _disparar_task(family, etapa)
-
-        # Bug #113: o ReceiveMessage que ESSA função acabou de fazer (inerente ao Event Source
-        # Mapping, acontece mesmo quando decidimos não lançar task) incrementa o MESMO
-        # ApproximateReceiveCount que o worker real usa pra contar tentativa -- se a mensagem
-        # ficasse escondida até o VisibilityTimeout padrão (300s) toda vez que achássemos "task já
-        # rodando", uma sequência de invocações da Lambda podia "gastar" o maxReceiveCount inteiro
-        # sem o worker real NUNCA ter recebido a mensagem (visto ao vivo em 2026-07-14, vídeo
-        # RdlHhz56VuM foi pra DLQ sem nenhuma das >5 tasks reais jamais ter processado). Por isso
-        # sempre resetamos a 0 aqui, incondicionalmente -- o custo é mais invocações da Lambda
-        # competindo com o worker pela mesma mensagem, que é barato; SqsOptions.MaxReceiveCount
-        # subiu de 3 pra 6 (ver comentário lá) pra dar folga extra a essas inspeções.
-        queue_url = sqs.get_queue_url(QueueName=queue_name)["QueueUrl"]
-        sqs.change_message_visibility(
-            QueueUrl=queue_url,
-            ReceiptHandle=record["receiptHandle"],
-            VisibilityTimeout=0,
-        )
+        else:
+            # Já tem uma task rodando (ou subindo) — ela já está fazendo (ou logo fará) seu
+            # próprio long-poll na fila, então não tem corrida "Lambda vs. task nova" aqui. Resetar
+            # pra 0 é seguro e útil: entrega a mensagem pra essa task já ativa imediatamente, sem
+            # esperar o VisibilityTimeout inteiro (era esse o cenário original do bug #113 — task
+            # rodando, mensagem presa até intervenção manual, vídeo RdlHhz56VuM).
+            queue_url = sqs.get_queue_url(QueueName=queue_name)["QueueUrl"]
+            sqs.change_message_visibility(
+                QueueUrl=queue_url,
+                ReceiptHandle=record["receiptHandle"],
+                VisibilityTimeout=0,
+            )
 
     return {"batchItemFailures": batch_item_failures}
