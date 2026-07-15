@@ -103,10 +103,16 @@ monolítico antigo, legenda→resumo→categorização→embedding numa chamada 
 DI** — só documentação viva de como era antes da Feature #33, caso um rollback precise deles.
 
 **Topologia de execução**: cada worker de etapa é 1 processo, 1 consumer só (não mais
-`Task.WhenAll` de várias etapas no mesmo processo) — `run-task` sob demanda, sem worker de
-longa duração. O fan-out (Resumo/Embedding começarem assim que o primeiro vídeo é transcrito)
+`Task.WhenAll` de várias etapas no mesmo processo). Migração 2026-07
+(`infra/ecs-services-etapas/`): deixou de ser `run-task` sob demanda (disparado por uma Lambda
+watchman reagindo a poll de SQS) e virou **ECS Service de longa duração + Application Auto
+Scaling 0→N por profundidade de fila** — ver seção "Ambientes AWS" abaixo pro motivo da
+mudança. O fan-out (Resumo/Embedding começarem assim que o primeiro vídeo é transcrito)
 continua acontecendo, só que via mensagens passando pelo `PipelineHandler` em vez de uma
-chamada direta dentro do mesmo processo.
+chamada direta dentro do mesmo processo. O `SqsFilaConsumer` (drena a fila e o processo termina
+sozinho) agora tem um grace period de idle (`SqsOptions.IdleGracePeriodSeconds`, default 3min)
+antes de encerrar — evita que o Service tenha que provisionar outra task Fargate do zero só
+porque o poll anterior achou a fila vazia por um instante.
 
 ### DLQ e retry (Feature #34)
 
@@ -174,6 +180,17 @@ Conta `798229612288`, região `us-east-1`, cluster ECS `giom-cluster`. `Institut
 automático configurado até o momento — cada run precisa ser disparada manualmente ou por
 alguma automação futura (ver Board, Feature "Escala e cobertura de vídeos" / US #20).
 `AgenteInstituto.Worker` roda como ECS Service de longa duração (um por ambiente).
+
+Os 5 workers de etapa (Transcrição/Resumo/Categorização/Embedding/Orquestração) também rodam
+como **ECS Service de longa duração**, um por (etapa, ambiente) — ver
+`infra/ecs-services-etapas/README.md` pra topologia completa, scripts de provisionamento e o
+desenho do autoscaling. Migração 2026-07: o gatilho anterior (Lambda `giom-fila-watchman`/
+`-dev` reagindo a poll de SQS com `ecs.run_task`) tinha uma corrida estrutural com o modelo
+run-to-completion dos workers — bug real ao vivo em 2026-07-15, mensagens redrivadas de uma DLQ
+ficaram presas 40+ minutos sem nenhum worker real pegá-las. Cada Service escala de 0 a N tasks
+por profundidade de fila SQS via Application Auto Scaling (target-tracking + step scaling de
+cold-start 0→1). A Lambda watchman continua no repo até o novo modelo ser validado em prod real
+(decommissioning é um passo separado, destrutivo, documentado no README acima).
 
 **IAM por convenção de nome**: a policy `giom-sqs-fila-videos` (inline em
 `giom-worker-task-role`) usa `Resource: arn:aws:sqs:us-east-1:798229612288:giom-videos-*` —

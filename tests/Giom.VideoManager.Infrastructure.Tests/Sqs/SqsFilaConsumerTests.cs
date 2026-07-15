@@ -7,6 +7,7 @@ using Giom.VideoManager.Infrastructure.Sqs;
 using Giom.VideoManager.Testes.Comuns;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Xunit;
 
@@ -31,7 +32,10 @@ public class SqsFilaConsumerTests
         _sqs.Setup(s => s.ChangeMessageVisibilityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChangeMessageVisibilityResponse());
 
-        var options = Options.Create(new SqsOptions { QueueName = "fila-teste", MaxReceiveCount = 3, RetryDelaySeconds = 10 });
+        // IdleGracePeriodSeconds=0 preserva o comportamento "encerra no primeiro poll vazio" pros
+        // testes existentes — o grace period de verdade (produção) é coberto por
+        // Consumir_FilaVazia_ContinuaPollingDentroDoGracePeriodEEncerraDepois, com FakeTimeProvider.
+        var options = Options.Create(new SqsOptions { QueueName = "fila-teste", MaxReceiveCount = 3, RetryDelaySeconds = 10, IdleGracePeriodSeconds = 0 });
         _consumer = new SqsFilaConsumer<MensagemDeTeste>(_sqs.Object, new SqsFilaCanal(_sqs.Object, options, new FakeLogger<SqsFilaCanal>()), options, _logger);
     }
 
@@ -161,5 +165,39 @@ public class SqsFilaConsumerTests
         // Sem esse atributo o consumer não sabe em qual tentativa está — o retry/DLQ depende dele
         _sqs.Verify(s => s.ReceiveMessageAsync(It.Is<ReceiveMessageRequest>(r =>
             r.MessageSystemAttributeNames.Contains(MessageSystemAttributeName.ApproximateReceiveCount)), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task Consumir_FilaVazia_ContinuaPollingDentroDoGracePeriodEEncerraDepois()
+    {
+        // Migração pra ECS Service (2026-07): grace period de idle evita que o processo morra no
+        // primeiro poll vazio — só encerra depois de IdleGracePeriodSeconds sem mensagem nenhuma.
+        var sqs = new Mock<IAmazonSQS>();
+        sqs.Setup(s => s.CreateQueueAsync(It.IsAny<CreateQueueRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CreateQueueRequest req, CancellationToken _) => new CreateQueueResponse { QueueUrl = $"https://sqs/{req.QueueName}" });
+        sqs.Setup(s => s.GetQueueAttributesAsync(It.IsAny<GetQueueAttributesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GetQueueAttributesResponse { Attributes = new() { [QueueAttributeName.QueueArn] = "arn:aws:sqs:us-east-1:123456789012:fila-teste-dlq" } });
+
+        var vaziaChamadas = 0;
+        var timeProvider = new FakeTimeProvider();
+        sqs.Setup(s => s.ReceiveMessageAsync(It.IsAny<ReceiveMessageRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                vaziaChamadas++;
+                // Cada poll vazio avança o relógio fake em 90s (metade do grace period de 180s
+                // usado neste teste) — precisa de pelo menos 3 chamadas pra estourar o grace period.
+                timeProvider.Advance(TimeSpan.FromSeconds(90));
+                return new ReceiveMessageResponse { Messages = [] };
+            });
+
+        var options = Options.Create(new SqsOptions { QueueName = "fila-teste", IdleGracePeriodSeconds = 180 });
+        var consumer = new SqsFilaConsumer<MensagemDeTeste>(
+            sqs.Object, new SqsFilaCanal(sqs.Object, options, new FakeLogger<SqsFilaCanal>()), options, new FakeLogger<SqsFilaConsumer<MensagemDeTeste>>(), timeProvider);
+
+        await consumer.ConsumirAsync((_, _) => Task.CompletedTask);
+
+        // idleDesde é marcado na 1ª chamada vazia (antes do Advance) — precisa de 3 polls (0s →
+        // 90s → 180s) pra idleHa atingir os 180s do grace period e encerrar na 3ª.
+        Assert.Equal(3, vaziaChamadas);
     }
 }
