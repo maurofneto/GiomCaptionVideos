@@ -10,8 +10,14 @@ using Microsoft.Extensions.Options;
 namespace Giom.VideoManager.Infrastructure.Sqs;
 
 /// <summary>
-/// Drena a fila (long polling) até um ReceiveMessage devolver vazio — condizente com "mesma
-/// execução processa o que a descoberta publicou" (ver ChannelProcessor/EtapaQueueConsumer).
+/// Drena a fila (long polling) até acumular <see cref="SqsOptions.IdleGracePeriodSeconds"/> de
+/// long polls vazios seguidos — condizente com "mesma execução processa o que a descoberta
+/// publicou" (ver ChannelProcessor/EtapaQueueConsumer), mas agora rodando sob um ECS Service de
+/// longa duração (não mais `run-task` sob demanda de uma Lambda watchman — ver
+/// infra/ecs-services-etapas/README.md): o grace period evita que o processo morra no primeiro
+/// poll vazio e o Service tenha que subir outra task do zero (custo de start-up do Fargate) só
+/// pra achar a fila ainda vazia de novo alguns segundos depois. Qualquer mensagem recebida
+/// reseta o contador de idle a zero.
 /// Mensagem só é confirmada (deletada) se o handler não lançar. Se lançar (US #44), o retry é
 /// DINÂMICO pela exceção: falha transitória comum reduz a visibilidade pra RetryDelaySeconds
 /// (menor que o long poll — a MESMA run tenta de novo); rate limit (RateLimitExcedidoException
@@ -21,14 +27,18 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 /// via sink — US #45) e zera a visibilidade: o próximo receive dispara a RedrivePolicy e o SQS
 /// move a mensagem pra DLQ agora, não na run do dia seguinte.
 /// </summary>
-public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, IOptions<SqsOptions> options, ILogger<SqsFilaConsumer<TMensagem>> logger) : IFilaConsumer<TMensagem>
+public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, IOptions<SqsOptions> options, ILogger<SqsFilaConsumer<TMensagem>> logger, TimeProvider? timeProvider = null) : IFilaConsumer<TMensagem>
 {
     private readonly SqsOptions _options = options.Value;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public async Task ConsumirAsync(Func<TMensagem, CancellationToken, Task> handler, CancellationToken ct = default)
     {
         var queueUrl = await canal.ResolverQueueUrlAsync(ct);
         logger.LogInformation("Iniciando drenagem da fila {Fila} ({QueueUrl})", _options.QueueName, queueUrl);
+
+        var gracePeriodIdle = TimeSpan.FromSeconds(_options.IdleGracePeriodSeconds);
+        var idleDesde = (DateTimeOffset?)null;
 
         while (!ct.IsCancellationRequested)
         {
@@ -43,10 +53,19 @@ public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, 
 
             if (resposta.Messages is not { Count: > 0 })
             {
-                logger.LogInformation("Fila {Fila} vazia — encerrando drenagem", _options.QueueName);
-                break;
+                idleDesde ??= _timeProvider.GetUtcNow();
+                var idleHa = _timeProvider.GetUtcNow() - idleDesde.Value;
+                if (idleHa >= gracePeriodIdle)
+                {
+                    logger.LogInformation("Fila {Fila} vazia há {IdleMinutos:F1}min — encerrando drenagem", _options.QueueName, idleHa.TotalMinutes);
+                    break;
+                }
+
+                logger.LogInformation("Fila {Fila} vazia — dentro do grace period ({IdleSegundos:F0}s/{GraceSegundos:F0}s), continuando poll", _options.QueueName, idleHa.TotalSeconds, gracePeriodIdle.TotalSeconds);
+                continue;
             }
 
+            idleDesde = null;
             logger.LogInformation("Recebidas {Count} mensagem(ns) da fila {Fila}", resposta.Messages.Count, _options.QueueName);
 
             foreach (var mensagemSqs in resposta.Messages)
