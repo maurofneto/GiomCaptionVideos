@@ -13,7 +13,8 @@ variables:
   # do pipeline (Pipelines > Edit > Variables), NÃO ficam neste arquivo nem em variable group.
   # User: giom-ci-deploy, permissão de push em qualquer repositório ECR "giom-*" (wildcard —
   # evita ter que editar a policy toda vez que um worker novo ganha repositório próprio, ver
-  # Feature #104) e ecs:UpdateService só nos dois services do AgenteInstituto.
+  # Feature #104), ecs:UpdateService só nos dois services do AgenteInstituto e
+  # lambda:UpdateFunctionCode só na giom-fila-watchman.
   - group: giom-aws
   #
   # branch dev publica recursos -dev (imagem :dev, service giom-agenteinstituto-dev-service);
@@ -24,122 +25,237 @@ variables:
   #
   # Ambos os "if" abaixo comparam com igualdade explícita (nunca "!= dev") — sem isso, uma
   # branch qualquer (ex.: enfileirada manualmente pra validar este YAML) cairia no "senão" e
-  # seria tratada como prod, forçando deploy no service de produção sem querer. O job abaixo
-  # também só roda em dev/master (condition) — qualquer outra branch simplesmente não builda
-  # nem publica nada.
+  # seria tratada como prod, forçando deploy no service de produção sem querer. Cada stage abaixo
+  # também só roda em dev/master (condition) — qualquer outra branch simplesmente não builda nem
+  # publica nada. Variáveis declaradas aqui na raiz (grupos incluídos) ficam visíveis em TODAS as
+  # stages/jobs do pipeline, não precisa redeclarar por stage.
   - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
       - group: giom-dev
   - ${{ if eq(variables['Build.SourceBranchName'], 'master') }}:
       - group: giom-prod
 
-jobs:
-  - job: BuildAndDeploy
+# Dividido em stages (era um job único "BuildAndDeploy") pra dar visibilidade de cada etapa
+# direto na lista de execuções do pipeline — cada stage aparece como um bloco separado no
+# resumo/diagrama do run, sem precisar abrir log nenhum pra saber o que rodou ou o que quebrou
+# (foi assim que a causa raiz do build 113 só apareceu depois de abrir o log inteiro).
+#
+# Ordem: Build (gate — se dotnet test falhar, nada mais roda) -> Migrations + Lambda (paralelas,
+# ambas só dependem do Build) -> Deploy 1..9, um por imagem Docker, todas em paralelo (só
+# dependem de Migrations, porque código novo pode depender de schema novo) -> Deploy Bot
+# (força o restart do bot, só depois de TODAS as imagens publicadas).
+stages:
+  - stage: Build
+    displayName: 'Build'
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
-    steps:
-      - script: |
-          command -v aws >/dev/null 2>&1 || pip install --user awscli
-          echo "##vso[task.prependpath]$HOME/.local/bin"
-        displayName: 'Garantir AWS CLI disponível'
+    jobs:
+      - job: BuildETestar
+        displayName: 'dotnet build + test'
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Instalar .NET SDK'
+            inputs:
+              packageType: 'sdk'
+              version: '9.0.x'
 
-      - script: |
-          aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
-        displayName: 'Login no ECR'
-        env:
-          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+          - script: dotnet build GiomCaptionVideos.sln --configuration Release
+            displayName: 'dotnet build'
 
-      # giom-fila-watchman (bug #113) é uma Lambda ÚNICA (não separada por dev/prod — os event
-      # source mappings dela já cobrem as filas -dev e -prod, ver regex _PADRAO_FILA no código)
-      # cujo deploy até agora era manual (aws lambda update-function-code na mão), perdendo
-      # versionamento real do que estava rodando em prod. Redeploy incondicional a cada run do
-      # pipeline (dev ou master) é seguro e barato — update-function-code é idempotente (mesmo
-      # zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende de build Docker.
-      - script: |
-          cd infra/lambda-fila-watchman
-          zip -q function.zip lambda_function.py
-          aws lambda update-function-code --function-name giom-fila-watchman --zip-file fileb://function.zip --region $(AWS_REGION)
-        displayName: 'Deploy Lambda watchman (giom-fila-watchman)'
-        env:
-          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+          - script: dotnet test GiomCaptionVideos.sln --configuration Release --no-build
+            displayName: 'dotnet test'
 
-      # Migrations + Edge Functions ANTES do deploy da imagem nova — o código novo (esta PR, por
-      # exemplo, dependia da coluna "origem" em video_chunk) não deve subir antes do schema
-      # existir. SUPABASE_PROJECT_REF vem do variable group por branch (giom-dev =
-      # fajrstyqgogmqzceujjt, giom-prod = rhjsjfbegtusucunkgav — precisam ser cadastrados lá,
-      # ainda não existem). SUPABASE_ACCESS_TOKEN é secreto do pipeline (Pipelines > Edit >
-      # Variables, "Keep this value secret") — gerado em supabase.com/dashboard/account/tokens,
-      # nunca neste arquivo. `supabase db push` só aplica migrations em supabase/migrations/
-      # ainda não registradas (idempotente) — não recria nem reaplica o que já rodou.
-      - script: |
-          npm install -g supabase
-        displayName: 'Instalar Supabase CLI'
+  - stage: Migrations
+    displayName: 'Migrations'
+    dependsOn: Build
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: AplicarMigrations
+        displayName: 'Aplicar migrations + Edge Functions'
+        steps:
+          # Migrations + Edge Functions ANTES do deploy da imagem nova — código novo que depende
+          # de schema novo (ex: coluna "origem" em video_chunk) não deve subir antes do schema
+          # existir. SUPABASE_PROJECT_REF vem do variable group por branch (giom-dev/giom-prod).
+          # SUPABASE_ACCESS_TOKEN é secreto do pipeline (Pipelines > Edit > Variables, "Keep this
+          # value secret"), nunca neste arquivo. `supabase db push` só aplica migrations ainda não
+          # registradas (idempotente).
+          - script: npm install -g supabase
+            displayName: 'Instalar Supabase CLI'
 
-      - script: |
-          supabase link --project-ref $(SUPABASE_PROJECT_REF)
-          supabase db push
-          supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
-        displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
-        env:
-          SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
+          - script: |
+              supabase link --project-ref $(SUPABASE_PROJECT_REF)
+              supabase db push
+              supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
+            displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
+            env:
+              SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
 
-      # US #105 — Ingestao.Worker substitui Instituto.Worker/Ministerio.Worker (canal_ingestao
-      # no Supabase decide quais canais processar numa run só). Os dois antigos continuam no
-      # pipeline por enquanto — retirada é o passo de cutover final, depois de validar em
-      # dev/prod lado a lado.
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-ingestao
-          dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
+  - stage: Lambda
+    displayName: 'Lambda'
+    dependsOn: Build
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: DeployLambda
+        displayName: 'Deploy $(LAMBDA_WATCHMAN_NAME)'
+        steps:
+          - script: |
+              command -v aws >/dev/null 2>&1 || pip install --user awscli
+              echo "##vso[task.prependpath]$HOME/.local/bin"
+            displayName: 'Garantir AWS CLI disponível'
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-instituto
-          dockerfilePath: src/Giom.VideoManager.Instituto.Worker/Dockerfile
+          # giom-fila-watchman (bug #113) — uma função POR AMBIENTE (giom-fila-watchman-dev /
+          # giom-fila-watchman, sem sufixo em prod — mesmo padrão assimétrico das task definitions
+          # ECS), cada uma só com Event Source Mapping nas filas do próprio ambiente. Antes era uma
+          # única função cobrindo as duas, mas isso misturava logs e triggers de dev/prod no mesmo
+          # lugar, dificultando diagnóstico. LAMBDA_WATCHMAN_NAME vem do variable group por branch
+          # (giom-dev/giom-prod). Deploy até agora era manual (aws lambda update-function-code na
+          # mão), perdendo versionamento real do que estava rodando em prod. Redeploy incondicional
+          # a cada run do pipeline é seguro e barato — update-function-code é idempotente (mesmo
+          # zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende de build Docker, por
+          # isso roda em paralelo com Migrations/Deploy 1..9.
+          - script: |
+              cd infra/lambda-fila-watchman
+              zip -q function.zip lambda_function.py
+              aws lambda update-function-code --function-name $(LAMBDA_WATCHMAN_NAME) --zip-file fileb://function.zip --region $(AWS_REGION)
+            displayName: 'Deploy Lambda watchman ($(LAMBDA_WATCHMAN_NAME))'
+            env:
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-ministerio
-          dockerfilePath: src/Giom.VideoManager.Ministerio.Worker/Dockerfile
+  - stage: Deploy1
+    displayName: 'Deploy 1 — giom-ingestao'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-ingestao
+              dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-agenteinstituto
-          dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
+  - stage: Deploy2
+    displayName: 'Deploy 2 — giom-instituto'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-instituto
+              dockerfilePath: src/Giom.VideoManager.Instituto.Worker/Dockerfile
 
-      # Feature #104 — workers de etapa (Transcrição/Resumo/Categorização/Embedding) +
-      # orquestrador. Cada imagem é única (não duplicada por canal) — Instituto e Ministério
-      # compartilham a mesma imagem, disparada via run-task com config diferente por canal
-      # (não faz parte do build). Requer os repositórios ECR giom-transcricao/giom-resumo/
-      # giom-categorizacao/giom-embedding/giom-orquestracao já criados.
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-transcricao
-          dockerfilePath: src/Giom.VideoManager.Transcricao.Worker/Dockerfile
+  - stage: Deploy3
+    displayName: 'Deploy 3 — giom-ministerio'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-ministerio
+              dockerfilePath: src/Giom.VideoManager.Ministerio.Worker/Dockerfile
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-resumo
-          dockerfilePath: src/Giom.VideoManager.Resumo.Worker/Dockerfile
+  - stage: Deploy4
+    displayName: 'Deploy 4 — giom-agenteinstituto'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-agenteinstituto
+              dockerfilePath: src/Giom.VideoManager.AgenteInstituto.Worker/Dockerfile
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-categorizacao
-          dockerfilePath: src/Giom.VideoManager.Categorizacao.Worker/Dockerfile
+  # Feature #104 — workers de etapa (Transcrição/Resumo/Categorização/Embedding) + orquestrador.
+  # Cada imagem é única (não duplicada por canal) — Instituto e Ministério compartilham a mesma
+  # imagem, disparada via run-task com config diferente por canal (não faz parte do build).
+  - stage: Deploy5
+    displayName: 'Deploy 5 — giom-transcricao'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-transcricao
+              dockerfilePath: src/Giom.VideoManager.Transcricao.Worker/Dockerfile
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-embedding
-          dockerfilePath: src/Giom.VideoManager.Embedding.Worker/Dockerfile
+  - stage: Deploy6
+    displayName: 'Deploy 6 — giom-resumo'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-resumo
+              dockerfilePath: src/Giom.VideoManager.Resumo.Worker/Dockerfile
 
-      - template: pipelines/templates/build-push-image.yml
-        parameters:
-          serviceName: giom-orquestracao
-          dockerfilePath: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile
+  - stage: Deploy7
+    displayName: 'Deploy 7 — giom-categorizacao'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-categorizacao
+              dockerfilePath: src/Giom.VideoManager.Categorizacao.Worker/Dockerfile
 
-      - script: |
-          aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)
-        displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
-        env:
-          AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-          AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+  - stage: Deploy8
+    displayName: 'Deploy 8 — giom-embedding'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-embedding
+              dockerfilePath: src/Giom.VideoManager.Embedding.Worker/Dockerfile
+
+  - stage: Deploy9
+    displayName: 'Deploy 9 — giom-orquestracao'
+    dependsOn: Migrations
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: BuildEPush
+        displayName: 'Build e push'
+        steps:
+          - template: pipelines/templates/deploy-imagem.yml
+            parameters:
+              serviceName: giom-orquestracao
+              dockerfilePath: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile
+
+  - stage: DeployBot
+    displayName: 'Deploy Bot'
+    dependsOn: [Deploy1, Deploy2, Deploy3, Deploy4, Deploy5, Deploy6, Deploy7, Deploy8, Deploy9]
+    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
+    jobs:
+      - job: ForcarNovoDeploy
+        displayName: 'Forçar novo deploy'
+        steps:
+          - script: |
+              command -v aws >/dev/null 2>&1 || pip install --user awscli
+              echo "##vso[task.prependpath]$HOME/.local/bin"
+            displayName: 'Garantir AWS CLI disponível'
+
+          - script: |
+              aws ecs update-service --cluster giom-cluster --service $(AGENTEINSTITUTO_SERVICE) --force-new-deployment --region $(AWS_REGION)
+            displayName: 'Forçar novo deploy — GiomAgenteInstituto (bot fica sempre ligado, precisa reiniciar pra puxar a imagem nova)'
+            env:
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)

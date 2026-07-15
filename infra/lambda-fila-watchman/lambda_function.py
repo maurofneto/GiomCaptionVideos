@@ -12,6 +12,14 @@ Contrato com a Lambda: a mensagem NUNCA é apagada por aqui. Toda mensagem proce
 `batchItemFailures` -- quem consome de verdade é o SqsFilaConsumer do worker (retry/DLQ de
 US #44/#45), não esta função. Isso preserva o mesmo princípio que corrigiu o bug dos EventBridge
 Pipes: o mecanismo de trigger só observa a fila, nunca compete pela mensagem com o worker real.
+
+Deploy: uma função POR AMBIENTE -- giom-fila-watchman-dev (só filas -dev) e giom-fila-watchman
+(prod, sem sufixo -- mesmo padrão assimétrico das task definitions ECS). Antes era uma função
+única cobrindo os dois ambientes via Event Source Mapping nas filas -dev e -prod ao mesmo tempo,
+mas isso misturava logs e triggers de dev/prod no mesmo CloudWatch Log Group, dificultando
+diagnóstico (2026-07-15). O código continua o mesmo nas duas funções -- cada uma só tem Event
+Source Mapping nas filas do próprio ambiente, então a resolução de família por env (ver
+_disparar_task) nunca precisa lidar com o ambiente "errado" na prática.
 """
 
 import os
@@ -48,19 +56,33 @@ def _task_ja_em_andamento(family: str) -> bool:
 
 
 def _disparar_task(family: str, etapa: str) -> None:
-    resp = ecs.run_task(
-        cluster=CLUSTER_ARN,
-        taskDefinition=family,
-        capacityProviderStrategy=[{"capacityProvider": "FARGATE_SPOT", "weight": 1, "base": 0}],
-        networkConfiguration={
-            "awsvpcConfiguration": {
-                "subnets": SUBNETS,
-                "securityGroups": SECURITY_GROUPS,
-                "assignPublicIp": "ENABLED",
-            }
-        },
-        startedBy=f"lambda-watchman/{etapa}",
-    )
+    try:
+        resp = ecs.run_task(
+            cluster=CLUSTER_ARN,
+            taskDefinition=family,
+            capacityProviderStrategy=[{"capacityProvider": "FARGATE_SPOT", "weight": 1, "base": 0}],
+            networkConfiguration={
+                "awsvpcConfiguration": {
+                    "subnets": SUBNETS,
+                    "securityGroups": SECURITY_GROUPS,
+                    "assignPublicIp": "ENABLED",
+                }
+            },
+            startedBy=f"lambda-watchman/{etapa}",
+        )
+    except Exception as exc:
+        # RunTask pode LANÇAR (ex: ClientException "TaskDefinition not found" -- bug real achado
+        # em 2026-07-15, family com nome errado pro ambiente), não só devolver 200 com failures[]
+        # preenchido (ex: capacidade indisponível). Se deixasse propagar, a invocação inteira da
+        # Lambda falhava sem devolver batchItemFailures -- SQS trata isso como falha do BATCH
+        # inteiro, e a mensagem só reaparece depois do VisibilityTimeout natural (300s) em vez do
+        # reset explícito abaixo, queimando ApproximateReceiveCount sem o worker real nunca ter
+        # recebido a mensagem (mesma classe de sintoma do bug #113). Por isso sempre capturamos
+        # aqui -- a mensagem só é reprocessada no próximo poll (via reset de visibilidade abaixo,
+        # que roda de qualquer forma), nunca derruba a invocação inteira.
+        print(f"[watchman] RunTask lançou exceção pra {family}: {exc}")
+        return
+
     for falha in resp.get("failures", []):
         # RunTask pode devolver 200 com failures[] preenchido (ex: capacidade indisponível) --
         # não é uma exceção, só logamos; a mensagem volta pra fila e o próximo poll tenta de novo.
@@ -82,7 +104,13 @@ def handler(event, context):
             continue
 
         etapa, env = resolvido
-        family = f"giom-{etapa}-{env}-task"
+        # Bug real achado em 2026-07-15: a convenção de nome de task definition NÃO é simétrica
+        # entre ambientes -- dev tem sufixo "-dev" (giom-transcricao-dev-task), prod não tem
+        # sufixo nenhum (giom-transcricao-task, sem "-prod"). Usar f"giom-{etapa}-{env}-task" pra
+        # prod monta "giom-transcricao-prod-task", que nunca existiu -- RunTask lançava
+        # ClientException "TaskDefinition not found" a cada mensagem de fila prod, o que por sua
+        # vez (antes do fix acima) derrubava a invocação inteira sem processar nada de verdade.
+        family = f"giom-{etapa}-{env}-task" if env == "dev" else f"giom-{etapa}-task"
 
         ja_em_andamento = _task_ja_em_andamento(family)
         if not ja_em_andamento:
