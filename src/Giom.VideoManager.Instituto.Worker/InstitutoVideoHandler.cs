@@ -18,7 +18,7 @@ public class InstitutoVideoHandler(
     ICaptionService captionService,
     IResumoService resumoService,
     ICategorizacaoService categorizacaoService,
-    IEmbeddingService embeddingService,
+    IVideoIndexingService embeddingIndexingService,
     ILogger<InstitutoVideoHandler> logger,
     IOptions<ProcessingOptions> options) : IVideoProcessador
 {
@@ -92,7 +92,7 @@ public class InstitutoVideoHandler(
         // Cada chunk (~600 tokens) recebe seu próprio embedding para RAG preciso.
         if (_options.ShouldIndexEmbedding && video.Transcricao != null && !video.Chunks.Any())
         {
-            await embeddingService.IndexarAsync(video, ct);
+            await embeddingIndexingService.IndexarAsync(video, ct);
             logger.LogInformation("Instituto — embedding indexado: {Title}", video.Title);
         }
 

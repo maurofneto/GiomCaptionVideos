@@ -12,7 +12,7 @@ namespace Giom.VideoManager.SmokeTests;
 /// bater com a coluna vector(1536) do banco. Injeta falha determinística por vídeo (ver
 /// InjecaoDeFalha) pra exercitar o retry dinâmico da Feature #34.
 /// </summary>
-public class FakeEmbeddingService(IVideoChunkRepository chunkRepository, ILogger<FakeEmbeddingService> logger) : IEmbeddingService
+public class FakeEmbeddingService(IVideoChunkRepository chunkRepository, ILogger<FakeEmbeddingService> logger) : IVideoIndexingService
 {
     private const int Dimensoes = 1536;
 
@@ -47,9 +47,6 @@ public class FakeEmbeddingService(IVideoChunkRepository chunkRepository, ILogger
         await chunkRepository.DeletarPorVideoAsync(video.Id, ct);
         await chunkRepository.InserirAsync(chunks, ct);
     }
-
-    public Task<BuscaSemanticaResultado> BuscarAsync(string pergunta, string? area = null, string? canalId = null, int limite = 6, double threshold = 0.35, CancellationToken ct = default)
-        => throw new NotSupportedException("FakeEmbeddingService só indexa — busca semântica não é usada por esta ferramenta de teste.");
 
     private static float[] GerarVetorDeterministico(string videoId, int chunkIndex)
     {

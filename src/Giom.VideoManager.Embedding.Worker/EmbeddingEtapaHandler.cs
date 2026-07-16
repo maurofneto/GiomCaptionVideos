@@ -13,7 +13,7 @@ namespace Giom.VideoManager.Embedding.Worker;
 /// </summary>
 public class EmbeddingEtapaHandler(
     IVideoRepository videoRepository,
-    IEmbeddingService embeddingService,
+    IVideoIndexingService embeddingIndexingService,
     [FromKeyedServices("etapa-concluida")] IFilaPublisher<EtapaConcluidaMensagem> etapaConcluidaPublisher,
     ISessionContext sessionContext,
     ITracingService tracingService,
@@ -31,7 +31,7 @@ public class EmbeddingEtapaHandler(
 
         if (video.Transcricao != null && !video.Chunks.Any())
         {
-            await embeddingService.IndexarAsync(video, ct);
+            await embeddingIndexingService.IndexarAsync(video, ct);
             logger.LogInformation("{Canal} — embedding indexado: {Title}", video.ChannelTitle, video.Title);
         }
 

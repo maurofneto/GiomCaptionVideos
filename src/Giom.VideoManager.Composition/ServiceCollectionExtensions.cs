@@ -204,16 +204,15 @@ public static class ServiceCollectionExtensions
     /// vetores, então adicionar um provider na cadeia não mistura espaços vetoriais
     /// incompatíveis. Mesmo mecanismo de AddSummaryService.
     ///
-    /// Embedding:Modo (Feature #115) decide qual combinator vira o IEmbeddingService único:
-    /// "Fallback" (default, busca do bot — para no primeiro provider que funcionar) ou
-    /// "Pipeline" (indexação — roda TODOS os providers, uma falha não impede os outros). É só
-    /// uma troca de Composition — quem injeta IEmbeddingService (EmbeddingEtapaHandler,
-    /// ChatBotProcessor) nunca sabe qual dos dois está por trás.
+    /// Indexação (IVideoIndexingService) e busca (IBuscaSemanticaService) são interfaces
+    /// separadas (Feature #115, ISP) resolvidas SEMPRE pro mesmo combinator — sem config, sem
+    /// troca em runtime: PipelineEmbeddingService pra indexar (roda todos os providers) e
+    /// FallbackEmbeddingService pra buscar (para no primeiro que funcionar). Cada consumidor
+    /// (EmbeddingEtapaHandler indexa, ChatBotProcessor busca) injeta só a interface que usa.
     /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
         var cadeiaNomes = config.GetSection("Embedding:FallbackChain").Get<string[]>() ?? ["OpenAI"];
-        var modo = config["Embedding:Modo"] ?? "Fallback";
 
         foreach (var nome in cadeiaNomes)
         {
@@ -234,14 +233,19 @@ public static class ServiceCollectionExtensions
             }
         }
 
-        services.AddSingleton<IEmbeddingService>(sp =>
+        services.AddSingleton<IBuscaSemanticaService>(sp =>
         {
             var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
-            return modo == "Pipeline"
-                ? new PipelineEmbeddingService(cadeia, sp.GetRequiredService<ILogger<PipelineEmbeddingService>>())
-                : new FallbackEmbeddingService(cadeia, sp.GetRequiredService<ILogger<FallbackEmbeddingService>>());
+            return new FallbackEmbeddingService(cadeia, sp.GetRequiredService<ILogger<FallbackEmbeddingService>>());
         });
-        services.Decorate<IEmbeddingService, TelemetriaEmbeddingService>();
+        services.Decorate<IBuscaSemanticaService, TelemetriaBuscaSemanticaService>();
+
+        services.AddSingleton<IVideoIndexingService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
+            return new PipelineEmbeddingService(cadeia, sp.GetRequiredService<ILogger<PipelineEmbeddingService>>());
+        });
+        services.Decorate<IVideoIndexingService, TelemetriaVideoIndexingService>();
 
         return services;
     }

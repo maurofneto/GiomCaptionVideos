@@ -126,7 +126,14 @@ public class OpenAIEmbeddingService : IEmbeddingService
         double threshold = 0.35,
         CancellationToken ct = default)
     {
-        var (embeddings, _) = await GenerateEmbeddingsAsync([pergunta.AsMemory()], ct);
+        var (embeddings, tokensTotais) = await GenerateEmbeddingsAsync([pergunta.AsMemory()], ct);
+
+        _contextoTelemetria.Registrar(
+            provedor: "OpenAI",
+            modelo: _options.EmbeddingModel,
+            tokensEntrada: tokensTotais,
+            custoEstimadoUsd: OpenAiPricingCalculator.Calcular(_options.EmbeddingModel, tokensTotais));
+
         return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
     }
 
