@@ -29,12 +29,15 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Registra o tipo concreto (não a interface) — a Composition decide como este elo entra na cadeia de fallback (Feature #101).</summary>
+    /// <summary>
+    /// Registra o tipo concreto (não a interface) — a Composition decide como este elo entra na
+    /// cadeia de fallback (Feature #101). A busca semântica delega a IVideoChunkRepository
+    /// (Domain) — este projeto nunca referencia Infrastructure.Supabase diretamente.
+    /// </summary>
     public static IServiceCollection AddOpenAiEmbedding(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<OpenAiEmbeddingOptions>(config.GetSection("OpenAiEmbedding"));
         services.AddOpenAiHttpClient();
-        services.AddHttpClient("supabase-functions").AddStandardResilienceHandler();
         services.AddContextoTelemetria();
         services.AddSingleton<OpenAIEmbeddingService>();
         return services;
