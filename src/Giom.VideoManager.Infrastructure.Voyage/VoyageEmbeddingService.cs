@@ -19,14 +19,22 @@ public class VoyageEmbeddingOptions
 }
 
 /// <summary>
-/// Provider de embedding pra cadeia de fallback (Embedding:FallbackChain, Feature #101) — fora
-/// da cadeia padrão por enquanto ("mantenha somente OpenAI"). Cada chunk é gravado com
-/// Origem = "VoyageAI", e o Supabase filtra por origem na busca — vetores Voyage nunca são
-/// comparados com vetores OpenAI (espaços vetoriais incompatíveis).
+/// Provider de embedding pra cadeia de fallback (Embedding:FallbackChain, Feature #101). Cada
+/// chunk é gravado com Origem = "VoyageAI", e a busca semântica (via IVideoChunkRepository,
+/// Domain) filtra por origem antes de comparar vetores — nunca mistura com chunks de outro
+/// provedor. Este projeto não conhece Supabase diretamente (nunca referência direta entre dois
+/// Infrastructure.*, ver CLAUDE.md).
 /// </summary>
 public class VoyageEmbeddingService : IEmbeddingService
 {
     private const string Origem = "VoyageAI";
+
+    // voyage-3 emite vetores de 1024 dim, mas video_chunk.embedding é vector(1536) fixo (Bug
+    // #121 — pgvector recusa HNSW sobre coluna sem dimensão, então a coluna tem que ter
+    // tamanho fixo). Preencher com zeros não distorce a similaridade de cosseno (não muda
+    // produto escalar nem magnitude) e as RPCs match_chunks_hibrido* só comparam dentro da
+    // mesma origem, então nunca mistura com vetores OpenAI/Cohere de tamanho real diferente.
+    private const int DimensaoAlvo = 1536;
 
     private readonly VoyageEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
@@ -52,9 +60,9 @@ public class VoyageEmbeddingService : IEmbeddingService
 
     public async Task IndexarAsync(Video video, CancellationToken ct = default)
     {
-        if (video.Chunks.Count > 0)
+        if (video.Chunks.Any(c => c.Origem == Origem))
         {
-            _logger.LogInformation("{VideoId} já tem {Count} chunks — indexação ignorada", video.Id, video.Chunks.Count);
+            _logger.LogInformation("{VideoId} já tem chunks da origem {Origem} — indexação ignorada", video.Id, Origem);
             return;
         }
 
@@ -76,7 +84,7 @@ public class VoyageEmbeddingService : IEmbeddingService
             modelo: _options.Model,
             tokensEntrada: tokensTotais);
 
-        await _chunkRepository.DeletarPorVideoAsync(video.Id, ct);
+        await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
             chunks.Select((mem, i) => new VideoChunk
             {
@@ -91,14 +99,26 @@ public class VoyageEmbeddingService : IEmbeddingService
         _logger.LogInformation("{VideoId} — {Chunks} chunks indexados com sucesso (Voyage)", video.Id, chunks.Count);
     }
 
-    // Desde a Feature #101 a Edge Function filtra por origem (não embeda mais server-side) —
-    // misturar embeddings Voyage/OpenAI deixou de ser um problema arquitetural. BuscarAsync só
-    // não está implementado ainda porque Voyage fica fora da cadeia de fallback por enquanto
-    // ("mantenha somente OpenAI") — sem uso real hoje. Seguiria o mesmo padrão de
-    // OpenAIEmbeddingService.BuscarAsync quando for necessário: gerar o embedding da pergunta
-    // aqui, enviar {pergunta, embedding, origem: "VoyageAI", ...} pra buscar-similar.
-    public Task<BuscaSemanticaResultado> BuscarAsync(string pergunta, string? area = null, string? canalId = null, int limite = 6, double threshold = 0.35, CancellationToken ct = default)
-        => throw new NotSupportedException("VoyageEmbeddingService.BuscarAsync ainda não implementado — Voyage está fora da cadeia de fallback nesta entrega (ver Feature #101).");
+    // Mesmo padrão de OpenAIEmbeddingService.BuscarAsync — embeda a pergunta aqui mesmo
+    // (client-side) e delega o resto (RRF híbrido, diversidade por aula, filtro por origem) pro
+    // IVideoChunkRepository (Feature #101) — nunca mistura com chunks embedados via OpenAI.
+    public async Task<BuscaSemanticaResultado> BuscarAsync(
+        string pergunta,
+        string? area = null,
+        string? canalId = null,
+        int limite = 6,
+        double threshold = 0.35,
+        CancellationToken ct = default)
+    {
+        var (embeddings, tokensTotais) = await GerarEmbeddingsAsync([pergunta.AsMemory()], ct);
+
+        _contextoTelemetria.Registrar(
+            provedor: "VoyageAI",
+            modelo: _options.Model,
+            tokensEntrada: tokensTotais);
+
+        return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
+    }
 
     private async Task<(List<float[]> Embeddings, int TokensTotais)> GerarEmbeddingsAsync(List<ReadOnlyMemory<char>> chunks, CancellationToken ct)
     {
@@ -124,7 +144,7 @@ public class VoyageEmbeddingService : IEmbeddingService
                 usage = new { total_tokens = 0 }
             });
 
-            all.AddRange(result!.data.OrderBy(d => d.index).Select(d => d.embedding));
+            all.AddRange(result!.data.OrderBy(d => d.index).Select(d => Preencher(d.embedding)));
             tokensTotais += result.usage?.total_tokens ?? 0;
 
             if (i + _options.EmbedBatchSize < chunks.Count)
@@ -132,5 +152,13 @@ public class VoyageEmbeddingService : IEmbeddingService
         }
 
         return (all, tokensTotais);
+    }
+
+    private static float[] Preencher(float[] embedding)
+    {
+        if (embedding.Length >= DimensaoAlvo) return embedding;
+        var preenchido = new float[DimensaoAlvo];
+        Array.Copy(embedding, preenchido, embedding.Length);
+        return preenchido;
     }
 }

@@ -27,14 +27,14 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
         _http.Timeout = TimeSpan.FromMinutes(5);
     }
 
-    public async Task DeletarPorVideoAsync(string videoId, CancellationToken ct = default)
+    public async Task DeletarPorVideoAsync(string videoId, string origem, CancellationToken ct = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"/rest/v1/video_chunk?video_id=eq.{videoId}");
+        var request = new HttpRequestMessage(HttpMethod.Delete, $"/rest/v1/video_chunk?video_id=eq.{videoId}&origem=eq.{origem}");
         request.Headers.Add("Prefer", "return=minimal");
 
         var response = await _http.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
-            _logger.LogWarning("Falha ao deletar chunks de {VideoId}: {Status}", videoId, response.StatusCode);
+            _logger.LogWarning("Falha ao deletar chunks de {VideoId} (origem {Origem}): {Status}", videoId, origem, response.StatusCode);
     }
 
     public async Task InserirAsync(IEnumerable<VideoChunk> chunks, CancellationToken ct = default)
@@ -66,5 +66,50 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
 
             _logger.LogDebug("Chunks inseridos: {Done}/{Total}", Math.Min(i + BatchSize, list.Count), list.Count);
         }
+    }
+
+    public async Task<BuscaSemanticaResultado> BuscarSimilaresAsync(
+        string pergunta,
+        float[] embedding,
+        string origem,
+        string? area = null,
+        string? canalId = null,
+        int limite = 6,
+        double threshold = 0.35,
+        CancellationToken ct = default)
+    {
+        var payload = new { pergunta, embedding, origem, area, limite, threshold, canal_id = canalId };
+        var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
+
+        var response = await _http.PostAsync("/functions/v1/buscar-similar", content, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("Falha na busca semântica ({Origem}): {Status} — {Body}", origem, response.StatusCode, body);
+            return new BuscaSemanticaResultado([], "Nenhuma aula relevante encontrada.");
+        }
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var result = JsonConvert.DeserializeAnonymousType(json, new
+        {
+            chunks = new[] { new
+            {
+                video_id     = "",
+                titulo       = "",
+                chunk_index  = 0,
+                conteudo     = "",
+                area         = (string?)null,
+                subcategoria = (string?)null,
+                similarity   = 0.0
+            }},
+            contexto_formatado = ""
+        });
+
+        var chunks = result?.chunks?
+            .Select(c => new ChunkSimilar(c.video_id, c.titulo, c.chunk_index, c.conteudo, c.area, c.subcategoria, c.similarity))
+            .ToList() ?? [];
+
+        return new BuscaSemanticaResultado(chunks, result?.contexto_formatado ?? "");
     }
 }

@@ -3,12 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Giom.VideoManager.Application\Giom.VideoManager.Application.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Testes.Comuns\Giom.VideoManager.Testes.Comuns.csproj" />
-    <!-- Feature #33: InstitutoPipelineHandler/MinisterioPipelineHandler vivem nos projetos dos
-         workers (não em Application), mesmo lugar de InstitutoVideoHandler/MinisterioVideoHandler -->
-    <ProjectReference Include="..\..\src\Giom.VideoManager.Instituto.Worker\Giom.VideoManager.Instituto.Worker.csproj" />
-    <ProjectReference Include="..\..\src\Giom.VideoManager.Ministerio.Worker\Giom.VideoManager.Ministerio.Worker.csproj" />
-    <!-- Feature #104 — handlers de etapa genéricos vivem nos próprios workers de etapa, mesmo
-         padrão de InstitutoPipelineHandler/MinisterioPipelineHandler. -->
+    <!-- Feature #104 — handlers de etapa genéricos vivem nos próprios workers de etapa. -->
     <ProjectReference Include="..\..\src\Giom.VideoManager.Transcricao.Worker\Giom.VideoManager.Transcricao.Worker.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Resumo.Worker\Giom.VideoManager.Resumo.Worker.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Categorizacao.Worker\Giom.VideoManager.Categorizacao.Worker.csproj" />

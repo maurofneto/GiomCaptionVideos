@@ -5,6 +5,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
+using Giom.VideoManager.Infrastructure.Cohere;
 using Giom.VideoManager.Infrastructure.Feedback;
 using Giom.VideoManager.Infrastructure.Grok;
 using Giom.VideoManager.Infrastructure.GuardRails;
@@ -196,12 +197,18 @@ public static class ServiceCollectionExtensions
         => services.AddClaudeAvaliadorIA(config);
 
     /// <summary>
-    /// Embedding — cadeia de fallback (Feature #101), configurável via Embedding:FallbackChain
-    /// (default: só ["OpenAI"] por enquanto). Cada provider embeda a pergunta/os chunks do seu
-    /// próprio lado e marca a origem (VideoChunk.Origem) — o Supabase (Edge Function
-    /// buscar-similar) filtra por origem antes de comparar vetores, então adicionar um segundo
-    /// provider na cadeia (ex: "VoyageAI") não mistura espaços vetoriais incompatíveis, ao
-    /// contrário do que acontecia antes dessa mudança. Mesmo mecanismo de AddSummaryService.
+    /// Embedding — configurável via Embedding:FallbackChain (default: só ["OpenAI"] por
+    /// enquanto; "VoyageAI"/"Cohere" também disponíveis). Cada provider embeda a pergunta/os
+    /// chunks do seu próprio lado e marca a origem (VideoChunk.Origem) — a busca
+    /// (IVideoChunkRepository.BuscarSimilaresAsync, Domain) filtra por origem antes de comparar
+    /// vetores, então adicionar um provider na cadeia não mistura espaços vetoriais
+    /// incompatíveis. Mesmo mecanismo de AddSummaryService.
+    ///
+    /// Indexação (IVideoIndexingService) e busca (IBuscaSemanticaService) são interfaces
+    /// separadas (Feature #115, ISP) resolvidas SEMPRE pro mesmo combinator — sem config, sem
+    /// troca em runtime: PipelineEmbeddingService pra indexar (roda todos os providers) e
+    /// FallbackEmbeddingService pra buscar (para no primeiro que funcionar). Cada consumidor
+    /// (EmbeddingEtapaHandler indexa, ChatBotProcessor busca) injeta só a interface que usa.
     /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
@@ -215,6 +222,10 @@ public static class ServiceCollectionExtensions
                     services.AddVoyageEmbedding(config);
                     services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<VoyageEmbeddingService>());
                     break;
+                case "Cohere":
+                    services.AddCohereEmbedding(config);
+                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<CohereEmbeddingService>());
+                    break;
                 default: // OpenAI
                     services.AddOpenAiEmbedding(config);
                     services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<OpenAIEmbeddingService>());
@@ -222,12 +233,19 @@ public static class ServiceCollectionExtensions
             }
         }
 
-        services.AddSingleton<IEmbeddingService>(sp =>
+        services.AddSingleton<IBuscaSemanticaService>(sp =>
         {
             var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
             return new FallbackEmbeddingService(cadeia, sp.GetRequiredService<ILogger<FallbackEmbeddingService>>());
         });
-        services.Decorate<IEmbeddingService, TelemetriaEmbeddingService>();
+        services.Decorate<IBuscaSemanticaService, TelemetriaBuscaSemanticaService>();
+
+        services.AddSingleton<IVideoIndexingService>(sp =>
+        {
+            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
+            return new PipelineEmbeddingService(cadeia, sp.GetRequiredService<ILogger<PipelineEmbeddingService>>());
+        });
+        services.Decorate<IVideoIndexingService, TelemetriaVideoIndexingService>();
 
         return services;
     }

@@ -13,7 +13,7 @@ namespace Giom.VideoManager.Embedding.Worker;
 /// </summary>
 public class EmbeddingEtapaHandler(
     IVideoRepository videoRepository,
-    IEmbeddingService embeddingService,
+    IVideoIndexingService embeddingIndexingService,
     [FromKeyedServices("etapa-concluida")] IFilaPublisher<EtapaConcluidaMensagem> etapaConcluidaPublisher,
     ISessionContext sessionContext,
     ITracingService tracingService,
@@ -29,9 +29,12 @@ public class EmbeddingEtapaHandler(
             video.Chunks = existing.Chunks;
         }
 
-        if (video.Transcricao != null && !video.Chunks.Any())
+        // Não filtra por video.Chunks.Any() aqui: um vídeo pode já ter chunk de UM provedor mas
+        // não de outro (pipeline multi-provedor, Feature #115/Bug #121) — quem decide por
+        // provedor é o próprio IVideoIndexingService (cada provider checa sua própria Origem).
+        if (video.Transcricao != null)
         {
-            await embeddingService.IndexarAsync(video, ct);
+            await embeddingIndexingService.IndexarAsync(video, ct);
             logger.LogInformation("{Canal} — embedding indexado: {Title}", video.ChannelTitle, video.Title);
         }
 
