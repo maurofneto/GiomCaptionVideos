@@ -27,14 +27,14 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
         _http.Timeout = TimeSpan.FromMinutes(5);
     }
 
-    public async Task DeletarPorVideoAsync(string videoId, CancellationToken ct = default)
+    public async Task DeletarPorVideoAsync(string videoId, string origem, CancellationToken ct = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"/rest/v1/video_chunk?video_id=eq.{videoId}");
+        var request = new HttpRequestMessage(HttpMethod.Delete, $"/rest/v1/video_chunk?video_id=eq.{videoId}&origem=eq.{origem}");
         request.Headers.Add("Prefer", "return=minimal");
 
         var response = await _http.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
-            _logger.LogWarning("Falha ao deletar chunks de {VideoId}: {Status}", videoId, response.StatusCode);
+            _logger.LogWarning("Falha ao deletar chunks de {VideoId} (origem {Origem}): {Status}", videoId, origem, response.StatusCode);
     }
 
     public async Task InserirAsync(IEnumerable<VideoChunk> chunks, CancellationToken ct = default)

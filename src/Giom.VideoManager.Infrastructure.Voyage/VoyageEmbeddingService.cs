@@ -29,6 +29,13 @@ public class VoyageEmbeddingService : IEmbeddingService
 {
     private const string Origem = "VoyageAI";
 
+    // voyage-3 emite vetores de 1024 dim, mas video_chunk.embedding é vector(1536) fixo (Bug
+    // #121 — pgvector recusa HNSW sobre coluna sem dimensão, então a coluna tem que ter
+    // tamanho fixo). Preencher com zeros não distorce a similaridade de cosseno (não muda
+    // produto escalar nem magnitude) e as RPCs match_chunks_hibrido* só comparam dentro da
+    // mesma origem, então nunca mistura com vetores OpenAI/Cohere de tamanho real diferente.
+    private const int DimensaoAlvo = 1536;
+
     private readonly VoyageEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
     private readonly ILogger<VoyageEmbeddingService> _logger;
@@ -77,7 +84,7 @@ public class VoyageEmbeddingService : IEmbeddingService
             modelo: _options.Model,
             tokensEntrada: tokensTotais);
 
-        await _chunkRepository.DeletarPorVideoAsync(video.Id, ct);
+        await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
             chunks.Select((mem, i) => new VideoChunk
             {
@@ -137,7 +144,7 @@ public class VoyageEmbeddingService : IEmbeddingService
                 usage = new { total_tokens = 0 }
             });
 
-            all.AddRange(result!.data.OrderBy(d => d.index).Select(d => d.embedding));
+            all.AddRange(result!.data.OrderBy(d => d.index).Select(d => Preencher(d.embedding)));
             tokensTotais += result.usage?.total_tokens ?? 0;
 
             if (i + _options.EmbedBatchSize < chunks.Count)
@@ -145,5 +152,13 @@ public class VoyageEmbeddingService : IEmbeddingService
         }
 
         return (all, tokensTotais);
+    }
+
+    private static float[] Preencher(float[] embedding)
+    {
+        if (embedding.Length >= DimensaoAlvo) return embedding;
+        var preenchido = new float[DimensaoAlvo];
+        Array.Copy(embedding, preenchido, embedding.Length);
+        return preenchido;
     }
 }

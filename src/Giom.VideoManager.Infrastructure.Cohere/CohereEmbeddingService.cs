@@ -82,7 +82,7 @@ public class CohereEmbeddingService : IEmbeddingService
             modelo: _options.Model,
             tokensEntrada: tokensTotais);
 
-        await _chunkRepository.DeletarPorVideoAsync(video.Id, ct);
+        await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
             chunks.Select((mem, i) => new VideoChunk
             {
