@@ -67,9 +67,9 @@ public class OpenAIEmbeddingService : IEmbeddingService
 
     public async Task IndexarAsync(Video video, CancellationToken ct = default)
     {
-        if (video.Chunks.Count > 0)
+        if (video.Chunks.Any(c => c.Origem == Origem))
         {
-            _logger.LogInformation("{VideoId} já tem {Count} chunks — indexação ignorada", video.Id, video.Chunks.Count);
+            _logger.LogInformation("{VideoId} já tem chunks da origem {Origem} — indexação ignorada", video.Id, Origem);
             return;
         }
 

@@ -51,4 +51,20 @@ public class EmbeddingEtapaHandlerTests
         var evento = Assert.Single(ambiente.EtapaConcluidaPublisher.Publicadas);
         Assert.Equal("embedding", evento.Etapa);
     }
+
+    // Bug #121/US #118 — um vídeo já indexado por OUTRO provedor (pipeline multi-provedor,
+    // Feature #115) não pode fazer o handler pular a chamada: quem decide se pula é cada
+    // provider dentro do IVideoIndexingService, checando sua própria Origem.
+    [Fact]
+    public async Task ProcessarAsync_VideoJaTemChunkDeOutraOrigem_AindaAssimChamaIndexarAsync()
+    {
+        var ambiente = new Ambiente();
+        var video = CriarVideo();
+        video.Transcricao = new Domain.Entities.Transcricao { Conteudo = "legenda" };
+        video.Chunks = [new VideoChunk { VideoId = video.Id, ChunkIndex = 0, Origem = "OpenAI" }];
+
+        await ((IEtapaEmbeddingHandler)ambiente.CriarHandler()).ProcessarAsync(video);
+
+        ambiente.EmbeddingService.Verify(e => e.IndexarAsync(video, It.IsAny<CancellationToken>()), Times.Once);
+    }
 }
