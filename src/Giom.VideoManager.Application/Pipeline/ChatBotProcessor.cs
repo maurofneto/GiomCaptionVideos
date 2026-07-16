@@ -22,7 +22,7 @@ namespace Giom.VideoManager.Application.Pipeline;
 /// </summary>
 public class ChatBotProcessor(
     IChatChannel channel,
-    IEmbeddingService embeddingService,
+    IBuscaSemanticaService embeddingService,
     IAgentService agentService,
     IConversaHistoricoService historicoService,
     ITelemetriaService telemetriaService,

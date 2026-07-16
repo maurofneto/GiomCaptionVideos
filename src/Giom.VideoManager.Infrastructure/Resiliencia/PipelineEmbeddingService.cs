@@ -5,17 +5,16 @@ using Microsoft.Extensions.Logging;
 namespace Giom.VideoManager.Infrastructure.Resiliencia;
 
 /// <summary>
-/// Variante de IEmbeddingService pra indexação em pipeline (Feature #115) — troca de
-/// FallbackEmbeddingService é só uma decisão de Composition (Embedding:Modo), o chamador
-/// (EmbeddingEtapaHandler) injeta IEmbeddingService normalmente e nunca sabe qual das duas está
-/// por trás. IndexarAsync roda TODOS os provedores da cadeia (uma falha não impede os outros —
-/// cada um grava seus próprios chunks, Origem diferente). BuscarAsync mantém a MESMA semântica
-/// de fallback de FallbackEmbeddingService (busca sempre para no primeiro que funcionar,
-/// independente do modo de indexação escolhido).
+/// Roda IndexarAsync em TODOS os provedores configurados (Feature #115), um após o outro — ao
+/// contrário de FallbackEmbeddingService (busca), aqui uma falha de UM provedor não impede os
+/// outros de indexarem: cada provedor grava seus próprios chunks (Origem diferente), então o
+/// corpus fica disponível pra qualquer um deles servir de fallback de busca de verdade depois.
+/// Único implementador de IVideoIndexingService — interfaces separadas (ISP) pra
+/// EmbeddingEtapaHandler/InstitutoVideoHandler nunca precisarem saber que "buscar" existe.
 /// </summary>
 public sealed class PipelineEmbeddingService(
     IReadOnlyList<(string Nome, IEmbeddingService Servico)> cadeia,
-    ILogger<PipelineEmbeddingService> logger) : IEmbeddingService
+    ILogger<PipelineEmbeddingService> logger) : IVideoIndexingService
 {
     public async Task IndexarAsync(Video video, CancellationToken ct = default)
     {
@@ -33,14 +32,5 @@ public sealed class PipelineEmbeddingService(
                 logger.LogError(ex, "Pipeline de indexação: provedor {Provider} falhou pra {VideoId} — seguindo com os demais", nome, video.Id);
             }
         }
-    }
-
-    public Task<BuscaSemanticaResultado> BuscarAsync(string pergunta, string? area = null, string? canalId = null, int limite = 6, double threshold = 0.35, CancellationToken ct = default)
-    {
-        var elos = cadeia
-            .Select(c => (c.Nome, (Func<CancellationToken, Task<BuscaSemanticaResultado>>)(token => c.Servico.BuscarAsync(pergunta, area, canalId, limite, threshold, token))))
-            .ToList();
-
-        return FallbackChain.Montar(elos).ExecutarAsync("embedding_buscar", logger, ct);
     }
 }

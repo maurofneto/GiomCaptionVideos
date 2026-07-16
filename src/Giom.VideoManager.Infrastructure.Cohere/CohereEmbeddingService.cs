@@ -108,7 +108,13 @@ public class CohereEmbeddingService : IEmbeddingService
         double threshold = 0.35,
         CancellationToken ct = default)
     {
-        var (embeddings, _) = await GerarEmbeddingsAsync([pergunta.AsMemory()], "search_query", ct);
+        var (embeddings, tokensTotais) = await GerarEmbeddingsAsync([pergunta.AsMemory()], "search_query", ct);
+
+        _contextoTelemetria.Registrar(
+            provedor: "Cohere",
+            modelo: _options.Model,
+            tokensEntrada: tokensTotais);
+
         return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
     }
 

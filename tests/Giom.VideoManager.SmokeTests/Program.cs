@@ -92,7 +92,7 @@ using var host = Host.CreateDefaultBuilder(args)
             services.AddCategorizacaoService(config);
         else
             services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
-        services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
+        services.AddSingleton<IVideoIndexingService, FakeEmbeddingService>();
         services.AddSessionContext();
         services.AddActiveChannelContext(); // US #105 — ChannelProcessor agora exige isso no construtor; FakeVideoSource ignora, mas precisa estar registrado
         services.AddTelemetriaService(config);     // Supabase + Sentry + alerta de gasto

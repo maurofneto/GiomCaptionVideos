@@ -18,7 +18,7 @@ public class EmbeddingEtapaHandlerTests
     private sealed class Ambiente
     {
         public Mock<IVideoRepository> VideoRepository { get; } = new();
-        public Mock<IEmbeddingService> EmbeddingService { get; } = new();
+        public Mock<IVideoIndexingService> EmbeddingService { get; } = new();
         public FakeFilaPublisher<EtapaConcluidaMensagem> EtapaConcluidaPublisher { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeTracingService Tracing { get; } = new();

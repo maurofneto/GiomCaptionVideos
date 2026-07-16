@@ -39,7 +39,7 @@ public class ChatBotProcessorTests
         public FakeGuardRailPipeline GuardRails { get; } = new();
         public FakeContextoTelemetria ContextoTelemetria { get; } = new();
         public FakeLogger<ChatBotProcessor> Logger { get; } = new();
-        public Mock<IEmbeddingService> Embedding { get; } = new();
+        public Mock<IBuscaSemanticaService> Embedding { get; } = new();
         public Mock<IAgentService> Agent { get; } = new();
 
         public RagOptions Rag { get; set; } = new();
