@@ -44,4 +44,14 @@ public class SqsOptions
     /// run seguinte (quota diária do YouTube, por exemplo, só volta amanhã mesmo).
     /// </summary>
     public int RateLimitDelaySeconds { get; init; } = 300;
+
+    /// <summary>
+    /// Segundos de long polls vazios seguidos que o consumer aguenta antes de encerrar a
+    /// drenagem e deixar o processo terminar (ver SqsFilaConsumer). Migração pra ECS Service de
+    /// longa duração (2026-07): sem esse grace period, o processo morria no primeiro poll vazio
+    /// (~WaitTimeSeconds) e o Service tinha que provisionar outra task Fargate do zero só pra
+    /// achar a fila ainda vazia segundos depois — custo de start-up sem necessidade. Default 180s
+    /// (3min); 0 desliga o grace period (encerra no primeiro poll vazio, comportamento antigo).
+    /// </summary>
+    public int IdleGracePeriodSeconds { get; init; } = 180;
 }
