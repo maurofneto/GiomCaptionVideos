@@ -10,7 +10,7 @@ using System.Text;
 
 namespace Giom.VideoManager.Infrastructure.OpenAI;
 
-public class DirectEmbeddingOptions
+public class OpenAiEmbeddingOptions
 {
     public string OpenAiApiKey { get; init; } = string.Empty;
     public string EmbeddingModel { get; init; } = "text-embedding-3-small";
@@ -37,7 +37,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
     /// </summary>
     private const string Origem = "OpenAI";
 
-    private readonly DirectEmbeddingOptions _options;
+    private readonly OpenAiEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
     private readonly ILogger<OpenAIEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
@@ -45,7 +45,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
     private readonly HttpClient _supabaseFunctions;
 
     public OpenAIEmbeddingService(
-        IOptions<DirectEmbeddingOptions> options,
+        IOptions<OpenAiEmbeddingOptions> options,
         IOptions<SupabaseOptions> supabaseOptions,
         IVideoChunkRepository chunkRepository,
         IHttpClientFactory httpClientFactory,

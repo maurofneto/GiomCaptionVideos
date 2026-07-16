@@ -3,6 +3,7 @@ using System.Text;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Resiliencia;
+using Giom.VideoManager.Infrastructure.Supabase;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -33,9 +34,11 @@ public class VoyageEmbeddingService : IEmbeddingService
     private readonly ILogger<VoyageEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly HttpClient _voyage;
+    private readonly HttpClient _supabaseFunctions;
 
     public VoyageEmbeddingService(
         IOptions<VoyageEmbeddingOptions> options,
+        IOptions<SupabaseOptions> supabaseOptions,
         IVideoChunkRepository chunkRepository,
         IHttpClientFactory httpClientFactory,
         ILogger<VoyageEmbeddingService> logger,
@@ -48,6 +51,15 @@ public class VoyageEmbeddingService : IEmbeddingService
 
         _voyage = httpClientFactory.CreateClient("voyage");
         _voyage.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+
+        // Apenas para chamar Edge Functions (buscar-similar) — mesmo padrão de
+        // OpenAIEmbeddingService, não acessa tabelas diretamente.
+        var sb = supabaseOptions.Value;
+        _supabaseFunctions = httpClientFactory.CreateClient("supabase-functions");
+        _supabaseFunctions.BaseAddress = new Uri(sb.Url);
+        _supabaseFunctions.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", sb.SecretKey);
+        _supabaseFunctions.DefaultRequestHeaders.Add("apikey", sb.SecretKey);
     }
 
     public async Task IndexarAsync(Video video, CancellationToken ct = default)
@@ -91,14 +103,55 @@ public class VoyageEmbeddingService : IEmbeddingService
         _logger.LogInformation("{VideoId} — {Chunks} chunks indexados com sucesso (Voyage)", video.Id, chunks.Count);
     }
 
-    // Desde a Feature #101 a Edge Function filtra por origem (não embeda mais server-side) —
-    // misturar embeddings Voyage/OpenAI deixou de ser um problema arquitetural. BuscarAsync só
-    // não está implementado ainda porque Voyage fica fora da cadeia de fallback por enquanto
-    // ("mantenha somente OpenAI") — sem uso real hoje. Seguiria o mesmo padrão de
-    // OpenAIEmbeddingService.BuscarAsync quando for necessário: gerar o embedding da pergunta
-    // aqui, enviar {pergunta, embedding, origem: "VoyageAI", ...} pra buscar-similar.
-    public Task<BuscaSemanticaResultado> BuscarAsync(string pergunta, string? area = null, string? canalId = null, int limite = 6, double threshold = 0.35, CancellationToken ct = default)
-        => throw new NotSupportedException("VoyageEmbeddingService.BuscarAsync ainda não implementado — Voyage está fora da cadeia de fallback nesta entrega (ver Feature #101).");
+    // Mesmo padrão de OpenAIEmbeddingService.BuscarAsync — embeda a pergunta aqui mesmo
+    // (client-side) e delega o resto (RRF híbrido, diversidade por aula) pra Edge Function
+    // buscar-similar, passando embedding+origem (Feature #101) — filtra por Origem="VoyageAI"
+    // antes de comparar vetores, nunca mistura com chunks embedados via OpenAI.
+    public async Task<BuscaSemanticaResultado> BuscarAsync(
+        string pergunta,
+        string? area = null,
+        string? canalId = null,
+        int limite = 6,
+        double threshold = 0.35,
+        CancellationToken ct = default)
+    {
+        var (embeddings, _) = await GerarEmbeddingsAsync([pergunta.AsMemory()], ct);
+        var embedding = embeddings[0];
+
+        var payload = new { pergunta, embedding, origem = Origem, area, limite, threshold, canal_id = canalId };
+        var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
+
+        var response = await _supabaseFunctions.PostAsync("functions/v1/buscar-similar", content, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("Falha na busca semântica (Voyage): {Status} — {Body}", response.StatusCode, body);
+            return new BuscaSemanticaResultado([], "Nenhuma aula relevante encontrada.");
+        }
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var result = JsonConvert.DeserializeAnonymousType(json, new
+        {
+            chunks = new[] { new
+            {
+                video_id     = "",
+                titulo       = "",
+                chunk_index  = 0,
+                conteudo     = "",
+                area         = (string?)null,
+                subcategoria = (string?)null,
+                similarity   = 0.0
+            }},
+            contexto_formatado = ""
+        });
+
+        var resultChunks = result?.chunks?
+            .Select(c => new ChunkSimilar(c.video_id, c.titulo, c.chunk_index, c.conteudo, c.area, c.subcategoria, c.similarity))
+            .ToList() ?? [];
+
+        return new BuscaSemanticaResultado(resultChunks, result?.contexto_formatado ?? "");
+    }
 
     private async Task<(List<float[]> Embeddings, int TokensTotais)> GerarEmbeddingsAsync(List<ReadOnlyMemory<char>> chunks, CancellationToken ct)
     {

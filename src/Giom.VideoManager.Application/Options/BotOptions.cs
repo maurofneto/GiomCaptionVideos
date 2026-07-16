@@ -10,4 +10,5 @@ public class BotOptions
     public string MensagemBoasVindas { get; init; } = "Olá! Pode mandar sua pergunta.";
     public string MensagemSobre { get; init; } = "Bot de perguntas e respostas.";
     public string MensagemLimpar { get; init; } = "Conversa reiniciada. Pode perguntar de novo.";
+    public string MensagemErro { get; init; } = "Desculpe, tive um problema técnico ao processar sua pergunta. Pode tentar de novo?";
 }

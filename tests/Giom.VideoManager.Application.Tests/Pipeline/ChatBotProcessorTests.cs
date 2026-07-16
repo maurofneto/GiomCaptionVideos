@@ -45,6 +45,7 @@ public class ChatBotProcessorTests
         public RagOptions Rag { get; set; } = new();
         public DebugMetricasOptions Debug { get; set; } = new();
         public HistoricoOptions HistoricoOpcoes { get; set; } = new();
+        public BotOptions BotOpcoes { get; set; } = new();
 
         public Ambiente()
         {
@@ -59,7 +60,8 @@ public class ChatBotProcessorTests
 
         public ChatBotProcessor CriarProcessor() => new(
             Channel, Embedding.Object, Agent.Object, Historico, Telemetria, Tracing, GuardRails, ContextoTelemetria,
-            Microsoft.Extensions.Options.Options.Create(Rag), Microsoft.Extensions.Options.Options.Create(Debug), Microsoft.Extensions.Options.Options.Create(HistoricoOpcoes), Logger);
+            Microsoft.Extensions.Options.Options.Create(Rag), Microsoft.Extensions.Options.Options.Create(Debug), Microsoft.Extensions.Options.Options.Create(HistoricoOpcoes),
+            Microsoft.Extensions.Options.Options.Create(BotOpcoes), Logger);
     }
 
     [Fact]
@@ -246,7 +248,11 @@ public class ChatBotProcessorTests
         var registro = Assert.Single(ambiente.Telemetria.Registros, r => r.Tipo == "bot_interacao");
         Assert.False(registro.Sucesso);
         Assert.Equal("1", registro.EntidadeId); // pergunta já tinha sido persistida antes da falha
-        Assert.Empty(ambiente.Channel.Respostas); // nenhuma resposta chegou a ser enviada
+
+        // Uma falha não pode deixar o aluno sem resposta nenhuma — o bot manda a mensagem de
+        // erro configurada em vez de simplesmente ficar em silêncio.
+        var resposta = Assert.Single(ambiente.Channel.Respostas);
+        Assert.Equal(ambiente.BotOpcoes.MensagemErro, resposta.Texto);
     }
 
     [Fact]
@@ -266,10 +272,11 @@ public class ChatBotProcessorTests
     }
 
     [Fact]
-    public async Task ProcessarMensagemAsync_QuandoBuscaRagFalhaAposATurnoJaPersistido_UsaOIdDoTurnoComoEntidadeId()
+    public async Task ProcessarMensagemAsync_QuandoBuscaRagFalha_DegradaSemContextoDeAulaEAindaAssimResponde()
     {
-        // BuscarAsync roda DEPOIS de AdicionarAsync — se falhar, o turno (com Id) já existe,
-        // então o fallback pro chatId (teste acima) não se aplica aqui.
+        // Uma falha isolada na busca RAG não pode derrubar o turno inteiro — o agente ainda
+        // responde (sem contexto de aula), em vez do aluno ficar sem resposta nenhuma por causa
+        // de uma falha isolada e recuperável (ex.: OpenAI fora do ar por um instante).
         var ambiente = new Ambiente();
         ambiente.Embedding
             .Setup(e => e.BuscarAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
@@ -277,9 +284,15 @@ public class ChatBotProcessorTests
 
         await ambiente.CriarProcessor().ProcessarMensagemAsync(new IncomingMessage(ChatId, "pergunta qualquer", "usuario"), CancellationToken.None);
 
-        var registro = Assert.Single(ambiente.Telemetria.Registros, r => r.Tipo == "bot_interacao");
-        Assert.False(registro.Sucesso);
-        Assert.Equal("1", registro.EntidadeId);
+        var registroBusca = Assert.Single(ambiente.Telemetria.Registros, r => r.Tipo == "busca_rag");
+        Assert.False(registroBusca.Sucesso);
+        Assert.Equal("1", registroBusca.EntidadeId); // turno já persistido antes da busca
+
+        var registroInteracao = Assert.Single(ambiente.Telemetria.Registros, r => r.Tipo == "bot_interacao");
+        Assert.True(registroInteracao.Sucesso); // degradado, mas o turno completou
+
+        ambiente.Agent.Verify(a => a.ResponderAsync(It.IsAny<string>(), It.IsAny<TurnoConversa>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<TurnoConversa>>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Single(ambiente.Channel.Respostas); // resposta do agente ainda chega ao aluno
     }
 
     [Fact]
