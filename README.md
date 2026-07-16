@@ -13,10 +13,14 @@ unificada via Sentry (traces/logs/métricas) e Helicone (proxy/sessões de LLM).
 
 ## O que o sistema faz
 
-1. **Pipeline de vídeos** (`Instituto.Worker` / `Ministerio.Worker`): descobre vídeos novos
-   nas playlists do canal → busca legenda/transcrição → gera resumo (Claude) → categoriza
-   (Instituto) → indexa embedding (Instituto, para RAG) → persiste no Supabase (Postgres +
-   pgvector). Roda como ECS Task sob demanda (run-once, não é um serviço de longa duração).
+1. **Pipeline de vídeos**: `Ingestao.Worker` descobre vídeos novos nas playlists dos dois
+   canais (dado-orientado via `canal_ingestao` no Supabase, não código por canal) e publica na
+   fila de Transcrição. Dali em diante, 5 workers de etapa genéricos (Transcrição/Resumo/
+   Categorização/Embedding/Orquestração) processam o vídeo — legenda/transcrição → resumo
+   (Claude) → categoriza → indexa embedding (RAG) → persiste no Supabase (Postgres +
+   pgvector). `Ingestao.Worker` roda como ECS Task sob demanda (schedule diário via
+   EventBridge); os 5 workers de etapa rodam como ECS Service de longa duração, escalando 0→N
+   por profundidade de fila (Application Auto Scaling) — ver `docs/ARCHITECTURE.md`.
 2. **Bot Telegram** (`AgenteInstituto.Worker`): persona "Timóteo", responde perguntas de
    alunos buscando contexto por RAG (busca híbrida vetor + full-text) no conteúdo indexado
    pelo pipeline. Roda como ECS Service de longa duração.
@@ -33,8 +37,12 @@ src/
   Giom.VideoManager.Composition         — composition root: liga tudo via appsettings (Provider plugável)
   Giom.VideoManager.Infrastructure      — kernel de infra compartilhado (helpers, base)
   Giom.VideoManager.Infrastructure.*    — um adapter por dependência externa (ver tabela abaixo)
-  Giom.VideoManager.Instituto.Worker    — entrypoint do worker do Instituto Giom
-  Giom.VideoManager.Ministerio.Worker   — entrypoint do worker do Ministério Giom
+  Giom.VideoManager.Ingestao.Worker     — descobre vídeos novos (Instituto + Ministério, dado-orientado)
+  Giom.VideoManager.Transcricao.Worker  — etapa: legenda/transcrição
+  Giom.VideoManager.Resumo.Worker       — etapa: resumo (Claude/fallback)
+  Giom.VideoManager.Categorizacao.Worker — etapa: categorização
+  Giom.VideoManager.Embedding.Worker    — etapa: indexação em embeddings (RAG)
+  Giom.VideoManager.Orquestracao.Worker — orquestrador central (decide próxima etapa por canal)
   Giom.VideoManager.AgenteInstituto.Worker — entrypoint do bot Telegram (Timóteo)
 tests/
   Giom.VideoManager.Testes.Comuns       — fakes/test doubles compartilhados
@@ -75,12 +83,12 @@ placeholders em branco com comentário indicando o path real no SSM
 (`/giom/{dev,prod}/{instituto,ministerio}/...`).
 
 ```bash
-# Instituto (processa vídeos + fila SQS/RabbitMq conforme Fila:Provider)
-cd src/Giom.VideoManager.Instituto.Worker
+# Ingestão (descobre vídeos novos, Instituto + Ministério, publica na fila de Transcrição)
+cd src/Giom.VideoManager.Ingestao.Worker
 ASPNETCORE_ENVIRONMENT=Development dotnet run
 
-# Ministério
-cd src/Giom.VideoManager.Ministerio.Worker
+# Um worker de etapa (mesmo padrão pra Resumo/Categorizacao/Embedding/Orquestracao)
+cd src/Giom.VideoManager.Transcricao.Worker
 ASPNETCORE_ENVIRONMENT=Development dotnet run
 
 # Bot (long-running)
