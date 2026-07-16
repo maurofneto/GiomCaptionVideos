@@ -189,8 +189,8 @@ desenho do autoscaling. Migração 2026-07: o gatilho anterior (Lambda `giom-fil
 run-to-completion dos workers — bug real ao vivo em 2026-07-15, mensagens redrivadas de uma DLQ
 ficaram presas 40+ minutos sem nenhum worker real pegá-las. Cada Service escala de 0 a N tasks
 por profundidade de fila SQS via Application Auto Scaling (target-tracking + step scaling de
-cold-start 0→1). A Lambda watchman continua no repo até o novo modelo ser validado em prod real
-(decommissioning é um passo separado, destrutivo, documentado no README acima).
+cold-start 0→1). **Lambda watchman decommissionada** (2026-07-16, dev e prod) depois de validar
+o modelo novo em produção real — nenhuma referência a ela sobra no código nem no pipeline.
 
 **IAM por convenção de nome**: a policy `giom-sqs-fila-videos` (inline em
 `giom-worker-task-role`) usa `Resource: arn:aws:sqs:us-east-1:798229612288:giom-videos-*` —

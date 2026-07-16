@@ -13,12 +13,12 @@ variables:
   # do pipeline (Pipelines > Edit > Variables), NÃO ficam neste arquivo nem em variable group.
   # User: giom-ci-deploy, permissão de push em qualquer repositório ECR "giom-*" (wildcard —
   # evita ter que editar a policy toda vez que um worker novo ganha repositório próprio, ver
-  # Feature #104), ecs:UpdateService nos services do AgenteInstituto e (migração 2026-07,
+  # Feature #104) e ecs:UpdateService nos services do AgenteInstituto e (migração 2026-07,
   # infra/ecs-services-etapas/) nos 10 Services de etapa (transcricao/resumo/categorizacao/
-  # embedding/orquestracao × dev/prod) e lambda:UpdateFunctionCode só na giom-fila-watchman
-  # (Lambda ainda presente até o decommissioning — ver infra/ecs-services-etapas/README.md).
-  # IAM do giom-ci-deploy precisa ser atualizada pra incluir os novos Services antes deste
-  # pipeline funcionar de ponta a ponta — não é feito automaticamente por este arquivo.
+  # embedding/orquestracao × dev/prod). A Lambda watchman (giom-fila-watchman/-dev) foi
+  # decommissionada nessa mesma migração — substituída por ECS Service + Application Auto
+  # Scaling, ver infra/ecs-services-etapas/README.md — por isso não há mais stage Lambda nem
+  # permissão lambda:UpdateFunctionCode aqui.
   - group: giom-aws
   #
   # branch dev publica recursos -dev (imagem :dev, service giom-agenteinstituto-dev-service);
@@ -43,10 +43,10 @@ variables:
 # resumo/diagrama do run, sem precisar abrir log nenhum pra saber o que rodou ou o que quebrou
 # (foi assim que a causa raiz do build 113 só apareceu depois de abrir o log inteiro).
 #
-# Ordem: Build (gate — se dotnet test falhar, nada mais roda) -> Migrations + Lambda (paralelas,
-# ambas só dependem do Build) -> Deploy 1..9, um por imagem Docker, todas em paralelo (só
-# dependem de Migrations, porque código novo pode depender de schema novo) -> Deploy Bot
-# (força o restart do bot, só depois de TODAS as imagens publicadas).
+# Ordem: Build (gate — se dotnet test falhar, nada mais roda) -> Migrations -> Deploy 1..9, um
+# por imagem Docker, todas em paralelo (só dependem de Migrations, porque código novo pode
+# depender de schema novo) -> Deploy Bot (força o restart do bot, só depois de TODAS as imagens
+# publicadas).
 stages:
   - stage: Build
     displayName: 'Build'
@@ -91,38 +91,6 @@ stages:
             displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
             env:
               SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
-
-  - stage: Lambda
-    displayName: 'Lambda'
-    dependsOn: Build
-    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
-    jobs:
-      - job: DeployLambda
-        displayName: 'Deploy $(LAMBDA_WATCHMAN_NAME)'
-        steps:
-          - script: |
-              command -v aws >/dev/null 2>&1 || pip install --user awscli
-              echo "##vso[task.prependpath]$HOME/.local/bin"
-            displayName: 'Garantir AWS CLI disponível'
-
-          # giom-fila-watchman (bug #113) — uma função POR AMBIENTE (giom-fila-watchman-dev /
-          # giom-fila-watchman, sem sufixo em prod — mesmo padrão assimétrico das task definitions
-          # ECS), cada uma só com Event Source Mapping nas filas do próprio ambiente. Antes era uma
-          # única função cobrindo as duas, mas isso misturava logs e triggers de dev/prod no mesmo
-          # lugar, dificultando diagnóstico. LAMBDA_WATCHMAN_NAME vem do variable group por branch
-          # (giom-dev/giom-prod). Deploy até agora era manual (aws lambda update-function-code na
-          # mão), perdendo versionamento real do que estava rodando em prod. Redeploy incondicional
-          # a cada run do pipeline é seguro e barato — update-function-code é idempotente (mesmo
-          # zip = novo CodeSha256 idêntico, sem efeito colateral) e não depende de build Docker, por
-          # isso roda em paralelo com Migrations/Deploy 1..9.
-          - script: |
-              cd infra/lambda-fila-watchman
-              zip -q function.zip lambda_function.py
-              aws lambda update-function-code --function-name $(LAMBDA_WATCHMAN_NAME) --zip-file fileb://function.zip --region $(AWS_REGION)
-            displayName: 'Deploy Lambda watchman ($(LAMBDA_WATCHMAN_NAME))'
-            env:
-              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
-              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
 
   - stage: Deploy1
     displayName: 'Deploy 1 — giom-ingestao'
