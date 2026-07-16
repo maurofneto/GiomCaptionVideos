@@ -5,6 +5,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Anthropic;
+using Giom.VideoManager.Infrastructure.Cohere;
 using Giom.VideoManager.Infrastructure.Feedback;
 using Giom.VideoManager.Infrastructure.Grok;
 using Giom.VideoManager.Infrastructure.GuardRails;
@@ -197,11 +198,11 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Embedding — cadeia de fallback (Feature #101), configurável via Embedding:FallbackChain
-    /// (default: só ["OpenAI"] por enquanto). Cada provider embeda a pergunta/os chunks do seu
-    /// próprio lado e marca a origem (VideoChunk.Origem) — o Supabase (Edge Function
-    /// buscar-similar) filtra por origem antes de comparar vetores, então adicionar um segundo
-    /// provider na cadeia (ex: "VoyageAI") não mistura espaços vetoriais incompatíveis, ao
-    /// contrário do que acontecia antes dessa mudança. Mesmo mecanismo de AddSummaryService.
+    /// (default: só ["OpenAI"] por enquanto; "VoyageAI"/"Cohere" também disponíveis). Cada
+    /// provider embeda a pergunta/os chunks do seu próprio lado e marca a origem
+    /// (VideoChunk.Origem) — a busca (IVideoChunkRepository.BuscarSimilaresAsync, Domain) filtra
+    /// por origem antes de comparar vetores, então adicionar um provider na cadeia não mistura
+    /// espaços vetoriais incompatíveis. Mesmo mecanismo de AddSummaryService.
     /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
@@ -214,6 +215,10 @@ public static class ServiceCollectionExtensions
                 case "VoyageAI":
                     services.AddVoyageEmbedding(config);
                     services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<VoyageEmbeddingService>());
+                    break;
+                case "Cohere":
+                    services.AddCohereEmbedding(config);
+                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<CohereEmbeddingService>());
                     break;
                 default: // OpenAI
                     services.AddOpenAiEmbedding(config);

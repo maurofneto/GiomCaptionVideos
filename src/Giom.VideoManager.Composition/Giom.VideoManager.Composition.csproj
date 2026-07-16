@@ -19,6 +19,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sentry\Giom.VideoManager.Infrastructure.Sentry.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sqs\Giom.VideoManager.Infrastructure.Sqs.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Voyage\Giom.VideoManager.Infrastructure.Voyage.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Cohere\Giom.VideoManager.Infrastructure.Cohere.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.RabbitMq\Giom.VideoManager.Infrastructure.RabbitMq.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets\Giom.VideoManager.Infrastructure.Secrets.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Aws\Giom.VideoManager.Infrastructure.Secrets.Aws.csproj" />

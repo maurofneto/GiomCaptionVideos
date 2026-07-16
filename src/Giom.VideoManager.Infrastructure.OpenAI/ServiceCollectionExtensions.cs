@@ -10,7 +10,7 @@ public static class ServiceCollectionExtensions
     private sealed class OpenAiHttpClientMarker;
 
     /// <summary>
-    /// Idempotente — chamado tanto por AddDirectEmbedding quanto por AddOpenAiSummary/
+    /// Idempotente — chamado tanto por AddOpenAiEmbedding quanto por AddOpenAiSummary/
     /// AddOpenAiCategorizacao (Feature #101), que podem coexistir sem colisão de registro.
     /// </summary>
     private static IServiceCollection AddOpenAiHttpClient(this IServiceCollection services)
@@ -31,15 +31,13 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Registra o tipo concreto (não a interface) — a Composition decide como este elo entra na
-    /// cadeia de fallback (Feature #101). A seção de config continua "DirectEmbedding" (não foi
-    /// renomeada junto com a classe) — o SSM já tem /giom/{env}/{app}/DirectEmbedding/OpenAiApiKey
-    /// provisionado, e renomear a seção quebraria esses secrets.
+    /// cadeia de fallback (Feature #101). A busca semântica delega a IVideoChunkRepository
+    /// (Domain) — este projeto nunca referencia Infrastructure.Supabase diretamente.
     /// </summary>
     public static IServiceCollection AddOpenAiEmbedding(this IServiceCollection services, IConfiguration config)
     {
-        services.Configure<DirectEmbeddingOptions>(config.GetSection("DirectEmbedding"));
+        services.Configure<OpenAiEmbeddingOptions>(config.GetSection("OpenAiEmbedding"));
         services.AddOpenAiHttpClient();
-        services.AddHttpClient("supabase-functions").AddStandardResilienceHandler();
         services.AddContextoTelemetria();
         services.AddSingleton<OpenAIEmbeddingService>();
         return services;

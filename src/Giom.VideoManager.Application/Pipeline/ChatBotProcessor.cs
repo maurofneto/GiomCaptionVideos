@@ -32,6 +32,7 @@ public class ChatBotProcessor(
     IOptions<RagOptions> ragOptions,
     IOptions<DebugMetricasOptions> debugOptions,
     IOptions<HistoricoOptions> historicoOptions,
+    IOptions<BotOptions> botOptions,
     ILogger<ChatBotProcessor> logger)
 {
     // Uma entrada por chat com processamento em andamento — permite cancelar a resposta
@@ -125,10 +126,24 @@ public class ChatBotProcessor(
 
             var buscaStopwatch = System.Diagnostics.Stopwatch.StartNew();
             BuscaSemanticaResultado busca;
-            using (trace.IniciarEtapa("busca_rag"))
+            var buscaOk = true;
+            try
             {
-                busca = await embeddingService.BuscarAsync(
-                    mensagem.Texto, canalId: ragOptions.Value.CanalId, limite: ragOptions.Value.Limite, threshold: ragOptions.Value.Threshold, ct: ct);
+                using (trace.IniciarEtapa("busca_rag"))
+                {
+                    busca = await embeddingService.BuscarAsync(
+                        mensagem.Texto, canalId: ragOptions.Value.CanalId, limite: ragOptions.Value.Limite, threshold: ragOptions.Value.Threshold, ct: ct);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Degrada em vez de derrubar o turno inteiro: sem contexto de aula o agente
+                // ainda consegue responder (avisando que não achou a aula), o que é melhor do
+                // que a pergunta ficar sem resposta nenhuma por uma falha isolada da busca.
+                buscaOk = false;
+                trace.MarcarErro(ex);
+                logger.LogError(ex, "Busca RAG falhou para {ChatId} — seguindo sem contexto de aula", mensagem.ChatId);
+                busca = new BuscaSemanticaResultado([], "Nenhuma aula relevante encontrada.");
             }
 
             if (busca.Chunks.Count == 0)
@@ -149,7 +164,7 @@ public class ChatBotProcessor(
                 Tipo: "busca_rag",
                 EntidadeId: turno.Id!.Value.ToString(),
                 TempoMs: buscaStopwatch.ElapsedMilliseconds,
-                Sucesso: true,
+                Sucesso: buscaOk,
                 Detalhes: new
                 {
                     chunks = busca.Chunks.Count,
@@ -233,6 +248,19 @@ public class ChatBotProcessor(
                 TempoMs: stopwatch.ElapsedMilliseconds,
                 Sucesso: false
             ), ct);
+
+            // Sem isso, uma falha em qualquer etapa (busca RAG, agente, etc.) deixava o aluno
+            // sem resposta nenhuma — silêncio total, pior ainda numa pergunta sensível. Usa
+            // CancellationToken.None: ct já pode estar cancelado (é o mesmo token do try acima),
+            // e essa mensagem de erro deve sair mesmo assim.
+            try
+            {
+                await channel.ResponderAsync(mensagem.ChatId, botOptions.Value.MensagemErro, ct: CancellationToken.None);
+            }
+            catch (Exception erroEnvio)
+            {
+                logger.LogError(erroEnvio, "Falha ao enviar mensagem de erro pra {ChatId}", mensagem.ChatId);
+            }
         }
         finally
         {
