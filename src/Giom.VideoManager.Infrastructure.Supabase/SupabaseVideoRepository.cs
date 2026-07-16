@@ -56,7 +56,7 @@ public class SupabaseVideoRepository : IVideoRepository
 
     public async Task<Video?> GetByIdAsync(string videoId, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/rest/v1/video?id=eq.{videoId}&select=*,transcricao(*),resumo(*,capitulo(*)),categoria_teologica(video_id,area,subcategoria,peso),video_chunk(chunk_index)", ct);
+        var response = await _http.GetAsync($"/rest/v1/video?id=eq.{videoId}&select=*,transcricao(*),resumo(*,capitulo(*)),categoria_teologica(video_id,area,subcategoria,peso),video_chunk(chunk_index,origem)", ct);
         if (!response.IsSuccessStatusCode) return null;
 
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -142,13 +142,14 @@ public class SupabaseVideoRepository : IVideoRepository
                 .OrderByDescending(c => c.Peso)
                 .ToList() ?? [],
             Chunks = video_chunk?
-                .Select(c => new VideoChunk { VideoId = id, ChunkIndex = c.chunk_index })
+                .Select(c => new VideoChunk { VideoId = id, ChunkIndex = c.chunk_index, Origem = c.origem })
                 .ToList() ?? []
         };
     }
 
-    // DTO leve — só carregamos o índice para saber se chunks existem, sem trazer conteúdo/embedding
-    private record VideoChunkIndexDto(int chunk_index);
+    // DTO leve — só carregamos índice e origem para saber se chunks existem por provedor, sem
+    // trazer conteúdo/embedding
+    private record VideoChunkIndexDto(int chunk_index, string origem);
 
     private record TranscricaoDto(string video_id, string conteudo, string formato, string origem, DateTime gerado_em)
     {
