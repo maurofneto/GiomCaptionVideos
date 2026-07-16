@@ -49,7 +49,7 @@ tests/
 | `Infrastructure.YouTube` | Descoberta de vídeo/playlist, legenda (`YouTubeCaption`/`YtDlpCaption`/`YouTubeTranscript`), OAuth Google |
 | `Infrastructure.Whisper` | Transcrição via Whisper local (fallback quando não há legenda) |
 | `Infrastructure.Anthropic` | Cliente Claude (resumo, categorização, bot) |
-| `Infrastructure.OpenAI` | Embeddings diretos (`DirectEmbedding`) |
+| `Infrastructure.OpenAI` | Embeddings diretos (`OpenAiEmbedding`) |
 | `Infrastructure.SummarizeTech` | Alternativa de resumo (provider plugável) |
 | `Infrastructure.Supabase` | Persistência (Postgres + pgvector), busca híbrida |
 | `Infrastructure.Mongo` | Memória de conversa do bot (alternativa) |
