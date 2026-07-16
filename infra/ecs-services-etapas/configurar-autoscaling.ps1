@@ -119,7 +119,11 @@ foreach ($etapa in @("transcricao", "resumo", "categorizacao", "embedding", "orq
         }
         ScaleOutCooldown = 60
         ScaleInCooldown  = 300
-    } | ConvertTo-Json -Depth 8 | Set-Content -Path $ttConfigPath -Encoding utf8
+    } | ConvertTo-Json -Depth 8 | Set-Variable -Name ttConfigJson
+    # Escrita via .NET direto, sem BOM -- Set-Content -Encoding utf8 no Windows PowerShell 5.1
+    # grava BOM, e o parser JSON do AWS CLI (Python) trava no BOM logo no 1o caractere (bug
+    # real, achado ao vivo rodando o script irmao criar-filas-faltantes.ps1).
+    [System.IO.File]::WriteAllText($ttConfigPath, $ttConfigJson, (New-Object System.Text.UTF8Encoding $false))
 
     aws application-autoscaling put-scaling-policy `
         --service-namespace ecs `
@@ -131,13 +135,18 @@ foreach ($etapa in @("transcricao", "resumo", "categorizacao", "embedding", "orq
         --region $region | Out-Null
 
     # --- Step scaling cold-start 0->1 ---
+    # MetricIntervalLowerBound=0 (nao UpperBound=0) -- o alarme e GreaterThanThreshold, entao o
+    # "breach amount" que a Application Auto Scaling recebe e POSITIVO (valor - limiar > 0).
+    # UpperBound=0 cobre so valores <= 0 (nunca bate com um breach positivo) -- bug real, achado
+    # ao vivo: a policy nunca tinha um degrau aplicavel e o scale-out simplesmente nao acontecia,
+    # mesmo com o alarme em ALARM e ActionsEnabled=true (nenhuma scaling activity era registrada).
     $stepPolicyArn = aws application-autoscaling put-scaling-policy `
         --service-namespace ecs `
         --scalable-dimension ecs:service:DesiredCount `
         --resource-id $resourceId `
         --policy-name "giom-$etapa$sufixo-cold-start" `
         --policy-type StepScaling `
-        --step-scaling-policy-configuration "AdjustmentType=ExactCapacity,StepAdjustments=[{MetricIntervalUpperBound=0,ScalingAdjustment=1}],Cooldown=60" `
+        --step-scaling-policy-configuration "AdjustmentType=ExactCapacity,StepAdjustments=[{MetricIntervalLowerBound=0,ScalingAdjustment=1}],Cooldown=60" `
         --region $region `
         --query "PolicyARN" --output text
 

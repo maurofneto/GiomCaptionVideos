@@ -1,12 +1,12 @@
 # ECS Services + Application Auto Scaling (workers de etapa)
 
-Substitui o padrão anterior (`infra/lambda-fila-watchman/`) — Lambda watchman que reagia a
-poll de SQS chamando `ecs.run_task` sob demanda — por **ECS Service de longa duração + Application
-Auto Scaling 0→N por profundidade de fila SQS**, por etapa/ambiente. Motivo: os workers seguem
-modelo run-to-completion (`SqsFilaConsumer` drena a fila e o processo termina sozinho), o que
-criava uma corrida estrutural entre a Lambda e o ciclo de vida real das tasks — confirmado ao
-vivo em 2026-07-15 (3 mensagens redrivadas de uma DLQ ficaram presas 40+ minutos sem nenhum
-worker real pegá-las).
+Substitui o padrão anterior (Lambda `giom-fila-watchman`/`-dev`, que reagia a poll de SQS
+chamando `ecs.run_task` sob demanda — **decommissionada por completo em 2026-07-16**, ver seção
+final) por **ECS Service de longa duração + Application Auto Scaling 0→N por profundidade de
+fila SQS**, por etapa/ambiente. Motivo: os workers seguem modelo run-to-completion
+(`SqsFilaConsumer` drena a fila e o processo termina sozinho), o que criava uma corrida
+estrutural entre a Lambda e o ciclo de vida real das tasks — confirmado ao vivo em 2026-07-15
+(3 mensagens redrivadas de uma DLQ ficaram presas 40+ minutos sem nenhum worker real pegá-las).
 
 ## Topologia — 1 Service por (etapa, ambiente)
 
@@ -82,16 +82,20 @@ configurável por `SqsOptions`) sem mensagem nenhuma, só então encerra e deixa
 terminar. Reduz o churn de start/stop de task Fargate e encolhe a janela morta entre uma task
 morrer e o autoscaling perceber fila não-vazia e subir outra.
 
-## Decommissioning da Lambda watchman
+## Decommissioning da Lambda watchman (concluído em 2026-07-16)
 
-Só depois de validar os 10 Services em prod real (ciclo completo de scale-out/scale-in
-observado). Ordem seguindo `../lambda-fila-watchman/`:
-1. Deletar os Event Source Mappings (`aws lambda delete-event-source-mapping`) — para os
-   triggers sem apagar mais nada.
-2. Janela de observação (mín. 24h) confirmando que os Services processam tudo sozinhos.
-3. Deletar as funções (`giom-fila-watchman`, `giom-fila-watchman-dev`) e a role
-   `giom-lambda-watchman-role`.
-4. Remover `infra/lambda-fila-watchman/` do repo e o stage `Lambda` do `azure-pipelines.yml`.
+Validado em dev e em prod real (dev: pipeline completo com 5 vídeos reais do Instituto; prod:
+teste controlado com 10 mensagens reais do Ministério/Instituto, incluindo um incidente real —
+a ESM de `transcricao-prod` ainda ativa durante o primeiro teste causou 10 mensagens na DLQ por
+correr contra o Service novo; corrigido desabilitando a ESM e redrivando a DLQ, confirmando o
+Service novo sozinho processa tudo sem erro). Ordem executada:
+1. Event Source Mappings deletadas (5 em dev, 1 em prod — a única que já existia antes desta
+   migração).
+2. Funções (`giom-fila-watchman`, `giom-fila-watchman-dev`) e a role
+   `giom-lambda-watchman-role` deletadas.
+3. `infra/lambda-fila-watchman/` removido do repo e o stage `Lambda` removido do
+   `azure-pipelines.yml`.
 
-Este é um passo destrutivo em infra real — pedir confirmação explícita separada antes de
-executar, não fazer automaticamente.
+Os EventBridge Schedules do modelo monolítico antigo (`giom-instituto-daily`,
+`giom-ministerio-daily`) também foram desabilitados (não deletados) no mesmo momento, pra evitar
+processamento duplicado enquanto o novo pipeline valida em prod.

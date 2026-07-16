@@ -29,20 +29,31 @@ $retencaoDlqSegundos = "1209600"
 # as 5). Rodar mesmo assim pras 5 -- e idempotente, e cobre o caso de uma fila dev ter sumido.
 $etapas = @("transcricao", "resumo", "categorizacao", "embedding", "etapa-concluida")
 
+$tmpDir = Join-Path $env:TEMP "giom-filas-$Ambiente"
+New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+
 function New-OrConvergeQueue {
     param([string]$Nome, [hashtable]$Atributos)
+
+    # JSON vai por arquivo (file://), nunca inline -- o PowerShell corrompe aspas duplas ao
+    # passar string JSON como argumento pra um executavel nativo (aws.exe), fazendo o
+    # --attributes chegar sem aspas nenhuma (bug real, achado ao vivo rodando este script).
+    # Escrita via .NET direto (nao Set-Content -Encoding utf8) -- Windows PowerShell 5.1 grava
+    # BOM com "utf8", e o parser JSON do AWS CLI (Python) trava no BOM logo no 1o caractere
+    # (outro bug real, achado ao vivo na mesma rodada).
+    $attrPath = Join-Path $tmpDir "$Nome-attrs.json"
+    $attrJson = $Atributos | ConvertTo-Json -Depth 6
+    [System.IO.File]::WriteAllText($attrPath, $attrJson, (New-Object System.Text.UTF8Encoding $false))
 
     $existente = aws sqs get-queue-url --queue-name $Nome --region $region --query QueueUrl --output text 2>$null
     if ($LASTEXITCODE -eq 0 -and $existente) {
         Write-Host "Fila $Nome ja existe -- convergindo atributos (idempotente)"
-        $attrJson = $Atributos | ConvertTo-Json -Compress
-        aws sqs set-queue-attributes --queue-url $existente --attributes $attrJson --region $region | Out-Null
+        aws sqs set-queue-attributes --queue-url $existente --attributes "file://$attrPath" --region $region | Out-Null
         return $existente
     }
 
     Write-Host "Criando fila $Nome"
-    $attrJson = $Atributos | ConvertTo-Json -Compress
-    $url = aws sqs create-queue --queue-name $Nome --attributes $attrJson --region $region --query QueueUrl --output text
+    $url = aws sqs create-queue --queue-name $Nome --attributes "file://$attrPath" --region $region --query QueueUrl --output text
     return $url
 }
 
@@ -60,4 +71,5 @@ foreach ($etapa in $etapas) {
     } | Out-Null
 }
 
+Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
 Write-Host "Filas de $Ambiente conferidas/criadas."
