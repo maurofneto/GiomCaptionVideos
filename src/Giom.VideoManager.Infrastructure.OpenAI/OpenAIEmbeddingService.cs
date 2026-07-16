@@ -98,7 +98,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
             tokensEntrada: tokensTotais,
             custoEstimadoUsd: OpenAiPricingCalculator.Calcular(_options.EmbeddingModel, tokensTotais));
 
-        await _chunkRepository.DeletarPorVideoAsync(video.Id, ct);
+        await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
             chunks.Select((mem, i) => new VideoChunk
             {
