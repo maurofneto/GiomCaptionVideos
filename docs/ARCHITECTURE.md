@@ -91,16 +91,16 @@ total, não 1 por canal × etapa) sem misturar secrets/billing entre canais nos 
 (a única credencial que de fato divergia entre Instituto/Ministério — `ClaudeResumo` — foi
 unificada; as demais já eram o mesmo valor ou nem existiam pro Ministério).
 
-**`InstitutoPipelineHandler` / `MinisterioPipelineHandler`** — desde a #104, encolheram pra só
-ingestão: implementam `IVideoHandler` (`IsRelevant` + `HandleAsync`, que publica na fila única
-de Transcrição) e mais nada. Não implementam nenhuma interface `IEtapaXHandler` — essas vivem
-nos workers de etapa, em classes genéricas (`TranscricaoEtapaHandler`, `ResumoEtapaHandler`,
-etc.) que não conhecem canal nenhum.
-
-**Histórico/rollback**: `InstitutoVideoHandler`/`MinisterioVideoHandler` (processamento
-monolítico antigo, legenda→resumo→categorização→embedding numa chamada só) e
-`IVideoProcessador` continuam no repositório, intocados, mas **não registrados em nenhum
-DI** — só documentação viva de como era antes da Feature #33, caso um rollback precise deles.
+**Ingestão** — desde a US #105, um único `Ingestao.Worker` cobre todos os canais via
+`CanalIngestaoVideoHandler` (dado-orientado: `IsRelevant` resolvido por `CanalIngestaoConfig.
+RelevanciaTipo` lido do Supabase, não por código por canal). Os projetos antigos
+`Instituto.Worker`/`Ministerio.Worker` (com `InstitutoPipelineHandler`/`MinisterioPipelineHandler`,
+que faziam a mesma coisa só que hard-coded por canal) e o processamento monolítico ainda mais
+antigo (`InstitutoVideoHandler`/`MinisterioVideoHandler`/`IVideoProcessador`, legenda→resumo→
+categorização→embedding numa chamada só, já morto/não registrado em DI havia tempo) foram
+**removidos do repositório em 2026-07-16**, depois de confirmar que o `Ingestao.Worker` já
+cobria os dois canais em prod (schedule único `giom-ingestao-daily` substituindo
+`giom-instituto-daily`/`giom-ministerio-daily`).
 
 **Topologia de execução**: cada worker de etapa é 1 processo, 1 consumer só (não mais
 `Task.WhenAll` de várias etapas no mesmo processo). Migração 2026-07
@@ -175,11 +175,11 @@ Azure/HashiCorp existem como adapters alternativos). Path por ambiente:
 
 ## Ambientes AWS
 
-Conta `798229612288`, região `us-east-1`, cluster ECS `giom-cluster`. `Instituto.Worker` e
-`Ministerio.Worker` rodam como ECS Task sob demanda (`aws ecs run-task`), sem agendamento
-automático configurado até o momento — cada run precisa ser disparada manualmente ou por
-alguma automação futura (ver Board, Feature "Escala e cobertura de vídeos" / US #20).
-`AgenteInstituto.Worker` roda como ECS Service de longa duração (um por ambiente).
+Conta `798229612288`, região `us-east-1`, cluster ECS `giom-cluster`. `Ingestao.Worker` roda
+como ECS Task sob demanda (`aws ecs run-task`), disparada pelo EventBridge Schedule
+`giom-ingestao-daily`/`giom-ingestao-dev-daily` (cron diário) — cobre Instituto e Ministério
+juntos via `canal_ingestao`. `AgenteInstituto.Worker` roda como ECS Service de longa duração
+(um por ambiente).
 
 Os 5 workers de etapa (Transcrição/Resumo/Categorização/Embedding/Orquestração) também rodam
 como **ECS Service de longa duração**, um por (etapa, ambiente) — ver

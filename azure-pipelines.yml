@@ -105,32 +105,6 @@ stages:
               serviceName: giom-ingestao
               dockerfilePath: src/Giom.VideoManager.Ingestao.Worker/Dockerfile
 
-  - stage: Deploy2
-    displayName: 'Deploy 2 — giom-instituto'
-    dependsOn: Migrations
-    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
-    jobs:
-      - job: BuildEPush
-        displayName: 'Build e push'
-        steps:
-          - template: pipelines/templates/deploy-imagem.yml
-            parameters:
-              serviceName: giom-instituto
-              dockerfilePath: src/Giom.VideoManager.Instituto.Worker/Dockerfile
-
-  - stage: Deploy3
-    displayName: 'Deploy 3 — giom-ministerio'
-    dependsOn: Migrations
-    condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
-    jobs:
-      - job: BuildEPush
-        displayName: 'Build e push'
-        steps:
-          - template: pipelines/templates/deploy-imagem.yml
-            parameters:
-              serviceName: giom-ministerio
-              dockerfilePath: src/Giom.VideoManager.Ministerio.Worker/Dockerfile
-
   - stage: Deploy4
     displayName: 'Deploy 4 — giom-agenteinstituto'
     dependsOn: Migrations
@@ -271,7 +245,7 @@ stages:
 
   - stage: DeployBot
     displayName: 'Deploy Bot'
-    dependsOn: [Deploy1, Deploy2, Deploy3, Deploy4, Deploy5, Deploy6, Deploy7, Deploy8, Deploy9]
+    dependsOn: [Deploy1, Deploy4, Deploy5, Deploy6, Deploy7, Deploy8, Deploy9]
     condition: or(eq(variables['Build.SourceBranchName'], 'master'), eq(variables['Build.SourceBranchName'], 'dev'))
     jobs:
       - job: ForcarNovoDeploy
