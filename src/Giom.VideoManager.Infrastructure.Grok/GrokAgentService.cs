@@ -3,6 +3,7 @@ using System.Text;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -95,6 +96,7 @@ public class GrokAgentService : IAgentService
             modelo: _options.Model,
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
+            custoEstimadoUsd: PricingCalculator.Calcular("Grok", _options.Model, result?.usage?.prompt_tokens, result?.usage?.completion_tokens),
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason, incerteza = texto != null && _incertezaDetector.ContemIncerteza(texto) },
             requestIdExterno: requestId);
 

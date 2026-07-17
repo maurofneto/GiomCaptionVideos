@@ -4,7 +4,7 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Resumo.Worker;
 using Giom.VideoManager.Testes.Comuns;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -26,6 +26,7 @@ public class ResumoEtapaHandlerTests
         public FakeFilaPublisher<EtapaConcluidaMensagem> EtapaConcluidaPublisher { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeTracingService Tracing { get; } = new();
+        public FakeLogger<ResumoEtapaHandler> Logger { get; } = new();
 
         public ResumoEtapaHandler CriarHandler()
         {
@@ -38,7 +39,7 @@ public class ResumoEtapaHandlerTests
                 EtapaConcluidaPublisher,
                 SessionContext,
                 Tracing,
-                NullLogger<ResumoEtapaHandler>.Instance);
+                Logger);
         }
     }
 
@@ -68,5 +69,17 @@ public class ResumoEtapaHandlerTests
 
         ambiente.ResumoService.Verify(r => r.GerarResumoAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Single(ambiente.EtapaConcluidaPublisher.Publicadas);
+    }
+
+    [Fact]
+    public async Task ProcessarAsync_SemTranscricao_LogaWarningExplicito()
+    {
+        // Bug #123: sem este log, o pulo era silencioso — nem WRN nem INF.
+        var ambiente = new Ambiente();
+        var video = CriarVideo();
+
+        await ((IEtapaResumoHandler)ambiente.CriarHandler()).ProcessarAsync(video);
+
+        Assert.Contains(ambiente.Logger.Entradas, e => e.Nivel == LogLevel.Warning && e.Mensagem.Contains("sem transcrição", StringComparison.OrdinalIgnoreCase));
     }
 }

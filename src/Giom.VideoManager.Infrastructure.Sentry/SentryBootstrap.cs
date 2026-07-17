@@ -46,6 +46,11 @@ public static class SentryBootstrap
 
         var tracerProvider = global::OpenTelemetry.Sdk.CreateTracerProviderBuilder()
             .AddSource(GiomActivitySource.Name)
+            // Sem isso, a chamada HTTP de verdade pro provedor (Claude/OpenAI/Voyage/Cohere/
+            // YouTube) acontecia DENTRO do Span da etapa (IniciarEtapaAtual) sem virar Span
+            // filho — a etapa aparecia como caixa-preta no Sentry, sem visibilidade de
+            // método/host/status/duração da chamada externa em si.
+            .AddHttpClientInstrumentation()
             .AddSentry()
             .Build();
 

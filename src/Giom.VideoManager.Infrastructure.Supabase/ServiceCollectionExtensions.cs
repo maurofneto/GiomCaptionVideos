@@ -1,6 +1,8 @@
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Giom.VideoManager.Infrastructure.Supabase;
 
@@ -14,7 +16,7 @@ public static class ServiceCollectionExtensions
             return services;
 
         services.AddSingleton<SupabaseHttpClientMarker>();
-        services.AddHttpClient("supabase").AddStandardResilienceHandler();
+        services.AddHttpClient("supabase").AddStandardResilienceHandler(options => options.RegistrarEventoDeRetryNoSpan("Supabase"));
         return services;
     }
 
@@ -76,6 +78,20 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
         services.AddSingleton<IEtapaProvedorConfigRepository, SupabaseEtapaProvedorConfigRepository>();
+        return services;
+    }
+
+    /// <summary>
+    /// Farol de rate limit por provedor (Bug #122) — token bucket compartilhado via Postgres
+    /// (tabela provedor_rate_limit). TryAddSingleton: chamado uma vez por provedor de embedding
+    /// que precisa dele (Voyage, Cohere) — idempotente, seguro chamar mais de uma vez na mesma
+    /// composição sem duplicar a instância.
+    /// </summary>
+    public static IServiceCollection AddSupabaseFarolRateLimiter(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
+        services.TryAddSingleton<IFarolRateLimiter, SupabaseFarolRateLimiter>();
         return services;
     }
 }

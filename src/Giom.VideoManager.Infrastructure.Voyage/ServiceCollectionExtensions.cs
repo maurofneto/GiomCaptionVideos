@@ -1,4 +1,5 @@
 using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
@@ -16,7 +17,7 @@ public static class ServiceCollectionExtensions
         {
             client.BaseAddress = new Uri("https://api.voyageai.com/");
             client.Timeout = TimeSpan.FromMinutes(5);
-        }).AddStandardResilienceHandler();
+        }).AddStandardResilienceHandler(options => options.RegistrarEventoDeRetryNoSpan("VoyageAI"));
 
         services.AddContextoTelemetria();
         services.AddSingleton<VoyageEmbeddingService>();

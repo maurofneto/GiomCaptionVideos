@@ -105,9 +105,11 @@ using var host = Host.CreateDefaultBuilder(args)
         // faz em produção — só publica na fila de Transcrição (Feature #104).
         services.AddSingleton<Func<string, IVideoHandler>>(sp =>
         {
+            var videoRepository = sp.GetRequiredService<IVideoRepository>();
             var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
             var sessionContext = sp.GetRequiredService<ISessionContext>();
             var tracingService = sp.GetRequiredService<ITracingService>();
+            var logger = sp.GetRequiredService<ILogger<CanalIngestaoVideoHandler>>();
             var canalPorId = canaisDeTeste.ToDictionary(c => c.ChannelId);
             var cache = new Dictionary<string, IVideoHandler>();
 
@@ -115,7 +117,7 @@ using var host = Host.CreateDefaultBuilder(args)
             {
                 if (!cache.TryGetValue(channelId, out var handler))
                 {
-                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], transcricaoPublisher, sessionContext, tracingService);
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], videoRepository, transcricaoPublisher, sessionContext, tracingService, logger);
                     cache[channelId] = handler;
                 }
                 return handler;

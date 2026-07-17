@@ -1,5 +1,6 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Precos;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -96,7 +97,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
             provedor: "OpenAI",
             modelo: _options.EmbeddingModel,
             tokensEntrada: tokensTotais,
-            custoEstimadoUsd: OpenAiPricingCalculator.Calcular(_options.EmbeddingModel, tokensTotais));
+            custoEstimadoUsd: PricingCalculator.Calcular("OpenAI", _options.EmbeddingModel, tokensTotais));
 
         await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
@@ -132,7 +133,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
             provedor: "OpenAI",
             modelo: _options.EmbeddingModel,
             tokensEntrada: tokensTotais,
-            custoEstimadoUsd: OpenAiPricingCalculator.Calcular(_options.EmbeddingModel, tokensTotais));
+            custoEstimadoUsd: PricingCalculator.Calcular("OpenAI", _options.EmbeddingModel, tokensTotais));
 
         return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
     }
