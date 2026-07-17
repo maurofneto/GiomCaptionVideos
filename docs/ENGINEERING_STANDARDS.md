@@ -64,6 +64,29 @@
 - Preferir `--query` do AWS CLI pra filtrar no servidor em vez de trazer o JSON inteiro e
   filtrar depois (ver `CLAUDE.md`, seção de economia de tokens).
 
+## Migrations (Supabase)
+
+- **Regra definitiva (ver Task #108 e incidente real de 2026-07-17):** o histórico remoto que
+  `supabase db push` consulta (tabela `supabase_migrations.schema_migrations`) casa migrations
+  com arquivos locais **só pelo timestamp no nome do arquivo** — nunca pelo conteúdo. Se você
+  aplicar uma mudança de schema via MCP do Supabase (`apply_migration`) — o caminho mais comum
+  neste projeto pra iterar rápido em dev — o MCP gera o próprio timestamp (hora exata da
+  chamada). Ao commitar o arquivo `.sql` correspondente no `supabase/migrations/`, o nome do
+  arquivo **tem que usar exatamente esse mesmo timestamp**, não um escolhido à mão. Pra
+  descobrir o timestamp real que ficou gravado: `list_migrations` (MCP) ou
+  `supabase migration list` (CLI) logo depois de aplicar.
+  - **Sintoma de quando isso já deu errado**: `supabase db push` (rodado no pipeline, stage
+    `Migrations`) falha com "Remote migration versions not found in local migrations
+    directory" — nesse caso, compare `list_migrations` (remoto) com `ls supabase/migrations/`
+    (local); a correção geralmente é só renomear (`git mv`) o arquivo local pro timestamp que o
+    remoto já tem — nunca usar `supabase migration repair` sem entender que ele só edita a
+    tabela de histórico, não desfaz nem refaz o DDL que já rodou (migrations não-idempotentes,
+    ex.: `DROP CONSTRAINT` sem `IF EXISTS`, falhariam se reaplicadas).
+  - Prefira, quando a mudança não precisar de iteração ao vivo contra o banco: escrever o
+    arquivo de migration primeiro (com o timestamp escolhido você mesmo), commitar, e deixar
+    `supabase db push` (local ou no pipeline) aplicar — isso elimina a categoria inteira de
+    descompasso, porque o arquivo passa a ser a única fonte da verdade desde o início.
+
 ## Observabilidade — o que instrumentar
 
 - Toda etapa nova da pipeline (nova etapa de processamento, novo tipo de chamada LLM) ganha
