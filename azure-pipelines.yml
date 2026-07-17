@@ -84,7 +84,16 @@ stages:
           - script: npm install -g supabase
             displayName: 'Instalar Supabase CLI'
 
+          # `set -e`: sem isso, a task CmdLine (ao contrário da task Bash) NÃO para no primeiro
+          # comando que falha — o exit code reportado é só o do ÚLTIMO comando do script. Bug
+          # real encontrado ao vivo: `supabase db push` falhou (histórico de migrations
+          # dessincronizado, ver docs/ENGINEERING_STANDARDS.md#migrations) mas o script seguiu
+          # pro `functions deploy` como se nada tivesse acontecido — só apareceu como falha
+          # porque o deploy TAMBÉM falhou por outro motivo (rate limit do Docker Hub puxando a
+          # imagem do edge-runtime). Se o deploy tivesse funcionado, o pipeline reportaria
+          # sucesso com o schema desatualizado, silenciosamente.
           - script: |
+              set -e
               supabase link --project-ref $(SUPABASE_PROJECT_REF)
               supabase db push
               supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
