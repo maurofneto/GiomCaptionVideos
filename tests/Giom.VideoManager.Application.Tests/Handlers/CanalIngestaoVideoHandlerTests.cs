@@ -4,6 +4,8 @@ using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Testes.Comuns;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Giom.VideoManager.Application.Tests.Handlers;
@@ -27,12 +29,18 @@ public class CanalIngestaoVideoHandlerTests
 
     private sealed class Ambiente
     {
+        public Mock<IVideoRepository> VideoRepository { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> TranscricaoPublisher { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeTracingService Tracing { get; } = new();
 
-        public CanalIngestaoVideoHandler CriarHandler(CanalIngestaoConfig canal) =>
-            new(canal, TranscricaoPublisher, SessionContext, Tracing);
+        public CanalIngestaoVideoHandler CriarHandler(CanalIngestaoConfig canal)
+        {
+            VideoRepository.Setup(r => r.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Video?)null);
+
+            return new(canal, VideoRepository.Object, TranscricaoPublisher, SessionContext, Tracing, NullLogger<CanalIngestaoVideoHandler>.Instance);
+        }
     }
 
     [Theory]
@@ -80,5 +88,37 @@ public class CanalIngestaoVideoHandlerTests
         Assert.Same(video, mensagem.Video);
         Assert.Same(sessao, mensagem.Sessao);
         Assert.Equal("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", mensagem.TraceParent);
+    }
+
+    [Fact]
+    public async Task HandleAsync_VideoJaProcessado_NaoPublicaDeNovo()
+    {
+        var ambiente = new Ambiente();
+        var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
+        var video = CriarVideo();
+        var handler = ambiente.CriarHandler(canal);
+        // Setup específico depois de CriarHandler — o catch-all (It.IsAny) montado lá dentro
+        // venceria se viesse por último (Moq resolve overlaps pelo setup mais recente).
+        ambiente.VideoRepository.Setup(r => r.GetByIdAsync(video.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Video { Id = video.Id, Title = video.Title, ProcessedAt = DateTime.UtcNow });
+
+        await ((IVideoHandler)handler).HandleAsync(video);
+
+        Assert.Empty(ambiente.TranscricaoPublisher.Publicadas);
+    }
+
+    [Fact]
+    public async Task HandleAsync_VideoSemProcessedAt_Publica()
+    {
+        var ambiente = new Ambiente();
+        var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
+        var video = CriarVideo();
+        var handler = ambiente.CriarHandler(canal);
+        ambiente.VideoRepository.Setup(r => r.GetByIdAsync(video.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Video { Id = video.Id, Title = video.Title, ProcessedAt = null });
+
+        await ((IVideoHandler)handler).HandleAsync(video);
+
+        Assert.Single(ambiente.TranscricaoPublisher.Publicadas);
     }
 }

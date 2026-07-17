@@ -37,6 +37,13 @@ public class ResumoEtapaHandler(
             video.Resumo = await resumoService.GerarResumoAsync(video, ct);
             logger.LogInformation("{Canal} — resumo gerado: {Title}", video.ChannelTitle, video.Title);
         }
+        else if (video.Resumo == null)
+        {
+            // Bug #123: sem este log, o pulo era silencioso — video.ProcessedAt acabava marcado
+            // como se o vídeo tivesse sido processado com sucesso, sem nenhum rastro de por que
+            // não tem resumo (só descobrível cruzando processed_at com resumo vazio na unha).
+            logger.LogWarning("{Canal} — sem transcrição disponível, pulando resumo: {Title}", video.ChannelTitle, video.Title);
+        }
 
         await videoRepository.UpsertAsync(video, ct);
 

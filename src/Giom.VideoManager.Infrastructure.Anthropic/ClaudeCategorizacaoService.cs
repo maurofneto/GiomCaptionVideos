@@ -6,6 +6,7 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
+using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -83,7 +84,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoProvedorService
             modelo: modelo,
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
-            custoEstimadoUsd: AnthropicPricingCalculator.Calcular(modelo, response.Usage?.InputTokens, response.Usage?.OutputTokens),
+            custoEstimadoUsd: PricingCalculator.Calcular("Claude", modelo, response.Usage?.InputTokens, response.Usage?.OutputTokens),
             detalhes: new { stopReason = response.StopReason });
 
         if (string.IsNullOrWhiteSpace(json)) return [];
