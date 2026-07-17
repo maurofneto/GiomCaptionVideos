@@ -2,6 +2,7 @@ using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -87,7 +88,7 @@ public class ClaudeAvaliadorIAService : IAvaliadorIAService
 
             tokensEntrada = response.Usage?.InputTokens;
             tokensSaida = response.Usage?.OutputTokens;
-            custo = AnthropicPricingCalculator.Calcular(_options.Model, tokensEntrada, tokensSaida);
+            custo = PricingCalculator.Calcular("Claude", _options.Model, tokensEntrada, tokensSaida);
 
             var parseado = JsonConvert.DeserializeAnonymousType(json, new { aprovado = true, motivo = (string?)null });
             resultado = new AvaliacaoIA(parseado?.aprovado ?? true, parseado?.motivo);

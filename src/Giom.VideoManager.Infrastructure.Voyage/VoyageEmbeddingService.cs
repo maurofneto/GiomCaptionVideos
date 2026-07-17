@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Precos;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -38,6 +39,7 @@ public class VoyageEmbeddingService : IEmbeddingService
 
     private readonly VoyageEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
+    private readonly IFarolRateLimiter _farol;
     private readonly ILogger<VoyageEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly HttpClient _voyage;
@@ -45,12 +47,14 @@ public class VoyageEmbeddingService : IEmbeddingService
     public VoyageEmbeddingService(
         IOptions<VoyageEmbeddingOptions> options,
         IVideoChunkRepository chunkRepository,
+        IFarolRateLimiter farol,
         IHttpClientFactory httpClientFactory,
         ILogger<VoyageEmbeddingService> logger,
         IContextoTelemetria contextoTelemetria)
     {
         _options         = options.Value;
         _chunkRepository = chunkRepository;
+        _farol           = farol;
         _logger          = logger;
         _contextoTelemetria = contextoTelemetria;
 
@@ -82,7 +86,8 @@ public class VoyageEmbeddingService : IEmbeddingService
         _contextoTelemetria.Registrar(
             provedor: "VoyageAI",
             modelo: _options.Model,
-            tokensEntrada: tokensTotais);
+            tokensEntrada: tokensTotais,
+            custoEstimadoUsd: PricingCalculator.Calcular("VoyageAI", _options.Model, tokensTotais));
 
         await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
@@ -115,7 +120,8 @@ public class VoyageEmbeddingService : IEmbeddingService
         _contextoTelemetria.Registrar(
             provedor: "VoyageAI",
             modelo: _options.Model,
-            tokensEntrada: tokensTotais);
+            tokensEntrada: tokensTotais,
+            custoEstimadoUsd: PricingCalculator.Calcular("VoyageAI", _options.Model, tokensTotais));
 
         return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
     }
@@ -132,6 +138,17 @@ public class VoyageEmbeddingService : IEmbeddingService
             var payload = new { model = _options.Model, input = batch };
             var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
 
+            // Bug #122: sem o farol, N tasks concorrentes (autoscaling) disparavam batches ao
+            // mesmo tempo contra os limites de RPM/TPM do Voyage, estourando 429 mesmo com o
+            // retry do Polly — o farol serializa isso entre TODAS as tasks, não só threads
+            // locais. As duas dimensões são pedidas juntas (tudo-ou-nada): o 429 real capturado
+            // no Bug #122 citava "3 RPM and 10K TPM" como limites independentes do Voyage.
+            var tokensEstimados = batch.Sum(t => t.Length) / 4.0;
+            await _farol.AguardarAsync("VoyageAI", new Dictionary<string, double>
+            {
+                [RateLimiterDimensao.Requisicoes] = 1,
+                [RateLimiterDimensao.Tokens] = tokensEstimados
+            }, ct);
             var response = await _voyage.PostAsync("v1/embeddings", content, ct);
             var json = await response.Content.ReadAsStringAsync(ct);
 

@@ -219,10 +219,12 @@ public static class ServiceCollectionExtensions
             switch (nome)
             {
                 case "VoyageAI":
+                    services.AddSupabaseFarolRateLimiter(config); // Bug #122 — idempotente, seguro chamar de novo se Cohere também estiver na cadeia
                     services.AddVoyageEmbedding(config);
                     services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<VoyageEmbeddingService>());
                     break;
                 case "Cohere":
+                    services.AddSupabaseFarolRateLimiter(config); // Bug #122
                     services.AddCohereEmbedding(config);
                     services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<CohereEmbeddingService>());
                     break;
@@ -336,9 +338,11 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<Func<string, IVideoHandler>>(sp =>
         {
+            var videoRepository = sp.GetRequiredService<IVideoRepository>();
             var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
             var sessionContext = sp.GetRequiredService<ISessionContext>();
             var tracingService = sp.GetRequiredService<ITracingService>();
+            var logger = sp.GetRequiredService<ILogger<CanalIngestaoVideoHandler>>();
             var canalPorId = canaisValidos.ToDictionary(c => c.ChannelId);
             var cache = new Dictionary<string, IVideoHandler>();
 
@@ -346,7 +350,7 @@ public static class ServiceCollectionExtensions
             {
                 if (!cache.TryGetValue(channelId, out var handler))
                 {
-                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], transcricaoPublisher, sessionContext, tracingService);
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], videoRepository, transcricaoPublisher, sessionContext, tracingService, logger);
                     cache[channelId] = handler;
                 }
                 return handler;
