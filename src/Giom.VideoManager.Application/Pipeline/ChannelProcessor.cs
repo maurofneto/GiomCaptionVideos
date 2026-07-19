@@ -96,6 +96,7 @@ public class ChannelProcessor(
         var channelKey       = config.ChannelId ?? "mine";
         var pageToken        = await progressoRepository.GetLastPageTokenAsync(channelKey, playlistId, ct);
         var lastProcessedDate = await progressoRepository.GetLastProcessedDateAsync(channelKey, playlistId, ct);
+        var paginaOffset     = await progressoRepository.GetPaginaOffsetAsync(channelKey, playlistId, ct);
 
         bool applyDateFilter = pageToken == null;
 
@@ -123,18 +124,26 @@ public class ChannelProcessor(
             var page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, maxVideosPerRun), pageToken, ct);
             if (page.Videos.Count == 0) break;
 
-            foreach (var video in page.Videos)
+            // Bug real (achado ao vivo, 2026-07-18/19): MaxVideosPerRun é um teto DURO — a
+            // primeira versão deste fix (Bug #125) deixava a página terminar inteira mesmo
+            // depois de bater o teto, o que estourava o limite (ex.: teto=2 processando 3) e
+            // isso não é aceitável com rate limit real do YouTube/downstream. Mas simplesmente
+            // cortar no meio (o bug ORIGINAL) e avançar pra próxima página também não serve —
+            // os vídeos que sobrariam ficariam pra trás pra sempre. A correção certa: quando o
+            // teto é batido no meio da página, NÃO avança pageToken (fica na mesma página) e
+            // guarda paginaOffset = índice do primeiro vídeo ainda não avaliado — a próxima
+            // execução refaz a MESMA página, pula direto pro índice salvo (sem re-gastar cota
+            // reavaliando o que já foi visto) e só avança pra próxima página quando o laço
+            // percorrer o restante dela inteiro sem bater no teto de novo.
+            var paginaEsgotada = true;
+
+            for (var indice = paginaOffset; indice < page.Videos.Count; indice++)
             {
-                // Bug real (achado ao vivo, 2026-07-18): antes esta condição também cortava o
-                // foreach assim que processedIds batia em maxVideosPerRun — no meio da página,
-                // não só entre páginas. Como o pageToken avança pra próxima página logo depois
-                // do foreach (independente de ele ter sido percorrido inteiro ou cortado), os
-                // vídeos que sobravam na página atual nunca eram avaliados e ficavam pra trás
-                // pra sempre — a troca de página não esperava "processar" todos os vídeos da
-                // página corrente. Só a condição de cancelamento interrompe o foreach agora; o
-                // teto de vídeos por run é respeitado pelo laço externo (linha do while), que só
-                // decide buscar OUTRA página depois que a atual foi inteiramente avaliada.
-                if (ct.IsCancellationRequested) break;
+                if (ct.IsCancellationRequested) { paginaEsgotada = false; paginaOffset = indice; break; }
+
+                if (processedIds.Count >= maxVideosPerRun) { paginaEsgotada = false; paginaOffset = indice; break; }
+
+                var video = page.Videos[indice];
 
                 if (applyDateFilter && video.UploadedAt <= (filtroDataBase ?? DateTime.MinValue)) continue;
 
@@ -167,12 +176,23 @@ public class ChannelProcessor(
                 await Task.Delay(delayEntreVideosMs, ct);
             }
 
-            pageToken = page.NextPageToken;
-            await progressoRepository.SaveProgressoAsync(channelKey, playlistId, pageToken, lastProcessedDate, ct);
+            if (paginaEsgotada)
+            {
+                pageToken = page.NextPageToken;
+                paginaOffset = 0;
+            }
+            else
+            {
+                logger.LogInformation("Canal {Name} — teto de {Max} atingido no meio da página (retomando no índice {Indice} na próxima execução)",
+                    config.Name, maxVideosPerRun, paginaOffset);
+            }
 
-            logger.LogInformation("Canal {Name} — página processada (próxima página: {NextPageToken})", config.Name, pageToken ?? "fim");
+            await progressoRepository.SaveProgressoAsync(channelKey, playlistId, pageToken, lastProcessedDate, paginaOffset, ct);
 
-            if (string.IsNullOrEmpty(pageToken))
+            logger.LogInformation("Canal {Name} — página processada (próxima página: {NextPageToken})",
+                config.Name, paginaEsgotada ? (pageToken ?? "fim") : "mesma página (retomando)");
+
+            if (paginaEsgotada && string.IsNullOrEmpty(pageToken))
             {
                 // Fim da playlist — sem isso, o while continuava rodando (processedIds.Count
                 // ainda < MaxVideosPerRun) e reiniciava a paginação do zero pra sempre, num

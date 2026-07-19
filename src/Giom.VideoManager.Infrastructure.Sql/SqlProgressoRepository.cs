@@ -45,29 +45,46 @@ public class SqlProgressoRepository : IProgressoRepository
         return result != DBNull.Value && result != null ? (DateTime?)result : null;
     }
 
-    public async Task SaveProgressoAsync(string channelKey, string playlistId, string? pageToken, DateTime? maxProcessedDate, CancellationToken ct = default)
+    public async Task<int> GetPaginaOffsetAsync(string channelKey, string playlistId, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = new SqlCommand(
+            "SELECT PaginaOffset FROM ProcessamentoProgresso WHERE ChannelKey=@ChannelKey AND PlaylistId=@PlaylistId",
+            conn);
+        cmd.Parameters.AddWithValue("@ChannelKey", channelKey);
+        cmd.Parameters.AddWithValue("@PlaylistId", playlistId);
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result != DBNull.Value && result != null ? (int)result : 0;
+    }
+
+    public async Task SaveProgressoAsync(string channelKey, string playlistId, string? pageToken, DateTime? maxProcessedDate, int paginaOffset, CancellationToken ct = default)
     {
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
 
         await using var cmd = new SqlCommand(
             @"MERGE ProcessamentoProgresso AS target
-              USING (VALUES (@ChannelKey, @PlaylistId, @LastPageToken, @LastProcessedDate, GETDATE()))
-                AS source (ChannelKey, PlaylistId, LastPageToken, LastProcessedDate, LastExecutionDate)
+              USING (VALUES (@ChannelKey, @PlaylistId, @LastPageToken, @LastProcessedDate, @PaginaOffset, GETDATE()))
+                AS source (ChannelKey, PlaylistId, LastPageToken, LastProcessedDate, PaginaOffset, LastExecutionDate)
               ON target.ChannelKey = source.ChannelKey AND target.PlaylistId = source.PlaylistId
               WHEN MATCHED THEN UPDATE SET
                 LastPageToken=source.LastPageToken,
                 LastProcessedDate=source.LastProcessedDate,
+                PaginaOffset=source.PaginaOffset,
                 LastExecutionDate=source.LastExecutionDate
               WHEN NOT MATCHED THEN
-                INSERT (ChannelKey, PlaylistId, LastPageToken, LastProcessedDate, LastExecutionDate)
-                VALUES (source.ChannelKey, source.PlaylistId, source.LastPageToken, source.LastProcessedDate, source.LastExecutionDate);",
+                INSERT (ChannelKey, PlaylistId, LastPageToken, LastProcessedDate, PaginaOffset, LastExecutionDate)
+                VALUES (source.ChannelKey, source.PlaylistId, source.LastPageToken, source.LastProcessedDate, source.PaginaOffset, source.LastExecutionDate);",
             conn);
 
         cmd.Parameters.AddWithValue("@ChannelKey", channelKey);
         cmd.Parameters.AddWithValue("@PlaylistId", playlistId);
         cmd.Parameters.AddWithValue("@LastPageToken", (object?)pageToken ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@LastProcessedDate", (object?)maxProcessedDate ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@PaginaOffset", paginaOffset);
 
         await cmd.ExecuteNonQueryAsync(ct);
     }

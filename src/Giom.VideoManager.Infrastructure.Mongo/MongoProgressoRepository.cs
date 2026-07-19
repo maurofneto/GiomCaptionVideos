@@ -20,6 +20,9 @@ public class MongoProgressoRepository : IProgressoRepository
     public Task<DateTime?> GetLastProcessedDateAsync(string channelKey, string playlistId, CancellationToken ct = default)
         => throw new NotImplementedException();
 
-    public Task SaveProgressoAsync(string channelKey, string playlistId, string? pageToken, DateTime? maxProcessedDate, CancellationToken ct = default)
+    public Task<int> GetPaginaOffsetAsync(string channelKey, string playlistId, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    public Task SaveProgressoAsync(string channelKey, string playlistId, string? pageToken, DateTime? maxProcessedDate, int paginaOffset, CancellationToken ct = default)
         => throw new NotImplementedException();
 }
