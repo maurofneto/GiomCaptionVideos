@@ -125,11 +125,24 @@ public class ChannelProcessor(
 
             foreach (var video in page.Videos)
             {
-                if (processedIds.Count >= maxVideosPerRun || ct.IsCancellationRequested) break;
+                // Bug real (achado ao vivo, 2026-07-18): antes esta condição também cortava o
+                // foreach assim que processedIds batia em maxVideosPerRun — no meio da página,
+                // não só entre páginas. Como o pageToken avança pra próxima página logo depois
+                // do foreach (independente de ele ter sido percorrido inteiro ou cortado), os
+                // vídeos que sobravam na página atual nunca eram avaliados e ficavam pra trás
+                // pra sempre — a troca de página não esperava "processar" todos os vídeos da
+                // página corrente. Só a condição de cancelamento interrompe o foreach agora; o
+                // teto de vídeos por run é respeitado pelo laço externo (linha do while), que só
+                // decide buscar OUTRA página depois que a atual foi inteiramente avaliada.
+                if (ct.IsCancellationRequested) break;
 
                 if (applyDateFilter && video.UploadedAt <= (filtroDataBase ?? DateTime.MinValue)) continue;
 
-                if (!videoHandler.IsRelevant(video)) continue;
+                if (!videoHandler.IsRelevant(video))
+                {
+                    logger.LogDebug("Canal {Name} — vídeo irrelevante, ignorando: {Id} — {Title}", config.Name, video.Id, video.Title);
+                    continue;
+                }
 
                 if (!processedIds.Add(video.Id)) continue;
 

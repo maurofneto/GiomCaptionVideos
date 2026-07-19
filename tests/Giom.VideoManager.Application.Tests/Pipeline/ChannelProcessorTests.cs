@@ -100,8 +100,15 @@ public class ChannelProcessorTests
     }
 
     [Fact]
-    public async Task RunAsync_RespeitaMaxVideosPerRun_ParandoAntesDeEsgotarAsPaginas()
+    public async Task RunAsync_MaxVideosPerRunEstouradoNoMeioDaPagina_AindaAssimTerminaAPaginaInteira()
     {
+        // Bug real (achado ao vivo, 2026-07-18): o corte por MaxVideosPerRun costumava
+        // interromper o foreach NO MEIO da página assim que o total acumulado batia no teto —
+        // a troca de página acontecia de qualquer jeito logo depois, então os vídeos que
+        // sobravam na página atual nunca eram avaliados e ficavam pra trás pra sempre (o
+        // pageToken salvo já apontava pra página seguinte). Página com 3 vídeos relevantes e
+        // teto=2: os 3 têm que ser processados (a página corrente sempre termina inteira); só a
+        // busca de uma PRÓXIMA página é que respeita o teto.
         var ambiente = new Ambiente { Opcoes = new ProcessingOptions { MaxVideosPerRun = 2, DelayBetweenPagesMs = 0, DelayBetweenVideosMs = 0 } };
         var pagina = new PlaylistPage(
             [CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow), CriarVideo("v3", DateTime.UtcNow)],
@@ -113,9 +120,30 @@ public class ChannelProcessorTests
 
         await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
 
-        ambiente.Handler.Verify(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
-        // Não deveria nem pedir a página 2 — o limite já foi atingido processando a página 1
+        ambiente.Handler.Verify(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        // O teto só é reavaliado ENTRE páginas — como já estourou processando a página 1
+        // inteira, não busca uma página 2.
         ambiente.VideoSource.Verify(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), "pagina-2", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_MaxVideosPerRunNaoEstouraNaPrimeiraPagina_BuscaSegundaPaginaNormalmente()
+    {
+        var ambiente = new Ambiente { Opcoes = new ProcessingOptions { MaxVideosPerRun = 2, DelayBetweenPagesMs = 0, DelayBetweenVideosMs = 0 } };
+        var pagina1 = new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: "pagina-2");
+        var pagina2 = new PlaylistPage([CriarVideo("v2", DateTime.UtcNow), CriarVideo("v3", DateTime.UtcNow)], NextPageToken: "pagina-3");
+
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), (string?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pagina1);
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), "pagina-2", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pagina2);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        ambiente.Handler.Verify(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        ambiente.VideoSource.Verify(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), "pagina-3", It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
