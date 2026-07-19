@@ -47,6 +47,11 @@ public static class PricingCalculator
             // Grok/xAI (chat) — nunca teve calculadora própria; conferir https://x.ai/api antes de confiar cegamente.
             [("Grok", "grok-3-mini")] = new(0.30m, 0.50m),
             [("Grok", "grok-3")] = new(3.00m, 15.00m),
+
+            // Kimi/Moonshot (chat, US #124) — US$3,00 entrada (cache miss — cache hit é
+            // US$0,30, não modelado aqui, custo de tabela cheio) / US$15,00 saída por 1M
+            // tokens; conferir platform.kimi.ai/docs/pricing/chat-k3 antes de confiar cegamente.
+            [("Kimi", "kimi-k3")] = new(3.00m, 15.00m),
         };
 
     /// <summary>Retorna null se provedor+modelo não estiver na tabela — melhor não estimar do que estimar errado.</summary>
