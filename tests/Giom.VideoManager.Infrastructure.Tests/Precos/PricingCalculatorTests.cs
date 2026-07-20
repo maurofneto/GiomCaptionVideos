@@ -83,6 +83,19 @@ public class PricingCalculatorTests
     }
 
     [Fact]
+    public void Calcular_OpenAiChat_TinhaFicadoSemCalculadora_AgoraTemPreco()
+    {
+        // Bug #131: OpenAiResumoService/OpenAiCategorizacaoService nunca chamavam
+        // PricingCalculator (custoEstimadoUsd sempre saía null) — e o modelo de chat (gpt-4o-mini)
+        // nem tinha entrada na tabela, só os embeddings da OpenAI. Confirma que os dois foram
+        // corrigidos.
+        var custo = PricingCalculator.Calcular("OpenAI", "gpt-4o-mini", tokensEntrada: 1_000_000, tokensSaida: 1_000_000);
+
+        Assert.NotNull(custo);
+        Assert.Equal(0.15m + 0.60m, custo);
+    }
+
+    [Fact]
     public void Calcular_ProvedorEModeloSaoCaseInsensitive()
     {
         var custoMinusculo = PricingCalculator.Calcular("claude", "claude-sonnet-5", 1000, 1000);

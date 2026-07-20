@@ -32,6 +32,11 @@ public static class PricingCalculator
             [("OpenAI", "text-embedding-3-small")] = new(0.02m, 0m),
             [("OpenAI", "text-embedding-3-large")] = new(0.13m, 0m),
 
+            // OpenAI (chat, Resumo/Categorização) — nunca teve entrada aqui (só embeddings);
+            // conferir https://openai.com/api/pricing antes de confiar cegamente.
+            [("OpenAI", "gpt-4o-mini")] = new(0.15m, 0.60m),
+            [("OpenAI", "gpt-4o")] = new(2.50m, 10.00m),
+
             // VoyageAI (embeddings) — cota gratuita de 200M tokens na criação da conta NÃO
             // descontada aqui, é o custo de tabela cheio (ver Bug #118/#122).
             [("VoyageAI", "voyage-3-lite")] = new(0.02m, 0m),
