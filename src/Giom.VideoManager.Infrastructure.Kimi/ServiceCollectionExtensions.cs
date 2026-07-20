@@ -55,4 +55,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<KimiCategorizacaoService>();
         return services;
     }
+
+    /// <summary>US #126 — mesmo mecanismo de AddKimiSummary/AddKimiCategorizacao.</summary>
+    public static IServiceCollection AddKimiAgent(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddPromptLoader();
+        services.AddKimiHttpClient();
+        services.AddContextoTelemetria();
+        services.AddSessionContext();
+        services.Configure<KimiAgentOptions>(config.GetSection("KimiAgent"));
+        services.AddSingleton<KimiAgentService>();
+        return services;
+    }
 }

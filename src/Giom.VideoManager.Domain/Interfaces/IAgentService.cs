@@ -12,5 +12,14 @@ namespace Giom.VideoManager.Domain.Interfaces;
 /// </summary>
 public interface IAgentService
 {
-    Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default);
+    Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Resposta de um IAgentService. ReasoningContent (US #126) só vem preenchido de provedores com
+/// "thinking" separado do texto final (Kimi K3) — a API deles exige reenviar esse raciocínio nas
+/// próximas chamadas da MESMA conversa pra manter o histórico coerente. Claude/Grok/OpenAI
+/// sempre devolvem null aqui; quem consome (ChatBotProcessor) grava direto em
+/// TurnoConversa.ReasoningContent, sem lógica condicional por provedor.
+/// </summary>
+public record RespostaAgente(string Texto, string? ReasoningContent = null);

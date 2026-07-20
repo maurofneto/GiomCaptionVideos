@@ -43,7 +43,7 @@ public class OpenAiAgentService : IAgentService
         _systemPrompt = prompts.Load("agent.md");
     }
 
-    public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var requestId = Guid.NewGuid().ToString();
 
@@ -108,6 +108,6 @@ public class OpenAiAgentService : IAgentService
             throw new InvalidOperationException("OpenAI não retornou texto");
         }
 
-        return texto;
+        return new RespostaAgente(texto);
     }
 }

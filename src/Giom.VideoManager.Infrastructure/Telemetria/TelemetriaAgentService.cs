@@ -6,7 +6,7 @@ namespace Giom.VideoManager.Infrastructure.Telemetria;
 /// <summary>Decorator genérico — ver TelemetriaResumoService para a explicação do padrão.</summary>
 public class TelemetriaAgentService(IAgentService inner, ITelemetriaService telemetria, ContextoTelemetria contextoTelemetria) : IAgentService
 {
-    public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
         // reaproveita o escopo do ChatBotProcessor se ele já abriu um (pra expor tokens/custo de
