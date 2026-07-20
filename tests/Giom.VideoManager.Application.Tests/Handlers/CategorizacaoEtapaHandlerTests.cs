@@ -4,7 +4,7 @@ using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Testes.Comuns;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -22,6 +22,7 @@ public class CategorizacaoEtapaHandlerTests
         public FakeFilaPublisher<EtapaConcluidaMensagem> EtapaConcluidaPublisher { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeTracingService Tracing { get; } = new();
+        public FakeLogger<CategorizacaoEtapaHandler> Logger { get; } = new();
 
         public CategorizacaoEtapaHandler CriarHandler()
         {
@@ -34,7 +35,7 @@ public class CategorizacaoEtapaHandlerTests
                 EtapaConcluidaPublisher,
                 SessionContext,
                 Tracing,
-                NullLogger<CategorizacaoEtapaHandler>.Instance);
+                Logger);
         }
     }
 
@@ -52,5 +53,18 @@ public class CategorizacaoEtapaHandlerTests
         ambiente.VideoRepository.Verify(r => r.UpsertAsync(video, It.IsAny<CancellationToken>()), Times.Once);
         var evento = Assert.Single(ambiente.EtapaConcluidaPublisher.Publicadas);
         Assert.Equal("categorizacao", evento.Etapa);
+    }
+
+    [Fact]
+    public async Task ProcessarAsync_SemResumo_LogaWarningExplicito()
+    {
+        // Bug #123: sem este log, o pulo era silencioso.
+        var ambiente = new Ambiente();
+        var video = CriarVideo();
+
+        await ((IEtapaCategorizacaoHandler)ambiente.CriarHandler()).ProcessarAsync(video);
+
+        ambiente.CategorizacaoService.Verify(c => c.ClassificarAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains(ambiente.Logger.Entradas, e => e.Nivel == LogLevel.Warning && e.Mensagem.Contains("sem resumo", StringComparison.OrdinalIgnoreCase));
     }
 }

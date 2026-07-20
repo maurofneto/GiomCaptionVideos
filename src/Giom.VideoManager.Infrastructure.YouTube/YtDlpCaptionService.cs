@@ -27,17 +27,24 @@ public class YtDlpCaptionService : ICaptionService
 {
     private readonly YtDlpCaptionOptions _options;
     private readonly ILogger<YtDlpCaptionService> _logger;
+    private readonly ITracingService _tracingService;
 
-    public YtDlpCaptionService(IOptions<YtDlpCaptionOptions> options, ILogger<YtDlpCaptionService> logger)
+    public YtDlpCaptionService(IOptions<YtDlpCaptionOptions> options, ILogger<YtDlpCaptionService> logger, ITracingService tracingService)
     {
         _options = options.Value;
         _logger = logger;
+        _tracingService = tracingService;
     }
 
     public async Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
     {
         var workDir = Path.Combine(_options.TempDirectory, "giom_captions", video.Id);
         Directory.CreateDirectory(workDir);
+
+        // Diferente das chamadas HTTP (instrumentadas via OpenTelemetry.Instrumentation.Http),
+        // invocar o yt-dlp é um Process externo — sem este Span, essa perna do fallback de
+        // transcrição ficava totalmente invisível no Sentry (nem duração, nem sucesso/falha).
+        using var span = _tracingService.IniciarEtapaAtual("transcricao_ytdlp");
 
         try
         {
@@ -51,6 +58,7 @@ public class YtDlpCaptionService : ICaptionService
 
             _logger.LogInformation("Baixando legendas via yt-dlp: {VideoId}", video.Id);
             var exitCode = await RunProcessAsync(_options.YtDlpPath, args, ct);
+            Activity.Current?.SetTag("exit_code", exitCode);
 
             if (exitCode != 0)
             {

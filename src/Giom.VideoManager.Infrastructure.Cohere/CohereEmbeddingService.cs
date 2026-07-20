@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Precos;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -36,6 +37,7 @@ public class CohereEmbeddingService : IEmbeddingService
 
     private readonly CohereEmbeddingOptions _options;
     private readonly IVideoChunkRepository _chunkRepository;
+    private readonly IFarolRateLimiter _farol;
     private readonly ILogger<CohereEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly HttpClient _cohere;
@@ -43,12 +45,14 @@ public class CohereEmbeddingService : IEmbeddingService
     public CohereEmbeddingService(
         IOptions<CohereEmbeddingOptions> options,
         IVideoChunkRepository chunkRepository,
+        IFarolRateLimiter farol,
         IHttpClientFactory httpClientFactory,
         ILogger<CohereEmbeddingService> logger,
         IContextoTelemetria contextoTelemetria)
     {
         _options         = options.Value;
         _chunkRepository = chunkRepository;
+        _farol           = farol;
         _logger          = logger;
         _contextoTelemetria = contextoTelemetria;
 
@@ -80,7 +84,8 @@ public class CohereEmbeddingService : IEmbeddingService
         _contextoTelemetria.Registrar(
             provedor: "Cohere",
             modelo: _options.Model,
-            tokensEntrada: tokensTotais);
+            tokensEntrada: tokensTotais,
+            custoEstimadoUsd: PricingCalculator.Calcular("Cohere", _options.Model, tokensTotais));
 
         await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
@@ -113,7 +118,8 @@ public class CohereEmbeddingService : IEmbeddingService
         _contextoTelemetria.Registrar(
             provedor: "Cohere",
             modelo: _options.Model,
-            tokensEntrada: tokensTotais);
+            tokensEntrada: tokensTotais,
+            custoEstimadoUsd: PricingCalculator.Calcular("Cohere", _options.Model, tokensTotais));
 
         return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
     }
@@ -137,6 +143,16 @@ public class CohereEmbeddingService : IEmbeddingService
             };
             var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
 
+            // Bug #122: farol serializa entre TODAS as tasks concorrentes, não só threads
+            // locais (autoscaling escala até maxCapacity). Cohere Embed não documenta limite
+            // por request nem por token — o limite real é "inputs" (nº de textos no batch),
+            // 2000/min (docs.cohere.com/docs/rate-limits) — daí a dimensão própria, não
+            // Requisicoes nem Tokens (que se aplicariam a Voyage/OpenAI, mas não descrevem o
+            // limite real do Cohere Embed).
+            await _farol.AguardarAsync("Cohere", new Dictionary<string, double>
+            {
+                [RateLimiterDimensao.Inputs] = batch.Count
+            }, ct);
             var response = await _cohere.PostAsync("v2/embed", content, ct);
             var json = await response.Content.ReadAsStringAsync(ct);
 

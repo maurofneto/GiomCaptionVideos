@@ -15,6 +15,7 @@ namespace Giom.VideoManager.Application.Handlers;
 /// </summary>
 public class CanalIngestaoVideoHandler(
     CanalIngestaoConfig canal,
+    IVideoRepository videoRepository,
     IFilaPublisher<VideoEtapaMensagem> transcricaoPublisher,
     ISessionContext sessionContext,
     ITracingService tracingService)
@@ -32,6 +33,21 @@ public class CanalIngestaoVideoHandler(
         valor.EndsWith('*')
             ? tituloEmMaiusculas.StartsWith(valor[..^1].ToUpperInvariant())
             : tituloEmMaiusculas.Contains(valor.ToUpperInvariant()));
+
+    // Bug #120: sem isso, todo vídeo relevante era republicado em TODA execução, mesmo já
+    // tendo concluído o pipeline inteiro antes — o Ingestao.Worker reprocessava
+    // transcrição/resumo/categorização/embedding de vídeos de anos atrás a cada run. Só é
+    // seguro checar ProcessedAt aqui desde a correção do bug #111 (PipelineHandler só marca
+    // ProcessedAt quando TODOS os ramos terminais do fan-out concluem) — antes disso, um
+    // vídeo com fan-out incompleto podia ter ProcessedAt setado cedo demais, e este check o
+    // deixaria travado pra sempre sem nunca ser reenfileirado. Exposto como método próprio
+    // (Bug #125/#126) — o ChannelProcessor chama isso ANTES de decidir se gasta cota do
+    // MaxVideosPerRun no vídeo, então HandleAsync em si não precisa mais checar de novo.
+    public async Task<bool> JaProcessadoAsync(Video video, CancellationToken ct = default)
+    {
+        var existente = await videoRepository.GetByIdAsync(video.Id, ct);
+        return existente?.ProcessedAt != null;
+    }
 
     public Task HandleAsync(Video video, CancellationToken ct = default) =>
         transcricaoPublisher.PublicarAsync(new VideoEtapaMensagem(video, sessionContext.Atual, tracingService.CapturarContextoAtual()), ct);

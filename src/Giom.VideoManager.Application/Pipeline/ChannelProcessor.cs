@@ -123,13 +123,38 @@ public class ChannelProcessor(
             var page = await videoSource.GetPlaylistPageAsync(playlistId, Math.Min(50, maxVideosPerRun), pageToken, ct);
             if (page.Videos.Count == 0) break;
 
+            // Bug real (achado ao vivo, 2026-07-18/19): MaxVideosPerRun é um teto DURO — a
+            // primeira versão deste fix (Bug #125) deixava a página terminar inteira mesmo
+            // depois de bater o teto, o que estourava o limite (ex.: teto=2 processando 3) e
+            // isso não é aceitável com rate limit real do YouTube/downstream. Mas simplesmente
+            // cortar no meio (o bug ORIGINAL) e avançar pra próxima página também não serve —
+            // os vídeos que sobrariam ficariam pra trás pra sempre. A correção certa: quando o
+            // teto é batido no meio da página, NÃO avança pageToken (fica na mesma página) — a
+            // próxima execução refaz a MESMA página desde o início. Isso não desperdiça cota
+            // reavaliando vídeo já concluído porque JaProcessadoAsync (Bug #125/#126, reaproveita
+            // o dedup do Bug #120) deixa esse pulo de graça, sem contar contra o teto — só
+            // avança pra próxima página quando o laço percorre a página inteira sem bater no teto.
+            var paginaEsgotada = true;
+
             foreach (var video in page.Videos)
             {
-                if (processedIds.Count >= maxVideosPerRun || ct.IsCancellationRequested) break;
+                if (ct.IsCancellationRequested) { paginaEsgotada = false; break; }
+
+                if (processedIds.Count >= maxVideosPerRun) { paginaEsgotada = false; break; }
 
                 if (applyDateFilter && video.UploadedAt <= (filtroDataBase ?? DateTime.MinValue)) continue;
 
-                if (!videoHandler.IsRelevant(video)) continue;
+                if (!videoHandler.IsRelevant(video))
+                {
+                    logger.LogDebug("Canal {Name} — vídeo irrelevante, ignorando: {Id} — {Title}", config.Name, video.Id, video.Title);
+                    continue;
+                }
+
+                if (await videoHandler.JaProcessadoAsync(video, ct))
+                {
+                    logger.LogDebug("Canal {Name} — vídeo já processado, pulando sem gastar cota: {Id} — {Title}", config.Name, video.Id, video.Title);
+                    continue;
+                }
 
                 if (!processedIds.Add(video.Id)) continue;
 
@@ -154,12 +179,22 @@ public class ChannelProcessor(
                 await Task.Delay(delayEntreVideosMs, ct);
             }
 
-            pageToken = page.NextPageToken;
+            if (paginaEsgotada)
+            {
+                pageToken = page.NextPageToken;
+            }
+            else
+            {
+                logger.LogInformation("Canal {Name} — teto de {Max} atingido no meio da página (retomando a mesma página na próxima execução)",
+                    config.Name, maxVideosPerRun);
+            }
+
             await progressoRepository.SaveProgressoAsync(channelKey, playlistId, pageToken, lastProcessedDate, ct);
 
-            logger.LogInformation("Canal {Name} — página processada (próxima página: {NextPageToken})", config.Name, pageToken ?? "fim");
+            logger.LogInformation("Canal {Name} — página processada (próxima página: {NextPageToken})",
+                config.Name, paginaEsgotada ? (pageToken ?? "fim") : "mesma página (retomando)");
 
-            if (string.IsNullOrEmpty(pageToken))
+            if (paginaEsgotada && string.IsNullOrEmpty(pageToken))
             {
                 // Fim da playlist — sem isso, o while continuava rodando (processedIds.Count
                 // ainda < MaxVideosPerRun) e reiniciava a paginação do zero pra sempre, num

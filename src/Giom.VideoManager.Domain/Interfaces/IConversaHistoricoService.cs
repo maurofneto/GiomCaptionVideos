@@ -34,5 +34,11 @@ public interface IConversaHistoricoService
 /// a pergunta é gravada (AdicionarAsync) e o momento em que a resposta do agente é conhecida
 /// (AtualizarAsync) — isso permite repassar o turno (com Id) pro agente ANTES da resposta
 /// existir, para que a telemetria do agente já identifique a qual turno ela pertence.
+/// ReasoningContent (US #126) — só preenchido por provedores com "thinking" separado da
+/// resposta final (Kimi K3), que exigem esse raciocínio de volta nas próximas chamadas do MESMO
+/// provedor pra manter o histórico coerente (exigência da API deles, não escolha nossa). Fica
+/// null pra todo turno gerado por Claude/Grok/OpenAI — eles nunca leem nem escrevem este campo.
+/// 4º parâmetro com default: qualquer `new TurnoConversa(id, pergunta, resposta)` de 3
+/// argumentos já existente continua compilando sem mudança.
 /// </summary>
-public record TurnoConversa(long? Id, string Pergunta, string? Resposta);
+public record TurnoConversa(long? Id, string Pergunta, string? Resposta, string? ReasoningContent = null);

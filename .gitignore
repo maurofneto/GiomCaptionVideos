@@ -370,7 +370,8 @@ FodyWeavers.xsd
 .claude/cache/
 
 # Config de servidores MCP locais — pode conter secrets (ex: PAT do Azure DevOps), nunca commitar
-.mcp.jsonsupabase/.temp/
+.mcp.json
+supabase/.temp/
 
 # Artefato de build da Lambda watchman — gerado a partir de lambda_function.py (fonte versionada),
 # nunca precisa ir pro repo; o pipeline gera o zip na hora do deploy (ver azure-pipelines.yml).

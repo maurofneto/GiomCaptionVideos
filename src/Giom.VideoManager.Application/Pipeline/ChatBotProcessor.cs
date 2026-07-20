@@ -180,12 +180,13 @@ public class ChatBotProcessor(
             // um novo — só assim os tokens/custo que ele coleta ficam visíveis aqui embaixo.
             var metaAgente = contextoTelemetria.IniciarEscopo();
 
-            string respostaTexto;
+            RespostaAgente respostaAgente;
             using (trace.IniciarEtapa("agente"))
             {
-                respostaTexto = await agentService.ResponderAsync(mensagem.ChatId, turno, busca.ContextoFormatado, historico, ct);
+                respostaAgente = await agentService.ResponderAsync(mensagem.ChatId, turno, busca.ContextoFormatado, historico, ct);
             }
 
+            var respostaTexto = respostaAgente.Texto;
             using (trace.IniciarEtapa("guardrail_saida"))
             {
                 var resultadoSaida = await guardRailPipeline.AvaliarSaidaAsync(contextoGuardRail with { Resposta = respostaTexto }, ct);
@@ -193,7 +194,10 @@ public class ChatBotProcessor(
                     respostaTexto = resultadoSaida.RespostaSubstituta ?? respostaTexto;
             }
 
-            turno = turno with { Resposta = respostaTexto };
+            // ReasoningContent (US #126) — só provedores com "thinking" separado do texto final
+            // (Kimi K3) preenchem RespostaAgente.ReasoningContent; pra Claude/Grok/OpenAI vem
+            // sempre null, e o turno é gravado igual sempre foi.
+            turno = turno with { Resposta = respostaTexto, ReasoningContent = respostaAgente.ReasoningContent };
             await historicoService.AtualizarAsync(mensagem.ChatId, turno, ct);
 
             indicadorCts.Cancel();
@@ -284,7 +288,10 @@ public class ChatBotProcessor(
         for (var i = historico.Count - 1; i >= 0; i--)
         {
             var turno = historico[i];
-            var tamanho = turno.Pergunta.Length + (turno.Resposta?.Length ?? 0);
+            // ReasoningContent (US #126) entra no orçamento — é conteúdo real que o Kimi manda
+            // de volta na próxima chamada, não metadado inerte. Fica 0 pra turnos de
+            // Claude/Grok/OpenAI (ReasoningContent sempre null).
+            var tamanho = turno.Pergunta.Length + (turno.Resposta?.Length ?? 0) + (turno.ReasoningContent?.Length ?? 0);
             if (mantidos.Count > 0 && total + tamanho > limiteCaracteres)
                 break;
 

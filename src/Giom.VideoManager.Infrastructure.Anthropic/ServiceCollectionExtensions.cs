@@ -4,6 +4,7 @@ using Microsoft.Extensions.Http.Resilience;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Infrastructure.Resiliencia;
 
 namespace Giom.VideoManager.Infrastructure.Anthropic;
 
@@ -33,6 +34,7 @@ public static class ServiceCollectionExtensions
                 options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
                 options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(200);
                 options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+                options.RegistrarEventoDeRetryNoSpan("Claude");
             });
 
         return services;

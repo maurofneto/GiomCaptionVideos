@@ -5,6 +5,7 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
+using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -90,6 +91,7 @@ public class GrokResumoService : IResumoProvedorService
             modelo: modelo,
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
+            custoEstimadoUsd: PricingCalculator.Calcular("Grok", modelo, result?.usage?.prompt_tokens, result?.usage?.completion_tokens),
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason });
 
         if (string.IsNullOrWhiteSpace(texto)) return null;

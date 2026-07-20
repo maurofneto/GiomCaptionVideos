@@ -37,6 +37,12 @@ public class CategorizacaoEtapaHandler(
             video.Categorias = (IList<Domain.Entities.CategoriaTeologica>)await categorizacaoService.ClassificarAsync(video, ct);
             logger.LogInformation("{Canal} — categorização concluída: {Title}", video.ChannelTitle, video.Title);
         }
+        else if (video.Categorias.Count == 0)
+        {
+            // Bug #123: mesmo padrão do ResumoEtapaHandler — sem log, o pulo por falta de resumo
+            // era indistinguível de sucesso (ProcessedAt marcado normalmente).
+            logger.LogWarning("{Canal} — sem resumo disponível, pulando categorização: {Title}", video.ChannelTitle, video.Title);
+        }
 
         await videoRepository.UpsertAsync(video, ct);
 

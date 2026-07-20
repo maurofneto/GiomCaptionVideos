@@ -3,6 +3,7 @@ using Anthropic.SDK.Messaging;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -52,7 +53,7 @@ public class ClaudeAgentService : IAgentService
         _systemPrompt = prompts.Load("agent.md");
     }
 
-    public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         // RequestId sempre gerado — quem decide se algo realmente consome isso (ex.: reportar
         // feedback via Helicone) é a plataforma externa de observabilidade, não esta classe.
@@ -108,7 +109,7 @@ public class ClaudeAgentService : IAgentService
             modelo: _options.Model,
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
-            custoEstimadoUsd: AnthropicPricingCalculator.Calcular(_options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens),
+            custoEstimadoUsd: PricingCalculator.Calcular("Claude", _options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens),
             detalhes: new { stopReason = response.StopReason, incerteza = _incertezaDetector.ContemIncerteza(texto) },
             requestIdExterno: requestId);
 
@@ -121,6 +122,6 @@ public class ClaudeAgentService : IAgentService
             throw new InvalidOperationException("Claude não retornou texto");
         }
 
-        return texto;
+        return new RespostaAgente(texto);
     }
 }
