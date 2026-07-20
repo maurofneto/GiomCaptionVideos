@@ -1,6 +1,7 @@
 using Amazon;
 using Amazon.SQS;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Observabilidade;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -28,6 +29,10 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IAmazonSQS>(_ =>
             new AmazonSQSClient(RegionEndpoint.GetBySystemName(options.Region)));
+
+        // Bug #133: dedupado por TryAddEnumerable — AddSqsFilaEtapa é chamado uma vez por fila
+        // (5x numa run típica), mas a regra de exclusão do Sentry só precisa existir uma vez.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISentryTransactionExclusionRule, SqsSentryTransactionExclusionRule>());
 
         services.AddKeyedSingleton<SqsFilaCanal>(chave, (sp, _) =>
             new SqsFilaCanal(sp.GetRequiredService<IAmazonSQS>(), iOptions, sp.GetRequiredService<ILogger<SqsFilaCanal>>()));
