@@ -91,6 +91,14 @@ public class TelegramChatChannel : IChatChannel
                 continue;
             }
 
+            // Bug #128: log só quando chega algo de fato — o long-polling em si (a cada ~30s,
+            // com ou sem mensagem) já é descartado das transações do Sentry
+            // (SentryBootstrap.SetBeforeSendTransaction), então logar aqui é só o outro lado da
+            // mesma correção: dar visibilidade real de mensagem recebida sem gerar ruído nenhum
+            // nos polls vazios (a grande maioria).
+            if (updates.Length > 0)
+                _logger.LogInformation("Recebidas {Count} atualizações do Telegram", updates.Length);
+
             foreach (var update in updates)
             {
                 offset = update.Id + 1;

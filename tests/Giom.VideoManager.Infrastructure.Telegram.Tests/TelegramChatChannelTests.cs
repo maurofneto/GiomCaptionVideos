@@ -132,6 +132,37 @@ public class TelegramChatChannelTests
         ambiente.Bot.Verify(b => b.SendRequest(It.Is<SendMessageRequest>(r => !r.Text.Contains('<')), It.IsAny<CancellationToken>()), Times.Once); // reenvio sem tags HTML
     }
 
+    // ---------- OuvirAsync — log condicional (Bug #128) ----------
+
+    [Fact]
+    public async Task OuvirAsync_QuandoChegaAlgumaAtualizacao_LogaAQuantidade()
+    {
+        var ambiente = new Ambiente();
+        var update = new Update { Id = 1, Message = new Message { Chat = new Chat { Id = 123 }, Text = "oi", From = new User { Username = "aluno1" } } };
+
+        ambiente.Bot.SetupSequence(b => b.SendRequest(It.IsAny<GetUpdatesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([update])
+            .ThrowsAsync(new OperationCanceledException());
+
+        await foreach (var _ in ambiente.CriarCanal().OuvirAsync(CancellationToken.None)) { }
+
+        Assert.Single(ambiente.Logger.Entradas, e => e.Nivel == LogLevel.Information && e.Mensagem.Contains('1'));
+    }
+
+    [Fact]
+    public async Task OuvirAsync_PollVazio_NaoLogaNada()
+    {
+        var ambiente = new Ambiente();
+
+        ambiente.Bot.SetupSequence(b => b.SendRequest(It.IsAny<GetUpdatesRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]) // poll vazio — o caso comum, que não pode gerar ruído de log
+            .ThrowsAsync(new OperationCanceledException());
+
+        await foreach (var _ in ambiente.CriarCanal().OuvirAsync(CancellationToken.None)) { }
+
+        Assert.Empty(ambiente.Logger.Entradas);
+    }
+
     // ---------- TratarComandoAsync ----------
 
     [Fact]
