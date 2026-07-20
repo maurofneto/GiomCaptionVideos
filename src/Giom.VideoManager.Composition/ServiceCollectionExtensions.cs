@@ -10,6 +10,7 @@ using Giom.VideoManager.Infrastructure.Feedback;
 using Giom.VideoManager.Infrastructure.Grok;
 using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Helicone;
+using Giom.VideoManager.Infrastructure.Kimi;
 using Giom.VideoManager.Infrastructure.Observabilidade;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Redis;
@@ -157,6 +158,9 @@ public static class ServiceCollectionExtensions
         services.AddGrokSummary(config);
         services.AddKeyedSingleton<IResumoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokResumoService>());
 
+        services.AddKimiSummary(config);
+        services.AddKeyedSingleton<IResumoProvedorService>("Kimi", (sp, _) => sp.GetRequiredService<KimiResumoService>());
+
         services.AddOpenAiSummary(config);
         services.AddKeyedSingleton<IResumoProvedorService>("OpenAI", (sp, _) => sp.GetRequiredService<OpenAiResumoService>());
 
@@ -179,6 +183,9 @@ public static class ServiceCollectionExtensions
 
         services.AddGrokCategorizacao(config);
         services.AddKeyedSingleton<ICategorizacaoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
+
+        services.AddKimiCategorizacao(config);
+        services.AddKeyedSingleton<ICategorizacaoProvedorService>("Kimi", (sp, _) => sp.GetRequiredService<KimiCategorizacaoService>());
 
         services.AddOpenAiCategorizacao(config);
         services.AddKeyedSingleton<ICategorizacaoProvedorService>("OpenAI", (sp, _) => sp.GetRequiredService<OpenAiCategorizacaoService>());

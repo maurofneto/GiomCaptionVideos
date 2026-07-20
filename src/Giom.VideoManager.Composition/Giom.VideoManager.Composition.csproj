@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure\Giom.VideoManager.Infrastructure.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Anthropic\Giom.VideoManager.Infrastructure.Anthropic.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Grok\Giom.VideoManager.Infrastructure.Grok.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Kimi\Giom.VideoManager.Infrastructure.Kimi.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Helicone\Giom.VideoManager.Infrastructure.Helicone.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.OpenAI\Giom.VideoManager.Infrastructure.OpenAI.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.YouTube\Giom.VideoManager.Infrastructure.YouTube.csproj" />
