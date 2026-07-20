@@ -342,7 +342,6 @@ public static class ServiceCollectionExtensions
             var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
             var sessionContext = sp.GetRequiredService<ISessionContext>();
             var tracingService = sp.GetRequiredService<ITracingService>();
-            var logger = sp.GetRequiredService<ILogger<CanalIngestaoVideoHandler>>();
             var canalPorId = canaisValidos.ToDictionary(c => c.ChannelId);
             var cache = new Dictionary<string, IVideoHandler>();
 
@@ -350,7 +349,7 @@ public static class ServiceCollectionExtensions
             {
                 if (!cache.TryGetValue(channelId, out var handler))
                 {
-                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], videoRepository, transcricaoPublisher, sessionContext, tracingService, logger);
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], videoRepository, transcricaoPublisher, sessionContext, tracingService);
                     cache[channelId] = handler;
                 }
                 return handler;

@@ -2,7 +2,6 @@ using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
-using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Application.Handlers;
 
@@ -19,8 +18,7 @@ public class CanalIngestaoVideoHandler(
     IVideoRepository videoRepository,
     IFilaPublisher<VideoEtapaMensagem> transcricaoPublisher,
     ISessionContext sessionContext,
-    ITracingService tracingService,
-    ILogger<CanalIngestaoVideoHandler> logger)
+    ITracingService tracingService)
     : IVideoHandler
 {
     public bool IsRelevant(Video video) => canal.RelevanciaTipo switch
@@ -36,22 +34,21 @@ public class CanalIngestaoVideoHandler(
             ? tituloEmMaiusculas.StartsWith(valor[..^1].ToUpperInvariant())
             : tituloEmMaiusculas.Contains(valor.ToUpperInvariant()));
 
-    public async Task HandleAsync(Video video, CancellationToken ct = default)
+    // Bug #120: sem isso, todo vídeo relevante era republicado em TODA execução, mesmo já
+    // tendo concluído o pipeline inteiro antes — o Ingestao.Worker reprocessava
+    // transcrição/resumo/categorização/embedding de vídeos de anos atrás a cada run. Só é
+    // seguro checar ProcessedAt aqui desde a correção do bug #111 (PipelineHandler só marca
+    // ProcessedAt quando TODOS os ramos terminais do fan-out concluem) — antes disso, um
+    // vídeo com fan-out incompleto podia ter ProcessedAt setado cedo demais, e este check o
+    // deixaria travado pra sempre sem nunca ser reenfileirado. Exposto como método próprio
+    // (Bug #125/#126) — o ChannelProcessor chama isso ANTES de decidir se gasta cota do
+    // MaxVideosPerRun no vídeo, então HandleAsync em si não precisa mais checar de novo.
+    public async Task<bool> JaProcessadoAsync(Video video, CancellationToken ct = default)
     {
-        // Bug #120: sem isso, todo vídeo relevante era republicado em TODA execução, mesmo já
-        // tendo concluído o pipeline inteiro antes — o Ingestao.Worker reprocessava
-        // transcrição/resumo/categorização/embedding de vídeos de anos atrás a cada run. Só é
-        // seguro checar ProcessedAt aqui desde a correção do bug #111 (PipelineHandler só marca
-        // ProcessedAt quando TODOS os ramos terminais do fan-out concluem) — antes disso, um
-        // vídeo com fan-out incompleto podia ter ProcessedAt setado cedo demais, e este check o
-        // deixaria travado pra sempre sem nunca ser reenfileirado.
         var existente = await videoRepository.GetByIdAsync(video.Id, ct);
-        if (existente?.ProcessedAt != null)
-        {
-            logger.LogInformation("{VideoId} já processado em {ProcessedAt} — ignorando (dedup, Bug #120)", video.Id, existente.ProcessedAt);
-            return;
-        }
-
-        await transcricaoPublisher.PublicarAsync(new VideoEtapaMensagem(video, sessionContext.Atual, tracingService.CapturarContextoAtual()), ct);
+        return existente?.ProcessedAt != null;
     }
+
+    public Task HandleAsync(Video video, CancellationToken ct = default) =>
+        transcricaoPublisher.PublicarAsync(new VideoEtapaMensagem(video, sessionContext.Atual, tracingService.CapturarContextoAtual()), ct);
 }
