@@ -17,7 +17,13 @@ public class KimiCategorizacaoOptions
 {
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "kimi-k3";
-    public int MaxTokens { get; init; } = 512;
+
+    // 512 não é suficiente: "thinking" do Kimi (sempre ligado) consome o orçamento de
+    // max_completion_tokens ANTES de sobrar espaço pro JSON de resposta — com 512, o raciocínio
+    // esgota o budget e content volta vazio, sem erro nenhum (falha silenciosa, ver
+    // KimiAgentService/comparativo Claude x Grok x Kimi x OpenAI de 2026-07-20, categorização
+    // do Kimi retornando 0 categorias mesmo com o resumo de entrada normal).
+    public int MaxTokens { get; init; } = 2048;
 }
 
 /// <summary>
