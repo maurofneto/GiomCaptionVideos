@@ -4,7 +4,6 @@ using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Testes.Comuns;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -39,7 +38,7 @@ public class CanalIngestaoVideoHandlerTests
             VideoRepository.Setup(r => r.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Video?)null);
 
-            return new(canal, VideoRepository.Object, TranscricaoPublisher, SessionContext, Tracing, NullLogger<CanalIngestaoVideoHandler>.Instance);
+            return new(canal, VideoRepository.Object, TranscricaoPublisher, SessionContext, Tracing);
         }
     }
 
@@ -91,7 +90,7 @@ public class CanalIngestaoVideoHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_VideoJaProcessado_NaoPublicaDeNovo()
+    public async Task JaProcessadoAsync_VideoComProcessedAt_RetornaTrue()
     {
         var ambiente = new Ambiente();
         var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
@@ -102,13 +101,11 @@ public class CanalIngestaoVideoHandlerTests
         ambiente.VideoRepository.Setup(r => r.GetByIdAsync(video.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Video { Id = video.Id, Title = video.Title, ProcessedAt = DateTime.UtcNow });
 
-        await ((IVideoHandler)handler).HandleAsync(video);
-
-        Assert.Empty(ambiente.TranscricaoPublisher.Publicadas);
+        Assert.True(await ((IVideoHandler)handler).JaProcessadoAsync(video));
     }
 
     [Fact]
-    public async Task HandleAsync_VideoSemProcessedAt_Publica()
+    public async Task JaProcessadoAsync_VideoSemProcessedAt_RetornaFalse()
     {
         var ambiente = new Ambiente();
         var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
@@ -117,8 +114,6 @@ public class CanalIngestaoVideoHandlerTests
         ambiente.VideoRepository.Setup(r => r.GetByIdAsync(video.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Video { Id = video.Id, Title = video.Title, ProcessedAt = null });
 
-        await ((IVideoHandler)handler).HandleAsync(video);
-
-        Assert.Single(ambiente.TranscricaoPublisher.Publicadas);
+        Assert.False(await ((IVideoHandler)handler).JaProcessadoAsync(video));
     }
 }

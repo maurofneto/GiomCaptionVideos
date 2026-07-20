@@ -47,9 +47,9 @@ public class ChannelProcessorTests
             VideoSource.Setup(v => v.GetUploadPlaylistIdAsync(It.IsAny<ChannelConfig>(), It.IsAny<CancellationToken>())).ReturnsAsync("playlist-1");
             Progresso.Setup(p => p.GetLastPageTokenAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
             Progresso.Setup(p => p.GetLastProcessedDateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((DateTime?)null);
-            Progresso.Setup(p => p.GetPaginaOffsetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
-            Progresso.Setup(p => p.SaveProgressoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            Progresso.Setup(p => p.SaveProgressoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             Handler.Setup(h => h.IsRelevant(It.IsAny<Video>())).Returns(true);
+            Handler.Setup(h => h.JaProcessadoAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
             Handler.Setup(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             HostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
         }
@@ -109,8 +109,8 @@ public class ChannelProcessorTests
         // ORIGINAL) também não serve — os vídeos que sobrariam ficariam pra trás pra sempre.
         // Correção: página com 3 vídeos relevantes e teto=2 processa EXATAMENTE 2 (nunca 3), e
         // NÃO avança pageToken (fica na mesma página — pageToken salvo continua null, o mesmo
-        // usado pra buscar essa página) — só o offset dentro dela avança, pra retomar do v3 na
-        // próxima execução (ver teste abaixo).
+        // usado pra buscar essa página) — a PRÓXIMA execução refaz a mesma página desde o
+        // início (ver teste abaixo: JaProcessadoAsync evita reprocessar v1/v2 de graça).
         var ambiente = new Ambiente { Opcoes = new ProcessingOptions { MaxVideosPerRun = 2, DelayBetweenPagesMs = 0, DelayBetweenVideosMs = 0 } };
         var pagina = new PlaylistPage(
             [CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow), CriarVideo("v3", DateTime.UtcNow)],
@@ -125,27 +125,24 @@ public class ChannelProcessorTests
         ambiente.Handler.Verify(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
         ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(vd => vd.Id == "v3"), It.IsAny<CancellationToken>()), Times.Never);
         ambiente.VideoSource.Verify(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), "pagina-2", It.IsAny<CancellationToken>()), Times.Never);
-        // pageToken salvo continua null (a MESMA página, não "pagina-2") e o offset marca o
-        // índice de v3 (2) pra retomar exatamente dali.
+        // pageToken salvo continua null (a MESMA página, não "pagina-2").
         ambiente.Progresso.Verify(p => p.SaveProgressoAsync(
-            It.IsAny<string>(), "playlist-1", null, It.IsAny<DateTime?>(), 2, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<string>(), "playlist-1", null, It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task RunAsync_RetomaDoOffsetSalvo_NaoReavaliaVideosJaTratadosNaMesmaPagina()
+    public async Task RunAsync_VideoJaProcessado_NaoContaContraOTetoEDeixaEspacoPraNovosNaMesmaPagina()
     {
-        // Continuação do teste acima: na PRÓXIMA execução, o progresso salvo diz "mesma página
-        // (pageToken=null), offset=2" — o processor tem que pular direto pro índice 2 (v3),
-        // sem tentar re-processar v1/v2 (que já foram tratados na execução anterior) e sem
-        // gastar cota do teto com eles. Teto=1 (só resta v3 mesmo) evita que o teste precise
-        // mockar uma "página 2" de verdade — o mock abaixo devolve a MESMA página de 3 vídeos
-        // pra qualquer token, então um teto maior faria o laço externo buscar outra "página"
-        // (mockada igual) e reprocessar v1/v2, o que não é o que este teste quer verificar.
+        // Bug #125/#126: ao retomar a MESMA página do zero (sem posição salva), reavaliar
+        // vídeos já concluídos não pode gastar cota do teto — senão, com um teto pequeno e
+        // vários vídeos já feitos antes de vídeos novos na mesma página, o run nunca alcançaria
+        // os novos, travado pra sempre no mesmo ponto. JaProcessadoAsync=true pula v1 de graça,
+        // sobrando cota (teto=1) pra processar v2 de verdade.
         var ambiente = new Ambiente { Opcoes = new ProcessingOptions { MaxVideosPerRun = 1, DelayBetweenPagesMs = 0, DelayBetweenVideosMs = 0 } };
-        ambiente.Progresso.Setup(p => p.GetPaginaOffsetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(2);
+        ambiente.Handler.Setup(h => h.JaProcessadoAsync(It.Is<Video>(vd => vd.Id == "v1"), It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var pagina = new PlaylistPage(
-            [CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow), CriarVideo("v3", DateTime.UtcNow)],
-            NextPageToken: "pagina-2");
+            [CriarVideo("v1", DateTime.UtcNow), CriarVideo("v2", DateTime.UtcNow)],
+            NextPageToken: null);
 
         ambiente.VideoSource
             .Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
@@ -153,13 +150,8 @@ public class ChannelProcessorTests
 
         await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
 
-        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(vd => vd.Id == "v3"), It.IsAny<CancellationToken>()), Times.Once);
         ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(vd => vd.Id == "v1"), It.IsAny<CancellationToken>()), Times.Never);
-        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(vd => vd.Id == "v2"), It.IsAny<CancellationToken>()), Times.Never);
-        // Página esgotada dessa vez (só v3 restava e coube dentro do teto) — avança pra
-        // "pagina-2" de verdade e zera o offset.
-        ambiente.Progresso.Verify(p => p.SaveProgressoAsync(
-            It.IsAny<string>(), "playlist-1", "pagina-2", It.IsAny<DateTime?>(), 0, It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(vd => vd.Id == "v2"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -180,12 +172,15 @@ public class ChannelProcessorTests
 
         // Página 1 (1 vídeo, cabe no teto) esgota normalmente e avança pra página 2; na página
         // 2, processedIds já vem de 1 — só v2 cabe no teto (chega a 2), v3 fica pra trás e a
-        // página 2 NÃO avança (fica pra retomar do índice 1 na próxima execução).
+        // página 2 NÃO avança (fica na mesma "pagina-2" pra retomar do zero na próxima execução
+        // — sem posição salva, mas JaProcessadoAsync evita reprocessar v2 de graça).
         ambiente.Handler.Verify(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
         ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(vd => vd.Id == "v3"), It.IsAny<CancellationToken>()), Times.Never);
         ambiente.VideoSource.Verify(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), "pagina-3", It.IsAny<CancellationToken>()), Times.Never);
+        // Dois saves com o mesmo pageToken "pagina-2": o primeiro ao avançar da página 1 pra 2,
+        // o segundo ao parar no meio da página 2 (pageToken não muda, continua "pagina-2").
         ambiente.Progresso.Verify(p => p.SaveProgressoAsync(
-            It.IsAny<string>(), "playlist-1", "pagina-2", It.IsAny<DateTime?>(), 1, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<string>(), "playlist-1", "pagina-2", It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]
@@ -406,6 +401,6 @@ public class ChannelProcessorTests
         await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
 
         ambiente.Progresso.Verify(p => p.SaveProgressoAsync(
-            It.IsAny<string>(), "playlist-1", null, maisRecente, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<string>(), "playlist-1", null, maisRecente, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

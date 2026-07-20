@@ -96,7 +96,6 @@ public class ChannelProcessor(
         var channelKey       = config.ChannelId ?? "mine";
         var pageToken        = await progressoRepository.GetLastPageTokenAsync(channelKey, playlistId, ct);
         var lastProcessedDate = await progressoRepository.GetLastProcessedDateAsync(channelKey, playlistId, ct);
-        var paginaOffset     = await progressoRepository.GetPaginaOffsetAsync(channelKey, playlistId, ct);
 
         bool applyDateFilter = pageToken == null;
 
@@ -130,26 +129,30 @@ public class ChannelProcessor(
             // isso não é aceitável com rate limit real do YouTube/downstream. Mas simplesmente
             // cortar no meio (o bug ORIGINAL) e avançar pra próxima página também não serve —
             // os vídeos que sobrariam ficariam pra trás pra sempre. A correção certa: quando o
-            // teto é batido no meio da página, NÃO avança pageToken (fica na mesma página) e
-            // guarda paginaOffset = índice do primeiro vídeo ainda não avaliado — a próxima
-            // execução refaz a MESMA página, pula direto pro índice salvo (sem re-gastar cota
-            // reavaliando o que já foi visto) e só avança pra próxima página quando o laço
-            // percorrer o restante dela inteiro sem bater no teto de novo.
+            // teto é batido no meio da página, NÃO avança pageToken (fica na mesma página) — a
+            // próxima execução refaz a MESMA página desde o início. Isso não desperdiça cota
+            // reavaliando vídeo já concluído porque JaProcessadoAsync (Bug #125/#126, reaproveita
+            // o dedup do Bug #120) deixa esse pulo de graça, sem contar contra o teto — só
+            // avança pra próxima página quando o laço percorre a página inteira sem bater no teto.
             var paginaEsgotada = true;
 
-            for (var indice = paginaOffset; indice < page.Videos.Count; indice++)
+            foreach (var video in page.Videos)
             {
-                if (ct.IsCancellationRequested) { paginaEsgotada = false; paginaOffset = indice; break; }
+                if (ct.IsCancellationRequested) { paginaEsgotada = false; break; }
 
-                if (processedIds.Count >= maxVideosPerRun) { paginaEsgotada = false; paginaOffset = indice; break; }
-
-                var video = page.Videos[indice];
+                if (processedIds.Count >= maxVideosPerRun) { paginaEsgotada = false; break; }
 
                 if (applyDateFilter && video.UploadedAt <= (filtroDataBase ?? DateTime.MinValue)) continue;
 
                 if (!videoHandler.IsRelevant(video))
                 {
                     logger.LogDebug("Canal {Name} — vídeo irrelevante, ignorando: {Id} — {Title}", config.Name, video.Id, video.Title);
+                    continue;
+                }
+
+                if (await videoHandler.JaProcessadoAsync(video, ct))
+                {
+                    logger.LogDebug("Canal {Name} — vídeo já processado, pulando sem gastar cota: {Id} — {Title}", config.Name, video.Id, video.Title);
                     continue;
                 }
 
@@ -179,15 +182,14 @@ public class ChannelProcessor(
             if (paginaEsgotada)
             {
                 pageToken = page.NextPageToken;
-                paginaOffset = 0;
             }
             else
             {
-                logger.LogInformation("Canal {Name} — teto de {Max} atingido no meio da página (retomando no índice {Indice} na próxima execução)",
-                    config.Name, maxVideosPerRun, paginaOffset);
+                logger.LogInformation("Canal {Name} — teto de {Max} atingido no meio da página (retomando a mesma página na próxima execução)",
+                    config.Name, maxVideosPerRun);
             }
 
-            await progressoRepository.SaveProgressoAsync(channelKey, playlistId, pageToken, lastProcessedDate, paginaOffset, ct);
+            await progressoRepository.SaveProgressoAsync(channelKey, playlistId, pageToken, lastProcessedDate, ct);
 
             logger.LogInformation("Canal {Name} — página processada (próxima página: {NextPageToken})",
                 config.Name, paginaEsgotada ? (pageToken ?? "fim") : "mesma página (retomando)");

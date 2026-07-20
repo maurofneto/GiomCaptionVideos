@@ -109,7 +109,6 @@ using var host = Host.CreateDefaultBuilder(args)
             var transcricaoPublisher = sp.GetRequiredKeyedService<IFilaPublisher<VideoEtapaMensagem>>("transcricao");
             var sessionContext = sp.GetRequiredService<ISessionContext>();
             var tracingService = sp.GetRequiredService<ITracingService>();
-            var logger = sp.GetRequiredService<ILogger<CanalIngestaoVideoHandler>>();
             var canalPorId = canaisDeTeste.ToDictionary(c => c.ChannelId);
             var cache = new Dictionary<string, IVideoHandler>();
 
@@ -117,7 +116,7 @@ using var host = Host.CreateDefaultBuilder(args)
             {
                 if (!cache.TryGetValue(channelId, out var handler))
                 {
-                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], videoRepository, transcricaoPublisher, sessionContext, tracingService, logger);
+                    handler = new CanalIngestaoVideoHandler(canalPorId[channelId], videoRepository, transcricaoPublisher, sessionContext, tracingService);
                     cache[channelId] = handler;
                 }
                 return handler;

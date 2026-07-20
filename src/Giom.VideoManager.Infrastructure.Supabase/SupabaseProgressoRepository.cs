@@ -51,19 +51,7 @@ public class SupabaseProgressoRepository : IProgressoRepository
         return value != null ? DateTime.Parse(value) : null;
     }
 
-    public async Task<int> GetPaginaOffsetAsync(string channelKey, string playlistId, CancellationToken ct = default)
-    {
-        var response = await _http.GetAsync(
-            $"/rest/v1/processamento_progresso?channel_key=eq.{channelKey}&playlist_id=eq.{playlistId}&select=pagina_offset", ct);
-
-        if (!response.IsSuccessStatusCode) return 0;
-
-        var json = await response.Content.ReadAsStringAsync(ct);
-        var list = JsonConvert.DeserializeObject<List<Dictionary<string, int?>>>(json);
-        return list?.FirstOrDefault()?.GetValueOrDefault("pagina_offset") ?? 0;
-    }
-
-    public async Task SaveProgressoAsync(string channelKey, string playlistId, string? pageToken, DateTime? maxProcessedDate, int paginaOffset, CancellationToken ct = default)
+    public async Task SaveProgressoAsync(string channelKey, string playlistId, string? pageToken, DateTime? maxProcessedDate, CancellationToken ct = default)
     {
         var dto = new
         {
@@ -71,7 +59,6 @@ public class SupabaseProgressoRepository : IProgressoRepository
             playlist_id = playlistId,
             last_page_token = pageToken,
             last_processed_date = maxProcessedDate,
-            pagina_offset = paginaOffset,
             last_execution_date = DateTime.UtcNow
         };
 
