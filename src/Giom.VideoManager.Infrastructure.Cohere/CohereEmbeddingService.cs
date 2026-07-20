@@ -144,14 +144,19 @@ public class CohereEmbeddingService : IEmbeddingService
             var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
 
             // Bug #122: farol serializa entre TODAS as tasks concorrentes, não só threads
-            // locais (autoscaling escala até maxCapacity). Cohere Embed não documenta limite
-            // por request nem por token — o limite real é "inputs" (nº de textos no batch),
-            // 2000/min (docs.cohere.com/docs/rate-limits) — daí a dimensão própria, não
-            // Requisicoes nem Tokens (que se aplicariam a Voyage/OpenAI, mas não descrevem o
-            // limite real do Cohere Embed).
+            // locais (autoscaling escala até maxCapacity). Cohere Embed em si não documenta
+            // limite por request nem por token — o limite do ENDPOINT é "inputs" (nº de textos
+            // no batch), 2000/min (docs.cohere.com/docs/rate-limits). Mas achado ao vivo
+            // (backfill em dev, 2026-07-20): a CHAVE trial tem um teto adicional, separado —
+            // "trial token rate limit exceeded, limit is 100000 tokens per minute" — que só
+            // aparece em volume (vídeos grandes), não documentado junto do limite do endpoint.
+            // Daí pedir as duas dimensões: Inputs cobre o limite do endpoint, Tokens cobre o
+            // teto da chave trial (mesmo padrão do Voyage, tokensEstimados = chars/4).
+            var tokensEstimados = batch.Sum(t => t.Length) / 4.0;
             await _farol.AguardarAsync("Cohere", new Dictionary<string, double>
             {
-                [RateLimiterDimensao.Inputs] = batch.Count
+                [RateLimiterDimensao.Inputs] = batch.Count,
+                [RateLimiterDimensao.Tokens] = tokensEstimados
             }, ct);
             var response = await _cohere.PostAsync("v2/embed", content, ct);
             var json = await response.Content.ReadAsStringAsync(ct);
