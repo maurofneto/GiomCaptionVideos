@@ -276,6 +276,10 @@ public static class ServiceCollectionExtensions
                     services.AddGrokAgent(config);
                     services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<GrokAgentService>());
                     break;
+                case "Kimi":
+                    services.AddKimiAgent(config);
+                    services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<KimiAgentService>());
+                    break;
                 case "OpenAI":
                     services.AddOpenAiAgent(config);
                     services.AddKeyedSingleton<IAgentService>(nome, (sp, _) => sp.GetRequiredService<OpenAiAgentService>());

@@ -41,7 +41,7 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
             .ToListAsync(ct);
 
         documentos.Reverse();
-        return documentos.Select(d => new TurnoConversa(d.NumericId, d.Pergunta, d.Resposta)).ToList();
+        return documentos.Select(d => new TurnoConversa(d.NumericId, d.Pergunta, d.Resposta, d.ReasoningContent)).ToList();
     }
 
     public async Task<TurnoConversa> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
@@ -59,6 +59,7 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
             ChatId = chatId,
             Pergunta = turno.Pergunta,
             Resposta = turno.Resposta,
+            ReasoningContent = turno.ReasoningContent,
             CriadoEm = DateTime.UtcNow,
             Geracao = geracao
         };
@@ -69,7 +70,9 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
 
     public async Task AtualizarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
-        var update = Builders<TurnoConversaDocumento>.Update.Set(d => d.Resposta, turno.Resposta);
+        var update = Builders<TurnoConversaDocumento>.Update
+            .Set(d => d.Resposta, turno.Resposta)
+            .Set(d => d.ReasoningContent, turno.ReasoningContent);
         await _collection.UpdateOneAsync(d => d.NumericId == turno.Id, update, cancellationToken: ct);
     }
 
@@ -122,6 +125,7 @@ public class MongoConversaHistoricoService : IConversaHistoricoService
         public string ChatId { get; set; } = string.Empty;
         public string Pergunta { get; set; } = string.Empty;
         public string? Resposta { get; set; }
+        public string? ReasoningContent { get; set; }
         public DateTime CriadoEm { get; set; }
         public int Geracao { get; set; } = 1;
         public int? Feedback { get; set; }

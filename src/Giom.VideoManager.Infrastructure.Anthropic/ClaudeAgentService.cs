@@ -53,7 +53,7 @@ public class ClaudeAgentService : IAgentService
         _systemPrompt = prompts.Load("agent.md");
     }
 
-    public async Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         // RequestId sempre gerado — quem decide se algo realmente consome isso (ex.: reportar
         // feedback via Helicone) é a plataforma externa de observabilidade, não esta classe.
@@ -122,6 +122,6 @@ public class ClaudeAgentService : IAgentService
             throw new InvalidOperationException("Claude não retornou texto");
         }
 
-        return texto;
+        return new RespostaAgente(texto);
     }
 }

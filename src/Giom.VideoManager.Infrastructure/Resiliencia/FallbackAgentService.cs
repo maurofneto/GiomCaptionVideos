@@ -8,10 +8,10 @@ public sealed class FallbackAgentService(
     IReadOnlyList<(string Nome, IAgentService Servico)> cadeia,
     ILogger<FallbackAgentService> logger) : IAgentService
 {
-    public Task<string> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
+    public Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var elos = cadeia
-            .Select(c => (c.Nome, (Func<CancellationToken, Task<string>>)(token => c.Servico.ResponderAsync(chatId, turnoAtual, contexto, historico, token))))
+            .Select(c => (c.Nome, (Func<CancellationToken, Task<RespostaAgente>>)(token => c.Servico.ResponderAsync(chatId, turnoAtual, contexto, historico, token))))
             .ToList();
 
         return FallbackChain.Montar(elos).ExecutarAsync("agent", logger, ct);

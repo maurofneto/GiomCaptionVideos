@@ -46,7 +46,7 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
         // resposta=not.is.null — exclui um turno em andamento (pergunta gravada, resposta
         // ainda não preenchida) do contexto passado pro agente.
         var response = await _http.GetAsync(
-            $"/rest/v1/conversa_historico?chat_id=eq.{chatId}&geracao=eq.{geracao}&resposta=not.is.null&select=id,pergunta,resposta&order=criado_em.asc", ct);
+            $"/rest/v1/conversa_historico?chat_id=eq.{chatId}&geracao=eq.{geracao}&resposta=not.is.null&select=id,pergunta,resposta,reasoning_content&order=criado_em.asc", ct);
 
         if (!response.IsSuccessStatusCode) return [];
 
@@ -57,7 +57,7 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
     public async Task<TurnoConversa> AdicionarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
         var geracao = await ObterGeracaoAtualAsync(chatId, ct);
-        var dto = new { chat_id = chatId, pergunta = turno.Pergunta, resposta = turno.Resposta, geracao };
+        var dto = new { chat_id = chatId, pergunta = turno.Pergunta, resposta = turno.Resposta, reasoning_content = turno.ReasoningContent, geracao };
         var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
 
         // "Prefer: return=representation" faz o PostgREST devolver o registro criado (com o id
@@ -76,7 +76,10 @@ public class SupabaseConversaHistoricoService : IConversaHistoricoService
 
     public async Task AtualizarAsync(string chatId, TurnoConversa turno, CancellationToken ct = default)
     {
-        var dto = new { resposta = turno.Resposta };
+        // reasoning_content some do PATCH quando null (NullValueHandling.Ignore, JsonSettings) —
+        // no-op nesse caso, já que a coluna já nasce null no AdicionarAsync (turnos de
+        // Claude/Grok/OpenAI nunca têm ReasoningContent).
+        var dto = new { resposta = turno.Resposta, reasoning_content = turno.ReasoningContent };
         var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
         var request = new HttpRequestMessage(HttpMethod.Patch, $"/rest/v1/conversa_historico?id=eq.{turno.Id}") { Content = content };
         await _http.SendAsync(request, ct);

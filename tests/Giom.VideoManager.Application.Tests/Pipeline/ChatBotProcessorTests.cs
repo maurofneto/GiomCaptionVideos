@@ -55,7 +55,7 @@ public class ChatBotProcessorTests
 
             Agent
                 .Setup(a => a.ResponderAsync(It.IsAny<string>(), It.IsAny<TurnoConversa>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<TurnoConversa>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync("resposta gerada pelo agente");
+                .ReturnsAsync(new RespostaAgente("resposta gerada pelo agente"));
         }
 
         public ChatBotProcessor CriarProcessor() => new(
@@ -114,7 +114,7 @@ public class ChatBotProcessorTests
         ambiente.Agent
             .Setup(a => a.ResponderAsync(It.IsAny<string>(), It.IsAny<TurnoConversa>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<TurnoConversa>>(), It.IsAny<CancellationToken>()))
             .Callback(() => ambiente.ContextoTelemetria.IniciarEscopo(reaproveitarEscopoExistente: true).RequestIdExterno = "helicone-req-abc")
-            .ReturnsAsync("resposta gerada pelo agente");
+            .ReturnsAsync(new RespostaAgente("resposta gerada pelo agente"));
         var processor = ambiente.CriarProcessor();
 
         await processor.ProcessarMensagemAsync(new IncomingMessage(ChatId, "pergunta qualquer", "usuario"), CancellationToken.None);
@@ -149,7 +149,7 @@ public class ChatBotProcessorTests
         ambiente.Agent
             .Setup(a => a.ResponderAsync(It.IsAny<string>(), It.IsAny<TurnoConversa>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<TurnoConversa>>(), It.IsAny<CancellationToken>()))
             .Callback<string, TurnoConversa, string, IReadOnlyList<TurnoConversa>, CancellationToken>((_, _, _, historico, _) => historicoRecebido = historico)
-            .ReturnsAsync("resposta nova");
+            .ReturnsAsync(new RespostaAgente("resposta nova"));
 
         await ambiente.CriarProcessor().ProcessarMensagemAsync(new IncomingMessage(ChatId, "pergunta nova", "usuario"), CancellationToken.None);
 
@@ -175,7 +175,7 @@ public class ChatBotProcessorTests
         ambiente.Agent
             .Setup(a => a.ResponderAsync(It.IsAny<string>(), It.IsAny<TurnoConversa>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<TurnoConversa>>(), It.IsAny<CancellationToken>()))
             .Callback<string, TurnoConversa, string, IReadOnlyList<TurnoConversa>, CancellationToken>((_, _, _, historico, _) => historicoRecebido = historico)
-            .ReturnsAsync("resposta nova");
+            .ReturnsAsync(new RespostaAgente("resposta nova"));
 
         await ambiente.CriarProcessor().ProcessarMensagemAsync(new IncomingMessage(ChatId, "pergunta nova", "usuario"), CancellationToken.None);
 
@@ -194,7 +194,7 @@ public class ChatBotProcessorTests
         ambiente.Agent
             .Setup(a => a.ResponderAsync(It.IsAny<string>(), It.IsAny<TurnoConversa>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<TurnoConversa>>(), It.IsAny<CancellationToken>()))
             .Callback<string, TurnoConversa, string, IReadOnlyList<TurnoConversa>, CancellationToken>((_, _, _, historico, _) => historicoRecebido = historico)
-            .ReturnsAsync("resposta nova");
+            .ReturnsAsync(new RespostaAgente("resposta nova"));
 
         await ambiente.CriarProcessor().ProcessarMensagemAsync(new IncomingMessage(ChatId, "pergunta nova", "usuario"), CancellationToken.None);
 
@@ -214,7 +214,7 @@ public class ChatBotProcessorTests
                 meta.TokensSaida = 50;
                 meta.CustoEstimadoUsd = 0.0042m;
             })
-            .ReturnsAsync("resposta gerada pelo agente");
+            .ReturnsAsync(new RespostaAgente("resposta gerada pelo agente"));
 
         await ambiente.CriarProcessor().ProcessarMensagemAsync(new IncomingMessage(ChatId, "pergunta qualquer", "usuario"), CancellationToken.None);
 
@@ -306,7 +306,7 @@ public class ChatBotProcessorTests
             {
                 cts.Cancel(); // simula: outra mensagem chegou e cancelou este processamento
                 await Task.Delay(Timeout.Infinite, ct);
-                return "nunca chega aqui";
+                return new RespostaAgente("nunca chega aqui");
             });
 
         await ambiente.CriarProcessor().ProcessarMensagemAsync(new IncomingMessage(ChatId, "pergunta qualquer", "usuario"), cts.Token);
@@ -329,7 +329,7 @@ public class ChatBotProcessorTests
                 if (Interlocked.Increment(ref chamadas) == 1)
                     await Task.Delay(Timeout.Infinite, ct); // primeira pergunta "trava" até ser cancelada pela segunda
 
-                return "resposta da segunda pergunta";
+                return new RespostaAgente("resposta da segunda pergunta");
             });
 
         ambiente.Channel.Mensagens.Add(new IncomingMessage(ChatId, "primeira pergunta", "usuario"));
