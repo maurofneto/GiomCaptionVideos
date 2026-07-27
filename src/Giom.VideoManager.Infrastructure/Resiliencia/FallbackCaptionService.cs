@@ -15,6 +15,6 @@ public sealed class FallbackCaptionService(
             .Select(c => (c.Nome, (Func<CancellationToken, Task<Transcricao?>>)(token => c.Servico.GetCaptionAsync(video, token))))
             .ToList();
 
-        return FallbackChain.Montar(elos).ExecutarAsync("transcricao", logger, ct);
+        return FallbackChain.Montar(elos).ExecutarAsync("transcricao", logger, ct, resultadoVazio: r => r is null);
     }
 }

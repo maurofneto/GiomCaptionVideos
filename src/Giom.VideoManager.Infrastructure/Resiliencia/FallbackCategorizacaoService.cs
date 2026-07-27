@@ -28,6 +28,6 @@ public sealed class FallbackCategorizacaoService(
             })))
             .ToList();
 
-        return await FallbackChain.Montar(elos).ExecutarAsync("categorizacao", logger, ct);
+        return await FallbackChain.Montar(elos).ExecutarAsync("categorizacao", logger, ct, resultadoVazio: r => r is null or { Count: 0 });
     }
 }
