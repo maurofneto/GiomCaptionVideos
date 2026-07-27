@@ -33,6 +33,6 @@ public sealed class FallbackResumoService(
             })))
             .ToList();
 
-        return await FallbackChain.Montar(elos).ExecutarAsync("resumo", logger, ct, resultadoVazio: r => r is null);
+        return await FallbackChain.Montar(elos).ExecutarAsync("resumo", logger, ct);
     }
 }

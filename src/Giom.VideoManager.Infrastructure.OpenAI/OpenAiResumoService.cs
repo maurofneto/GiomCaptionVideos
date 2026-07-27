@@ -93,7 +93,7 @@ public class OpenAiResumoService : IResumoProvedorService
             custoEstimadoUsd: PricingCalculator.Calcular("OpenAI", modelo, result?.usage?.prompt_tokens, result?.usage?.completion_tokens),
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason });
 
-        if (string.IsNullOrWhiteSpace(texto)) return null;
+        if (string.IsNullOrWhiteSpace(texto)) throw new NenhumResultadoEncontradoException("OpenAI.Resumo", $"resposta veio vazia pro vídeo {video.Id}");
 
         _logger.LogInformation("Resumo gerado via OpenAI para {VideoId}", video.Id);
 

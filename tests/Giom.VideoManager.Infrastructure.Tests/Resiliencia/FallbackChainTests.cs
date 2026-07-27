@@ -1,3 +1,4 @@
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Giom.VideoManager.Testes.Comuns;
 using Xunit;
@@ -74,61 +75,23 @@ public class FallbackChainTests
         Assert.Empty(logger.Entradas);
     }
 
-    // Bug #134 — um elo que devolve "sem conteúdo" (null, string vazia, lista vazia) SEM lançar
-    // exceção não pode virar a resposta final da cadeia enquanto houver próximo elo — antes do
-    // fix, nada distinguia isso de um sucesso de verdade.
-    private static (List<(string Nome, Func<CancellationToken, Task<string?>> Executar)> Elos, List<string> Chamadas) MontarElosComVazio(params (string Nome, string? Resultado)[] especificacao)
+    // Bug #134 — "não achei nada" (NenhumResultadoEncontradoException) precisa cair no MESMO
+    // mecanismo de fallback que qualquer outra exceção — sem precisar a cadeia saber a diferença.
+    [Fact]
+    public async Task ExecutarAsync_PrimeiroLancaNenhumResultadoEncontrado_CaiParaOSegundo()
     {
         var chamadas = new List<string>();
-        var elos = especificacao.Select(e => (e.Nome, (Func<CancellationToken, Task<string?>>)(_ =>
+        var elos = new List<(string Nome, Func<CancellationToken, Task<string>> Executar)>
         {
-            chamadas.Add(e.Nome);
-            return Task.FromResult(e.Resultado);
-        }))).ToList();
-
-        return (elos, chamadas);
-    }
-
-    [Fact]
-    public async Task ExecutarAsync_ComResultadoVazio_PrimeiroEloVazio_CaiParaOSegundo()
-    {
-        var (elos, chamadas) = MontarElosComVazio(("A", null), ("B", "resposta-b"), ("C", "resposta-c"));
-        var logger = new FakeLogger<object>();
-
-        var resultado = await FallbackChain.Montar(elos).ExecutarAsync("etapa", logger, CancellationToken.None, resultadoVazio: r => r is null);
-
-        Assert.Equal("resposta-b", resultado);
-        Assert.Equal(["A", "B"], chamadas);
-        Assert.Single(logger.Entradas);
-        Assert.Contains("Fallback acionado", logger.Entradas[0].Mensagem);
-        Assert.Contains("vazio", logger.Entradas[0].Mensagem);
-    }
-
-    [Fact]
-    public async Task ExecutarAsync_ComResultadoVazio_TodosVazios_DevolveOVazioDoUltimoSemErro()
-    {
-        var (elos, chamadas) = MontarElosComVazio(("A", null), ("B", null), ("C", null));
-        var logger = new FakeLogger<object>();
-
-        var resultado = await FallbackChain.Montar(elos).ExecutarAsync("etapa", logger, CancellationToken.None, resultadoVazio: r => r is null);
-
-        Assert.Null(resultado);
-        Assert.Equal(["A", "B", "C"], chamadas);
-        Assert.Equal(2, logger.Entradas.Count); // avisa A->B e B->C; C é o último, devolve vazio sem log
-    }
-
-    [Fact]
-    public async Task ExecutarAsync_SemPredicadoDeVazio_ComportamentoAntigoPreservado()
-    {
-        // Sem passar resultadoVazio (compat com quem não precisa disso, ex.: Agent/Embedding),
-        // um resultado vazio-mas-sem-erro continua virando a resposta final igual sempre foi.
-        var (elos, chamadas) = MontarElosComVazio(("A", null), ("B", "resposta-b"));
+            ("A", _ => { chamadas.Add("A"); throw new NenhumResultadoEncontradoException("A", "não achou nada"); }),
+            ("B", _ => { chamadas.Add("B"); return Task.FromResult("resposta-b"); }),
+        };
         var logger = new FakeLogger<object>();
 
         var resultado = await FallbackChain.Montar(elos).ExecutarAsync("etapa", logger, CancellationToken.None);
 
-        Assert.Null(resultado);
-        Assert.Equal(["A"], chamadas);
-        Assert.Empty(logger.Entradas);
+        Assert.Equal("resposta-b", resultado);
+        Assert.Equal(["A", "B"], chamadas);
+        Assert.Single(logger.Entradas);
     }
 }
