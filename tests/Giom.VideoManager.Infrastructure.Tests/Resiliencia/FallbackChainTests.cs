@@ -1,3 +1,4 @@
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Giom.VideoManager.Testes.Comuns;
 using Xunit;
@@ -72,5 +73,25 @@ public class FallbackChainTests
             () => FallbackChain.Montar(elos).ExecutarAsync("etapa", logger, CancellationToken.None));
 
         Assert.Empty(logger.Entradas);
+    }
+
+    // Bug #134 — "não achei nada" (NenhumResultadoEncontradoException) precisa cair no MESMO
+    // mecanismo de fallback que qualquer outra exceção — sem precisar a cadeia saber a diferença.
+    [Fact]
+    public async Task ExecutarAsync_PrimeiroLancaNenhumResultadoEncontrado_CaiParaOSegundo()
+    {
+        var chamadas = new List<string>();
+        var elos = new List<(string Nome, Func<CancellationToken, Task<string>> Executar)>
+        {
+            ("A", _ => { chamadas.Add("A"); throw new NenhumResultadoEncontradoException("A", "não achou nada"); }),
+            ("B", _ => { chamadas.Add("B"); return Task.FromResult("resposta-b"); }),
+        };
+        var logger = new FakeLogger<object>();
+
+        var resultado = await FallbackChain.Montar(elos).ExecutarAsync("etapa", logger, CancellationToken.None);
+
+        Assert.Equal("resposta-b", resultado);
+        Assert.Equal(["A", "B"], chamadas);
+        Assert.Single(logger.Entradas);
     }
 }

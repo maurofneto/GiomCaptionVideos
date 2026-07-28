@@ -98,7 +98,7 @@ public class ClaudeResumoService : IResumoProvedorService
             detalhes: new { stopReason = response.StopReason });
 
         if (string.IsNullOrWhiteSpace(content))
-            return null;
+            throw new NenhumResultadoEncontradoException("Claude.Resumo", $"resposta veio vazia pro vídeo {video.Id} (stopReason={response.StopReason})");
 
         if (response.StopReason == "max_tokens")
             _logger.LogWarning("Resumo cortado por MaxTokens ({MaxTokens}) para {VideoId}", maxTokens, video.Id);

@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Entities;
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Google.Apis.YouTube.v3;
 using Giom.VideoManager.Infrastructure;
@@ -47,7 +48,7 @@ public class YouTubeCaptionService : ICaptionService
             // que chama isso já loga um Warning com o título quando Transcricao continua null —
             // aqui fica em Information pra não duplicar o nível de alerta, só dar o motivo exato.
             _logger.LogInformation("Nenhuma legenda disponível para vídeo {VideoId}", video.Id);
-            return null;
+            throw new NenhumResultadoEncontradoException("YouTubeCaption", $"nenhuma legenda disponível pro vídeo {video.Id}");
         }
 
         var downloadRequest  = _youtube.Captions.Download(caption.Id);
@@ -60,7 +61,7 @@ public class YouTubeCaptionService : ICaptionService
         if (string.IsNullOrWhiteSpace(conteudo))
         {
             _logger.LogWarning("Legenda vazia para {VideoId}", video.Id);
-            return null;
+            throw new NenhumResultadoEncontradoException("YouTubeCaption", $"legenda baixada veio vazia pro vídeo {video.Id}");
         }
 
         _logger.LogInformation("Legenda obtida via YouTubeCaption: {VideoId} ({Formato}, {Chars} chars)",

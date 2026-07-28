@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Entities;
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -63,20 +64,20 @@ public class YtDlpCaptionService : ICaptionService
             if (exitCode != 0)
             {
                 _logger.LogWarning("yt-dlp falhou (código {Code}) para vídeo {VideoId}", exitCode, video.Id);
-                return null;
+                throw new NenhumResultadoEncontradoException("YtDlpCaption", $"yt-dlp falhou (código {exitCode}) pro vídeo {video.Id}");
             }
 
             var vttFile = FindVttFile(workDir);
             if (vttFile == null)
             {
                 _logger.LogDebug("Nenhuma legenda encontrada para vídeo {VideoId}", video.Id);
-                return null;
+                throw new NenhumResultadoEncontradoException("YtDlpCaption", $"nenhum arquivo .vtt gerado pro vídeo {video.Id}");
             }
 
             var rawVtt = await File.ReadAllTextAsync(vttFile, ct);
             var texto = ParseVtt(rawVtt);
 
-            if (string.IsNullOrWhiteSpace(texto)) return null;
+            if (string.IsNullOrWhiteSpace(texto)) throw new NenhumResultadoEncontradoException("YtDlpCaption", $"VTT do vídeo {video.Id} veio vazio após parse");
 
             _logger.LogInformation("Legenda obtida via yt-dlp: {VideoId} ({Chars} chars)", video.Id, texto.Length);
 

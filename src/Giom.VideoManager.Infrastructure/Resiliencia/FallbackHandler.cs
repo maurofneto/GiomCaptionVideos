@@ -7,6 +7,14 @@ namespace Giom.VideoManager.Infrastructure.Resiliencia;
 /// falhar, repassa pro próximo elo — sem laço, cada elo só conhece o seguinte. O último elo (sem
 /// <see cref="ComProximo"/>) não captura a exceção, então ela propaga normalmente — preserva o
 /// retry/DLQ da Feature #34 quando a cadeia inteira falha.
+///
+/// Bug #134 — "não achei nada" (sem legenda, resposta vazia/truncada do modelo) deve lançar
+/// <see cref="Giom.VideoManager.Domain.Exceptions.NenhumResultadoEncontradoException"/> em vez
+/// de devolver um resultado vazio (null/lista vazia): esse tipo de retorno não é exceção, então
+/// a cadeia aceitava como sucesso e nunca chegava no próximo elo (ex.: Whisper nunca tentado
+/// porque YouTubeCaptionService "só" devolvia null sem legenda). Cada provider concreto é
+/// responsável por lançar essa exceção no lugar certo — este handler não precisa saber a
+/// diferença entre um erro técnico e um "nada encontrado", os dois usam o mesmo canal.
 /// </summary>
 public sealed class FallbackHandler<TResult>(string nome, Func<CancellationToken, Task<TResult>> executar)
 {

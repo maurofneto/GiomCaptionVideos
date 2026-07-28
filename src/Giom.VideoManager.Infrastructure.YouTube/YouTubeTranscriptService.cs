@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Entities;
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -52,27 +53,27 @@ public class YouTubeTranscriptService : ICaptionService
     {
         // 1. Carrega a página do vídeo
         var html = await FetchPageAsync(video.Id, ct);
-        if (html == null) return null;
+        if (html == null) throw new NenhumResultadoEncontradoException("YouTubeTranscript", $"falha ao carregar a página do vídeo {video.Id}");
 
         // 2. Extrai ytInitialPlayerResponse
         var captionTracks = ExtractCaptionTracks(html);
         if (captionTracks == null || !captionTracks.Any())
         {
             _logger.LogDebug("Nenhuma faixa de legenda encontrada para {VideoId}", video.Id);
-            return null;
+            throw new NenhumResultadoEncontradoException("YouTubeTranscript", $"nenhuma faixa de legenda encontrada pro vídeo {video.Id}");
         }
 
         // 3. Escolhe a melhor faixa pelo idioma preferido (manual > automática)
         var track = SelectBestTrack(captionTracks);
-        if (track == null) return null;
+        if (track == null) throw new NenhumResultadoEncontradoException("YouTubeTranscript", $"nenhuma faixa no idioma preferido pro vídeo {video.Id}");
 
         // 4. Baixa o VTT
         var vtt = await DownloadVttAsync(track.Url, ct);
-        if (vtt == null) return null;
+        if (vtt == null) throw new NenhumResultadoEncontradoException("YouTubeTranscript", $"falha ao baixar o VTT do vídeo {video.Id}");
 
         // 5. Converte VTT → texto limpo
         var texto = ParseVtt(vtt);
-        if (string.IsNullOrWhiteSpace(texto)) return null;
+        if (string.IsNullOrWhiteSpace(texto)) throw new NenhumResultadoEncontradoException("YouTubeTranscript", $"VTT do vídeo {video.Id} veio vazio após parse");
 
         _logger.LogInformation("Transcrição obtida para {VideoId} — idioma: {Lang}, automática: {Auto}, {Chars} chars",
             video.Id, track.LanguageCode, track.IsAuto, texto.Length);
