@@ -84,8 +84,11 @@ public static class ServiceCollectionExtensions
                     services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>(nome);
                     break;
                 case "Whisper":
-                    services.Configure<WhisperOptions>(config.GetSection("Whisper"));
-                    services.AddSingleton<ITranscricaoService, WhisperTranscricaoService>();
+                    // AddWhisperTranscription (Bug #135) registra IContextoTelemetria + o
+                    // HttpClient "whisper" que WhisperTranscricaoService exige desde a migração
+                    // pra API — o switch aqui só cuidava de Configure/AddSingleton antes, quando
+                    // o serviço ainda era CLI local sem essas dependências.
+                    services.AddWhisperTranscription(config);
                     services.AddKeyedSingleton<ICaptionService, WhisperCaptionService>(nome);
                     break;
                 default: // YouTubeTranscript
