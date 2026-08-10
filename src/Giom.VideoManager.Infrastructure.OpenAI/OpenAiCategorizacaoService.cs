@@ -93,7 +93,7 @@ public class OpenAiCategorizacaoService : ICategorizacaoProvedorService
             custoEstimadoUsd: PricingCalculator.Calcular("OpenAI", modelo, result?.usage?.prompt_tokens, result?.usage?.completion_tokens),
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason });
 
-        if (string.IsNullOrWhiteSpace(json)) return [];
+        if (string.IsNullOrWhiteSpace(json)) throw new NenhumResultadoEncontradoException("OpenAI.Categorizacao", $"resposta veio vazia pro vídeo {video.Id}");
 
         _logger.LogInformation("Categorização gerada via OpenAI para {VideoId}", video.Id);
 
@@ -102,7 +102,7 @@ public class OpenAiCategorizacaoService : ICategorizacaoProvedorService
         var items = JsonConvert.DeserializeAnonymousType(json,
             new[] { new { area = "", subcategoria = "", peso = 0.0 } });
 
-        if (items == null || items.Length == 0) return [];
+        if (items == null || items.Length == 0) throw new NenhumResultadoEncontradoException("OpenAI.Categorizacao", $"JSON sem itens pro vídeo {video.Id}: {json}");
 
         var categorias = new List<CategoriaTeologica>();
         foreach (var item in items)
@@ -122,6 +122,8 @@ public class OpenAiCategorizacaoService : ICategorizacaoProvedorService
                 ClassificadoEm = DateTime.UtcNow
             });
         }
+
+        if (categorias.Count == 0) throw new NenhumResultadoEncontradoException("OpenAI.Categorizacao", $"nenhuma área teológica reconhecida pro vídeo {video.Id}: {json}");
 
         return categorias.OrderByDescending(c => c.Peso).ToList();
     }

@@ -87,7 +87,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoProvedorService
             custoEstimadoUsd: PricingCalculator.Calcular("Claude", modelo, response.Usage?.InputTokens, response.Usage?.OutputTokens),
             detalhes: new { stopReason = response.StopReason });
 
-        if (string.IsNullOrWhiteSpace(json)) return [];
+        if (string.IsNullOrWhiteSpace(json)) throw new NenhumResultadoEncontradoException("Claude.Categorizacao", $"resposta veio vazia pro vídeo {video.Id} (stopReason={response.StopReason})");
 
         if (response.StopReason == "max_tokens")
             _logger.LogWarning("Categorização cortada por MaxTokens ({MaxTokens}) para {VideoId}", maxTokens, video.Id);
@@ -99,7 +99,7 @@ public class ClaudeCategorizacaoService : ICategorizacaoProvedorService
         var items = JsonConvert.DeserializeAnonymousType(json,
             new[] { new { area = "", subcategoria = "", peso = 0.0 } });
 
-        if (items == null || items.Length == 0) return [];
+        if (items == null || items.Length == 0) throw new NenhumResultadoEncontradoException("Claude.Categorizacao", $"JSON sem itens pro vídeo {video.Id}: {json}");
 
         var categorias = new List<CategoriaTeologica>();
         foreach (var item in items)
@@ -119,6 +119,8 @@ public class ClaudeCategorizacaoService : ICategorizacaoProvedorService
                 ClassificadoEm = DateTime.UtcNow
             });
         }
+
+        if (categorias.Count == 0) throw new NenhumResultadoEncontradoException("Claude.Categorizacao", $"nenhuma área teológica reconhecida pro vídeo {video.Id}: {json}");
 
         return categorias.OrderByDescending(c => c.Peso).ToList();
     }
