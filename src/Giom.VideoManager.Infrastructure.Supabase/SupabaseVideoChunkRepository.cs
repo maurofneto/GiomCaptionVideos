@@ -70,13 +70,31 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
 
     public async Task<IReadOnlyList<string>> ListarVideoIdsPorOrigemAsync(string origem, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/rest/v1/video_chunk?select=video_id&origem=eq.{origem}", ct);
-        response.EnsureSuccessStatusCode();
+        // O PostgREST corta em 1000 linhas por página por padrão — video_chunk tem muito mais
+        // linhas que isso por origem (cada vídeo vira dezenas de chunks), então uma chamada sem
+        // paginação devolve só uma fatia arbitrária dos vídeos, não o corpus inteiro. Pagina via
+        // Range até a página vir mais curta que o tamanho pedido (fim dos dados).
+        const int paginaTamanho = 1000;
+        var videoIds = new HashSet<string>();
 
-        var json = await response.Content.ReadAsStringAsync(ct);
-        var linhas = JsonConvert.DeserializeObject<List<Dictionary<string, string>>>(json) ?? [];
+        for (var offset = 0; ; offset += paginaTamanho)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"/rest/v1/video_chunk?select=video_id&origem=eq.{origem}");
+            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(offset, offset + paginaTamanho - 1);
 
-        return linhas.Select(l => l["video_id"]).Distinct().Order().ToList();
+            var response = await _http.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            var linhas = JsonConvert.DeserializeObject<List<Dictionary<string, string>>>(json) ?? [];
+
+            foreach (var linha in linhas)
+                videoIds.Add(linha["video_id"]);
+
+            if (linhas.Count < paginaTamanho) break;
+        }
+
+        return videoIds.Order().ToList();
     }
 
     public async Task<BuscaSemanticaResultado> BuscarSimilaresAsync(
