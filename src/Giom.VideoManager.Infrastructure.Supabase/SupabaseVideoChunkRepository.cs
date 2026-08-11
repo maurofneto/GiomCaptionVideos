@@ -75,12 +75,20 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
         // paginação devolve só uma fatia arbitrária dos vídeos, não o corpus inteiro. Pagina via
         // Range até a página vir mais curta que o tamanho pedido (fim dos dados).
         const int paginaTamanho = 1000;
+        const int maxPaginas = 50; // 50k linhas — folga generosa acima do corpus atual (~8.4k); estoura em erro claro em vez de girar pra sempre se a paginação quebrar de novo
         var videoIds = new HashSet<string>();
+        var completo = false;
 
-        for (var offset = 0; ; offset += paginaTamanho)
+        for (var offset = 0; offset < paginaTamanho * maxPaginas; offset += paginaTamanho)
         {
+            // PostgREST não usa o Range HTTP padrão ("bytes=0-999") — espera dois headers
+            // separados (Range-Unit: items + Range: 0-999, sem prefixo de unidade). O tipo
+            // RangeHeaderValue do .NET fixa Unit="bytes" por padrão, que o PostgREST ignora
+            // silenciosamente e devolve sempre a mesma primeira página — loop infinito sem
+            // nenhum erro visível (foi exatamente o que aconteceu numa run real).
             var request = new HttpRequestMessage(HttpMethod.Get, $"/rest/v1/video_chunk?select=video_id&origem=eq.{origem}");
-            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(offset, offset + paginaTamanho - 1);
+            request.Headers.TryAddWithoutValidation("Range-Unit", "items");
+            request.Headers.TryAddWithoutValidation("Range", $"{offset}-{offset + paginaTamanho - 1}");
 
             var response = await _http.SendAsync(request, ct);
             response.EnsureSuccessStatusCode();
@@ -91,8 +99,11 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
             foreach (var linha in linhas)
                 videoIds.Add(linha["video_id"]);
 
-            if (linhas.Count < paginaTamanho) break;
+            if (linhas.Count < paginaTamanho) { completo = true; break; }
         }
+
+        if (!completo)
+            throw new InvalidOperationException($"ListarVideoIdsPorOrigemAsync({origem}): paginação não terminou em {maxPaginas} páginas — provável regressão na paginação PostgREST, abortando em vez de girar indefinidamente.");
 
         return videoIds.Order().ToList();
     }
