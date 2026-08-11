@@ -27,11 +27,19 @@ using Serilog;
 var limite = ObterArgInt(args, "--limite");
 var origemBase = ObterArgString(args, "--origem-base") ?? "OpenAI";
 
+// DOTNET_ENVIRONMENT não setado NÃO deve ser lido como "Development" — appsettings.json aqui já
+// é a config de prod (Secrets:Aws:Path=/giom/prod/..., Supabase de prod), então um fallback
+// implícito faria uma run "sem ambiente definido" cair silenciosamente em dev sem avisar
+// ninguém (aconteceu numa run real: `unset DOTNET_ENVIRONMENT` foi tratado como dev). Só
+// sobrepõe appsettings.{ambiente}.json quando a variável está de fato setada.
+var ambiente = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
     {
         config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-        config.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Development"}.json", optional: true);
+        if (!string.IsNullOrEmpty(ambiente))
+            config.AddJsonFile($"appsettings.{ambiente}.json", optional: true);
         config.AddEnvironmentVariables();
         config.AddSecretsProvider(config.Build());
     })
@@ -65,6 +73,8 @@ var videoRepository = host.Services.GetRequiredService<IVideoRepository>();
 var videoChunkRepository = host.Services.GetRequiredService<IVideoChunkRepository>();
 var indexingService = host.Services.GetRequiredService<IVideoIndexingService>();
 var sessionContext = host.Services.GetRequiredService<ISessionContext>();
+
+logger.LogInformation("Backfill (US #118) — ambiente: {Ambiente}", string.IsNullOrEmpty(ambiente) ? "(não setado — appsettings.json base, prod)" : ambiente);
 
 var videoIds = (await videoChunkRepository.ListarVideoIdsPorOrigemAsync(origemBase)).ToList();
 if (limite is int n) videoIds = videoIds.Take(n).ToList();
