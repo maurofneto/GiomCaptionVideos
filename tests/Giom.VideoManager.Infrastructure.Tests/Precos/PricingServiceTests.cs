@@ -1,6 +1,7 @@
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Precos;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Giom.VideoManager.Infrastructure.Tests.Precos;
@@ -41,7 +42,26 @@ public class PricingServiceTests
         }
     }
 
-    private static readonly PricingService Service = new(new FakePricingRepository());
+    private static readonly PricingService Service = new(new FakePricingRepository(), NullLogger<PricingService>.Instance);
+
+    private sealed class FalhandoPricingRepository : IPricingRepository
+    {
+        public Task<Preco?> ObterAsync(string provedor, string modelo, CancellationToken ct = default) =>
+            throw new HttpRequestException("Supabase indisponível (simulado)");
+    }
+
+    [Fact]
+    public async Task CalcularAsync_RepositorioFalha_RetornaNullEmVezDePropagar()
+    {
+        // Diferente do antigo PricingCalculator (dicionário puro, nunca falhava) — a versão
+        // orientada a banco pode ter erro de rede/tabela ainda não migrada; isso não pode
+        // derrubar a etapa (resumo/categorização/embedding) só porque a telemetria de custo falhou.
+        var service = new PricingService(new FalhandoPricingRepository(), NullLogger<PricingService>.Instance);
+
+        var custo = await service.CalcularAsync("Claude", "claude-sonnet-5", 1000, 1000);
+
+        Assert.Null(custo);
+    }
 
     [Fact]
     public async Task CalcularAsync_ProvedorOuModeloDesconhecido_RetornaNull()

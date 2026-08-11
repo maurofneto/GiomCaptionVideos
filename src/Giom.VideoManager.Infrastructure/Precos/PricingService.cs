@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Infrastructure.Precos;
 
@@ -6,15 +7,33 @@ namespace Giom.VideoManager.Infrastructure.Precos;
 /// Substitui o antigo PricingCalculator estático (Task #130) — mesma lógica de cálculo, preço
 /// agora vem de IPricingRepository (tabela provedor_preco) em vez de dicionário em código.
 /// </summary>
-public sealed class PricingService(IPricingRepository repository) : IPricingService
+public sealed class PricingService(IPricingRepository repository, ILogger<PricingService> logger) : IPricingService
 {
-    /// <summary>Retorna null se provedor/modelo vazio ou não cadastrado — melhor não estimar do que estimar errado.</summary>
+    /// <summary>
+    /// Retorna null se provedor/modelo vazio, não cadastrado, OU se a consulta ao repositório
+    /// falhar (rede, Supabase fora do ar, tabela ainda não migrada) — diferente do antigo
+    /// PricingCalculator (dicionário puro em memória, nunca podia falhar), a versão orientada a
+    /// banco introduz uma nova classe de erro que não pode vazar: telemetria de custo é
+    /// best-effort, nunca deveria derrubar resumo/categorização/embedding porque o preço não foi
+    /// encontrado. "Melhor não estimar do que estimar errado" — e "melhor não estimar do que
+    /// quebrar a etapa".
+    /// </summary>
     public async Task<decimal?> CalcularAsync(string provedor, string? modelo, int? tokensEntrada, int? tokensSaida = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(provedor) || string.IsNullOrWhiteSpace(modelo))
             return null;
 
-        var preco = await repository.ObterAsync(provedor, modelo, ct);
+        Domain.ValueObjects.Preco? preco;
+        try
+        {
+            preco = await repository.ObterAsync(provedor, modelo, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Falha ao consultar preço de {Provedor}/{Modelo} — custoEstimadoUsd sai null nesta chamada", provedor, modelo);
+            return null;
+        }
+
         if (preco is null)
             return null;
 
