@@ -1,29 +1,31 @@
-using System.Net.Http.Headers;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
-using Giom.VideoManager.Infrastructure.Supabase;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Newtonsoft.Json;
 using Serilog;
 
 // US #118 — backfill do corpus existente com os provedores de embedding que faltam (Voyage/
 // Cohere; ver Feature #115/appsettings.json: FallbackChain propositalmente sem OpenAI, já
 // indexado). Roda uma vez, fora do fluxo normal de fila/etapa — não é um worker de produção,
 // é uma ferramenta de operação (mesma ideia do SmokeTests: composição real, execução única).
-// Escopo dos vídeos elegíveis: quem já tem chunk de origem OpenAI (o "corpus existente" que a
-// US pede pra reindexar) — não é "todo vídeo com transcrição", que incluiria vídeos nunca
-// processados por outro motivo (fora do escopo aqui).
+// Escopo dos vídeos elegíveis: quem já tem chunk da origem-base (o "corpus existente" que a US
+// pede pra reindexar) — não é "todo vídeo com transcrição", que incluiria vídeos nunca
+// processados por outro motivo (fora do escopo aqui). A ferramenta em si não sabe nada de
+// Supabase/Postgres — só fala com IVideoRepository/IVideoChunkRepository/IVideoIndexingService
+// (Domain), então funciona igual com qualquer Persistence:Provider que os implemente.
 //
 // --limite N: processa só os N primeiros vídeos elegíveis — usar numa primeira validação antes
 // de rodar o corpus inteiro (custo real de API, rate limit real).
+// --origem-base NOME: origem cujo corpus já indexado define os vídeos elegíveis (default
+// "OpenAI") — deixa a ferramenta reutilizável se um dia o backfill precisar partir de outro
+// provedor já indexado, sem tocar código.
 
-var limite = ObterLimiteDoArgs(args);
+var limite = ObterArgInt(args, "--limite");
+var origemBase = ObterArgString(args, "--origem-base") ?? "OpenAI";
 
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, config) =>
@@ -60,14 +62,15 @@ await host.StartAsync();
 
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
 var videoRepository = host.Services.GetRequiredService<IVideoRepository>();
+var videoChunkRepository = host.Services.GetRequiredService<IVideoChunkRepository>();
 var indexingService = host.Services.GetRequiredService<IVideoIndexingService>();
 var sessionContext = host.Services.GetRequiredService<ISessionContext>();
 
-var videoIds = await ObterVideoIdsComOrigemOpenAiAsync(host.Services, CancellationToken.None);
+var videoIds = (await videoChunkRepository.ListarVideoIdsPorOrigemAsync(origemBase)).ToList();
 if (limite is int n) videoIds = videoIds.Take(n).ToList();
 
-logger.LogInformation("Backfill (US #118) — {Total} vídeos elegíveis (origem OpenAI já indexada){LimiteInfo}",
-    videoIds.Count, limite is int l ? $", limitado a {l} nesta run" : "");
+logger.LogInformation("Backfill (US #118) — {Total} vídeos elegíveis (origem {OrigemBase} já indexada){LimiteInfo}",
+    videoIds.Count, origemBase, limite is int l ? $", limitado a {l} nesta run" : "");
 
 var indexados = 0;
 var pulados = 0;
@@ -114,28 +117,14 @@ logger.LogInformation("Backfill concluído — {Indexados} indexados, {Pulados} 
 await host.StopAsync();
 await Log.CloseAndFlushAsync();
 
-static int? ObterLimiteDoArgs(string[] args)
+static int? ObterArgInt(string[] args, string nome)
 {
-    var idx = Array.IndexOf(args, "--limite");
+    var idx = Array.IndexOf(args, nome);
     return idx >= 0 && idx + 1 < args.Length && int.TryParse(args[idx + 1], out var valor) ? valor : null;
 }
 
-// Lista distinta de video_id com pelo menos um chunk de origem OpenAI — o "corpus existente"
-// que a US #118 pede pra reindexar com os demais provedores. Consulta direta ao PostgREST
-// (não existe método de listagem em IVideoChunkRepository — não vale criar um só pra esta
-// ferramenta de uso único).
-static async Task<List<string>> ObterVideoIdsComOrigemOpenAiAsync(IServiceProvider services, CancellationToken ct)
+static string? ObterArgString(string[] args, string nome)
 {
-    var options = services.GetRequiredService<IOptions<SupabaseOptions>>().Value;
-    var http = services.GetRequiredService<IHttpClientFactory>().CreateClient("supabase");
-    http.BaseAddress = new Uri(options.Url);
-    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.SecretKey);
-    http.DefaultRequestHeaders.Add("apikey", options.SecretKey);
-
-    var response = await http.GetAsync("/rest/v1/video_chunk?select=video_id&origem=eq.OpenAI", ct);
-    response.EnsureSuccessStatusCode();
-    var json = await response.Content.ReadAsStringAsync(ct);
-    var linhas = JsonConvert.DeserializeObject<List<Dictionary<string, string>>>(json) ?? [];
-
-    return linhas.Select(l => l["video_id"]).Distinct().Order().ToList();
+    var idx = Array.IndexOf(args, nome);
+    return idx >= 0 && idx + 1 < args.Length ? args[idx + 1] : null;
 }
