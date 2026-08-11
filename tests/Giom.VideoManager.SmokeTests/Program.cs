@@ -92,7 +92,14 @@ using var host = Host.CreateDefaultBuilder(args)
             services.AddCategorizacaoService(config);
         else
             services.AddSingleton<ICategorizacaoService, FakeCategorizacaoService>();
-        services.AddSingleton<IVideoIndexingService, FakeEmbeddingService>();
+        // Embedding: mesmo mecanismo do Resumo/Categorização acima (Task #130) — com
+        // Embedding:FallbackChain configurado, usa a cadeia REAL (OpenAI/VoyageAI/Cohere, mesma
+        // composição dos workers), exercitando IPricingService nos providers de embedding
+        // também. Sem a seção, mantém o Fake (retry/DLQ).
+        if (config.GetSection("Embedding:FallbackChain").Exists())
+            services.AddEmbeddingService(config);
+        else
+            services.AddSingleton<IVideoIndexingService, FakeEmbeddingService>();
         services.AddSessionContext();
         services.AddActiveChannelContext(); // US #105 — ChannelProcessor agora exige isso no construtor; FakeVideoSource ignora, mas precisa estar registrado
         services.AddTelemetriaService(config);     // Supabase + Sentry + alerta de gasto
@@ -165,10 +172,11 @@ await host.StartAsync();
 // Torna visível qual perfil/modo de resumo esta run está usando — sem isso não dá pra saber, só
 // pelo log, se a cadeia real de fallback (appsettings.teste-fallback.json) foi carregada ou não.
 var configFinal = host.Services.GetRequiredService<IConfiguration>();
-Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Resumo={ModoResumo}, Categorizacao={ModoCategorizacao}, MaxVideosPerRun={Max}",
+Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Resumo={ModoResumo}, Categorizacao={ModoCategorizacao}, Embedding={ModoEmbedding}, MaxVideosPerRun={Max}",
     Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "(nulo → Development)",
     configFinal.GetSection("Resumo:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Resumo:FallbackChain").Get<string[]>() ?? [])}]" : "FakeResumoService",
     configFinal.GetSection("Categorizacao:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Categorizacao:FallbackChain").Get<string[]>() ?? [])}]" : "FakeCategorizacaoService",
+    configFinal.GetSection("Embedding:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Embedding:FallbackChain").Get<string[]>() ?? [])}]" : "FakeEmbeddingService",
     configFinal["ProcessingOptions:MaxVideosPerRun"]);
 
 var processor = host.Services.GetRequiredService<ChannelProcessor>();
