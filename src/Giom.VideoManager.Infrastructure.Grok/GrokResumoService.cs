@@ -5,7 +5,6 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
-using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -33,14 +32,16 @@ public class GrokResumoService : IResumoProvedorService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
     private readonly ITracingService _tracingService;
+    private readonly IPricingService _pricingService;
 
-    public GrokResumoService(IOptions<GrokResumoOptions> options, IHttpClientFactory httpClientFactory, ILogger<GrokResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
+    public GrokResumoService(IOptions<GrokResumoOptions> options, IHttpClientFactory httpClientFactory, ILogger<GrokResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService, IPricingService pricingService)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _sessionContext = sessionContext;
         _tracingService = tracingService;
+        _pricingService = pricingService;
         _http = httpClientFactory.CreateClient("grok");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
     }
@@ -91,7 +92,7 @@ public class GrokResumoService : IResumoProvedorService
             modelo: modelo,
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
-            custoEstimadoUsd: PricingCalculator.Calcular("Grok", modelo, result?.usage?.prompt_tokens, result?.usage?.completion_tokens),
+            custoEstimadoUsd: await _pricingService.CalcularAsync("Grok", modelo, result?.usage?.prompt_tokens, result?.usage?.completion_tokens, ct),
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason });
 
         if (string.IsNullOrWhiteSpace(texto)) throw new NenhumResultadoEncontradoException("Grok.Resumo", $"resposta veio vazia pro vídeo {video.Id}");

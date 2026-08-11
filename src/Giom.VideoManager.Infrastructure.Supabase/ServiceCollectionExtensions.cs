@@ -81,6 +81,14 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>Registro de IPricingRepository (Task #130) — leitura da tabela provedor_preco.</summary>
+    public static IServiceCollection AddSupabasePricing(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSingleton<IPricingRepository, SupabasePricingRepository>();
+        return services;
+    }
+
     /// <summary>
     /// Farol de rate limit por provedor (Bug #122) — token bucket compartilhado via Postgres
     /// (tabela provedor_rate_limit). TryAddSingleton: chamado uma vez por provedor de embedding

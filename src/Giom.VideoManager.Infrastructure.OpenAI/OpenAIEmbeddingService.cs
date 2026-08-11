@@ -1,6 +1,5 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure.Precos;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -43,6 +42,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
     private readonly IVideoChunkRepository _chunkRepository;
     private readonly ILogger<OpenAIEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
+    private readonly IPricingService _pricingService;
     private readonly HttpClient _openAi;
 
     public OpenAIEmbeddingService(
@@ -50,12 +50,14 @@ public class OpenAIEmbeddingService : IEmbeddingService
         IVideoChunkRepository chunkRepository,
         IHttpClientFactory httpClientFactory,
         ILogger<OpenAIEmbeddingService> logger,
-        IContextoTelemetria contextoTelemetria)
+        IContextoTelemetria contextoTelemetria,
+        IPricingService pricingService)
     {
         _options         = options.Value;
         _chunkRepository = chunkRepository;
         _logger          = logger;
         _contextoTelemetria = contextoTelemetria;
+        _pricingService = pricingService;
 
         _openAi = httpClientFactory.CreateClient("openai");
         _openAi.DefaultRequestHeaders.Authorization =
@@ -97,7 +99,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
             provedor: "OpenAI",
             modelo: _options.EmbeddingModel,
             tokensEntrada: tokensTotais,
-            custoEstimadoUsd: PricingCalculator.Calcular("OpenAI", _options.EmbeddingModel, tokensTotais));
+            custoEstimadoUsd: await _pricingService.CalcularAsync("OpenAI", _options.EmbeddingModel, tokensTotais, ct: ct));
 
         await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
@@ -133,7 +135,7 @@ public class OpenAIEmbeddingService : IEmbeddingService
             provedor: "OpenAI",
             modelo: _options.EmbeddingModel,
             tokensEntrada: tokensTotais,
-            custoEstimadoUsd: PricingCalculator.Calcular("OpenAI", _options.EmbeddingModel, tokensTotais));
+            custoEstimadoUsd: await _pricingService.CalcularAsync("OpenAI", _options.EmbeddingModel, tokensTotais, ct: ct));
 
         return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
     }

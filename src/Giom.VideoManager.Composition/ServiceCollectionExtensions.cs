@@ -12,6 +12,7 @@ using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Helicone;
 using Giom.VideoManager.Infrastructure.Kimi;
 using Giom.VideoManager.Infrastructure.Observabilidade;
+using Giom.VideoManager.Infrastructure.Precos;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Redis;
 using Giom.VideoManager.Infrastructure.Sentry;
@@ -145,6 +146,25 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Preço por 1M tokens de cada (provedor, modelo) — Task #130, substitui o antigo
+    /// PricingCalculator estático. Fonte: tabela provedor_preco (Supabase), decorada com cache em
+    /// memória (mesmo padrão de AddEtapaProvedorConfigService — sem Redis por enquanto, nenhum
+    /// worker tem conexão configurada hoje). Idempotente — todo provedor de IA (Claude/OpenAI/
+    /// Grok/Kimi/VoyageAI/Cohere) chama isso ao se registrar, podem coexistir no mesmo worker.
+    /// </summary>
+    public static IServiceCollection AddPricingService(this IServiceCollection services, IConfiguration config)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IPricingService)))
+            return services;
+
+        services.AddSupabasePricing(config);
+        services.Decorate<IPricingRepository, CachePricingRepository>();
+        services.AddSingleton<IPricingService, PricingService>();
+
+        return services;
+    }
+
+    /// <summary>
     /// Resumo — cadeia de fallback por canal (US #106; antes Feature #101, cadeia global fixa
     /// via Resumo:FallbackChain). Cada provedor (Claude/Grok/OpenAI) é registrado Keyed como
     /// IResumoProvedorService — não decide mais sozinho seu prompt/config, recebe por parâmetro
@@ -157,6 +177,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSummaryService(this IServiceCollection services, IConfiguration config)
     {
         services.AddEtapaProvedorConfigService(config);
+        services.AddPricingService(config);
 
         services.AddGrokSummary(config);
         services.AddKeyedSingleton<IResumoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokResumoService>());
@@ -183,6 +204,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCategorizacaoService(this IServiceCollection services, IConfiguration config)
     {
         services.AddEtapaProvedorConfigService(config);
+        services.AddPricingService(config);
 
         services.AddGrokCategorizacao(config);
         services.AddKeyedSingleton<ICategorizacaoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
@@ -204,7 +226,10 @@ public static class ServiceCollectionExtensions
 
     /// <summary>Avaliador de conteúdo via IA (sempre Claude por enquanto) — usado pelo guardrail AvaliacaoIA.</summary>
     public static IServiceCollection AddAvaliadorIAService(this IServiceCollection services, IConfiguration config)
-        => services.AddClaudeAvaliadorIA(config);
+    {
+        services.AddPricingService(config);
+        return services.AddClaudeAvaliadorIA(config);
+    }
 
     /// <summary>
     /// Embedding — configurável via Embedding:FallbackChain (default: só ["OpenAI"] por
@@ -222,6 +247,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
+        services.AddPricingService(config);
         var cadeiaNomes = config.GetSection("Embedding:FallbackChain").Get<string[]>() ?? ["OpenAI"];
 
         foreach (var nome in cadeiaNomes)
@@ -269,6 +295,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAgentService(this IServiceCollection services, IConfiguration config)
     {
+        services.AddPricingService(config);
         var cadeiaNomes = config.GetSection("Agent:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
 
         foreach (var nome in cadeiaNomes)
