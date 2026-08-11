@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure.Precos;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -40,6 +39,7 @@ public class CohereEmbeddingService : IEmbeddingService
     private readonly IFarolRateLimiter _farol;
     private readonly ILogger<CohereEmbeddingService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
+    private readonly IPricingService _pricingService;
     private readonly HttpClient _cohere;
 
     public CohereEmbeddingService(
@@ -48,13 +48,15 @@ public class CohereEmbeddingService : IEmbeddingService
         IFarolRateLimiter farol,
         IHttpClientFactory httpClientFactory,
         ILogger<CohereEmbeddingService> logger,
-        IContextoTelemetria contextoTelemetria)
+        IContextoTelemetria contextoTelemetria,
+        IPricingService pricingService)
     {
         _options         = options.Value;
         _chunkRepository = chunkRepository;
         _farol           = farol;
         _logger          = logger;
         _contextoTelemetria = contextoTelemetria;
+        _pricingService = pricingService;
 
         _cohere = httpClientFactory.CreateClient("cohere");
         _cohere.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
@@ -85,7 +87,7 @@ public class CohereEmbeddingService : IEmbeddingService
             provedor: "Cohere",
             modelo: _options.Model,
             tokensEntrada: tokensTotais,
-            custoEstimadoUsd: PricingCalculator.Calcular("Cohere", _options.Model, tokensTotais));
+            custoEstimadoUsd: await _pricingService.CalcularAsync("Cohere", _options.Model, tokensTotais, ct: ct));
 
         await _chunkRepository.DeletarPorVideoAsync(video.Id, Origem, ct);
         await _chunkRepository.InserirAsync(
@@ -119,7 +121,7 @@ public class CohereEmbeddingService : IEmbeddingService
             provedor: "Cohere",
             modelo: _options.Model,
             tokensEntrada: tokensTotais,
-            custoEstimadoUsd: PricingCalculator.Calcular("Cohere", _options.Model, tokensTotais));
+            custoEstimadoUsd: await _pricingService.CalcularAsync("Cohere", _options.Model, tokensTotais, ct: ct));
 
         return await _chunkRepository.BuscarSimilaresAsync(pergunta, embeddings[0], Origem, area, canalId, limite, threshold, ct);
     }

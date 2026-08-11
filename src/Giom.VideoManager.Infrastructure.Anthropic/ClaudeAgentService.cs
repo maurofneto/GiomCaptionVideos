@@ -3,7 +3,6 @@ using Anthropic.SDK.Messaging;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Helicone;
-using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -33,6 +32,7 @@ public class ClaudeAgentService : IAgentService
     private readonly IIncertezaDetectorService _incertezaDetector;
     private readonly ISessionContext _sessionContext;
     private readonly string _systemPrompt;
+    private readonly IPricingService _pricingService;
 
     public ClaudeAgentService(
         IOptions<ClaudeAgentOptions> options,
@@ -42,13 +42,15 @@ public class ClaudeAgentService : IAgentService
         ILogger<ClaudeAgentService> logger,
         IContextoTelemetria contextoTelemetria,
         IIncertezaDetectorService incertezaDetector,
-        ISessionContext sessionContext)
+        ISessionContext sessionContext,
+        IPricingService pricingService)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _incertezaDetector = incertezaDetector;
         _sessionContext = sessionContext;
+        _pricingService = pricingService;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
         _systemPrompt = prompts.Load("agent.md");
     }
@@ -109,7 +111,7 @@ public class ClaudeAgentService : IAgentService
             modelo: _options.Model,
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
-            custoEstimadoUsd: PricingCalculator.Calcular("Claude", _options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens),
+            custoEstimadoUsd: await _pricingService.CalcularAsync("Claude", _options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens, ct),
             detalhes: new { stopReason = response.StopReason, incerteza = _incertezaDetector.ContemIncerteza(texto) },
             requestIdExterno: requestId);
 
