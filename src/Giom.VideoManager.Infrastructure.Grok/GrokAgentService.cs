@@ -3,7 +3,6 @@ using System.Text;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
-using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -30,14 +29,16 @@ public class GrokAgentService : IAgentService
     private readonly IIncertezaDetectorService _incertezaDetector;
     private readonly ISessionContext _sessionContext;
     private readonly string _systemPrompt;
+    private readonly IPricingService _pricingService;
 
-    public GrokAgentService(IOptions<GrokAgentOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<GrokAgentService> logger, IContextoTelemetria contextoTelemetria, IIncertezaDetectorService incertezaDetector, ISessionContext sessionContext)
+    public GrokAgentService(IOptions<GrokAgentOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<GrokAgentService> logger, IContextoTelemetria contextoTelemetria, IIncertezaDetectorService incertezaDetector, ISessionContext sessionContext, IPricingService pricingService)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _incertezaDetector = incertezaDetector;
         _sessionContext = sessionContext;
+        _pricingService = pricingService;
         _http = httpClientFactory.CreateClient("grok");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
         _systemPrompt = prompts.Load("agent.md");
@@ -96,7 +97,7 @@ public class GrokAgentService : IAgentService
             modelo: _options.Model,
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
-            custoEstimadoUsd: PricingCalculator.Calcular("Grok", _options.Model, result?.usage?.prompt_tokens, result?.usage?.completion_tokens),
+            custoEstimadoUsd: await _pricingService.CalcularAsync("Grok", _options.Model, result?.usage?.prompt_tokens, result?.usage?.completion_tokens, ct),
             detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason, incerteza = texto != null && _incertezaDetector.ContemIncerteza(texto) },
             requestIdExterno: requestId);
 
