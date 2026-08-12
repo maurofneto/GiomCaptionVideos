@@ -12,10 +12,16 @@ public class SupabaseProgressoRepository : IProgressoRepository
     private readonly HttpClient _http;
     private readonly SupabaseOptions _options;
 
+    // NullValueHandling.Include é obrigatório aqui: last_page_token PRECISA poder ser gravado
+    // como null quando a playlist termina (ChannelProcessor reseta o cursor pra próxima run
+    // recomeçar do topo com filtro de data). Com Ignore, o campo null some do JSON e o upsert
+    // (Prefer: resolution=merge-duplicates) simplesmente não toca a coluna existente — o reset
+    // nunca acontecia de verdade, prendendo a ingestão num cursor morto pra sempre (Bug #136:
+    // canais travados em 2026-07-18, nunca mais viram vídeo novo).
     private static readonly JsonSerializerSettings JsonSettings = new()
     {
         ContractResolver = new DefaultContractResolver { NamingStrategy = new SnakeCaseNamingStrategy() },
-        NullValueHandling = NullValueHandling.Ignore
+        NullValueHandling = NullValueHandling.Include
     };
 
     public SupabaseProgressoRepository(IOptions<SupabaseOptions> options)
