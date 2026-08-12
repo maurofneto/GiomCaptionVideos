@@ -70,14 +70,25 @@ using var host = Host.CreateDefaultBuilder(args)
 
         services.AddPersistence(config);           // Supabase dev — só escrita real; conteúdo de entrada é 100% sintético (Fake*Service)
         services.AddSingleton<IVideoSourceService, FakeVideoSource>();
-        // Decorado com TelemetriaCaptionService — igual AddYouTubeCaptionService faz pros
-        // providers reais — senão a etapa "transcricao" nunca abre span/métrica nesta ferramenta.
-        services.AddSingleton<FakeCaptionService>();
-        services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
-            sp.GetRequiredService<FakeCaptionService>(),
-            sp.GetRequiredService<ITelemetriaService>(),
-            sp.GetRequiredService<ITracingService>(),
-            sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
+        // Transcrição: mesmo mecanismo do Resumo/Categorização/Embedding abaixo (US #129) — com
+        // Transcricao:FallbackChain configurado, usa a cadeia REAL (YouTubeCaption/
+        // YouTubeTranscript/YtDlpCaption/Whisper, mesma composição dos workers, ordem resolvida
+        // por canal via etapa_provedor_config). Sem a seção, mantém o Fake (decorado com
+        // TelemetriaCaptionService — igual AddTranscriptionService faz pros providers reais —
+        // senão a etapa "transcricao" nunca abre span/métrica nesta ferramenta).
+        if (config.GetSection("Transcricao:FallbackChain").Exists())
+        {
+            services.AddTranscriptionService(config);
+        }
+        else
+        {
+            services.AddSingleton<FakeCaptionService>();
+            services.AddSingleton<ICaptionService>(sp => new TelemetriaCaptionService(
+                sp.GetRequiredService<FakeCaptionService>(),
+                sp.GetRequiredService<ITelemetriaService>(),
+                sp.GetRequiredService<ITracingService>(),
+                sp.GetRequiredService<ILogger<TelemetriaCaptionService>>()));
+        }
         // Resumo: com Resumo:FallbackChain configurado, usa a cadeia REAL de fallback da
         // Feature #101 (Claude → Grok → OpenAI, mesma composição dos workers) em vez do Fake —
         // é assim que o E2E exercita o fallback de provider de verdade (ex.: ClaudeResumo:Model
@@ -172,11 +183,12 @@ await host.StartAsync();
 // Torna visível qual perfil/modo de resumo esta run está usando — sem isso não dá pra saber, só
 // pelo log, se a cadeia real de fallback (appsettings.teste-fallback.json) foi carregada ou não.
 var configFinal = host.Services.GetRequiredService<IConfiguration>();
-Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Resumo={ModoResumo}, Categorizacao={ModoCategorizacao}, Embedding={ModoEmbedding}, MaxVideosPerRun={Max}",
+Log.Information("Perfil da run — DOTNET_ENVIRONMENT={Env}, Transcricao={ModoTranscricao}, Resumo={ModoResumo}, Categorizacao={ModoCategorizacao}, Embedding={ModoEmbedding}, MaxVideosPerRun={Max}",
     Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "(nulo → Development)",
+    configFinal.GetSection("Transcricao:FallbackChain").Exists() ? "cadeia real por canal (US #129)" : "FakeCaptionService",
     configFinal.GetSection("Resumo:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Resumo:FallbackChain").Get<string[]>() ?? [])}]" : "FakeResumoService",
     configFinal.GetSection("Categorizacao:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Categorizacao:FallbackChain").Get<string[]>() ?? [])}]" : "FakeCategorizacaoService",
-    configFinal.GetSection("Embedding:FallbackChain").Exists() ? $"fallback real [{string.Join("→", configFinal.GetSection("Embedding:FallbackChain").Get<string[]>() ?? [])}]" : "FakeEmbeddingService",
+    configFinal.GetSection("Embedding:FallbackChain").Exists() ? "cadeia real por canal (US #129)" : "FakeEmbeddingService",
     configFinal["ProcessingOptions:MaxVideosPerRun"]);
 
 var processor = host.Services.GetRequiredService<ChannelProcessor>();
