@@ -34,5 +34,5 @@ public class SupabaseEtapaProvedorConfigRepository : IEtapaProvedorConfigReposit
 
     private record EtapaProvedorConfigRow(
         string channel_id, string etapa, string provedor, int ordem,
-        string prompt, string? model, int? max_tokens, bool? usar_observabilidade);
+        string? prompt, string? model, int? max_tokens, bool? usar_observabilidade);
 }
