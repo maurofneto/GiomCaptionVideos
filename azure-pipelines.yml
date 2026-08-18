@@ -67,6 +67,12 @@ stages:
           - script: dotnet test GiomCaptionVideos.sln --configuration Release --no-build
             displayName: 'dotnet test'
 
+          # A Lambda do webhook do WhatsApp (Task #140) é o único controle de acesso de um
+          # endpoint público — se a validação de assinatura quebrar, qualquer um injeta mensagem
+          # na fila do bot. Roda aqui junto do gate pra isso não passar despercebido.
+          - script: python -m unittest discover -s infra/lambda-whatsapp-webhook -v
+            displayName: 'python -m unittest (lambda do webhook)'
+
   - stage: Migrations
     displayName: 'Migrations'
     dependsOn: Build
