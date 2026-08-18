@@ -27,6 +27,7 @@ using Giom.VideoManager.Infrastructure.SummarizeTech;
 using Giom.VideoManager.Infrastructure.Telegram;
 using Giom.VideoManager.Infrastructure.Voyage;
 using Giom.VideoManager.Infrastructure.Whisper;
+using Giom.VideoManager.Infrastructure.WhatsApp;
 using Giom.VideoManager.Infrastructure.YouTube;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -300,6 +301,36 @@ public static class ServiceCollectionExtensions
     /// <summary>Channel:Provider — Telegram (único por enquanto; WhatsApp/Web futuramente).</summary>
     public static IServiceCollection AddChatChannel(this IServiceCollection services, IConfiguration config)
         => services.AddTelegramChatChannel(config);
+
+    /// <summary>Chave do keyed service da fila do webhook do WhatsApp (Task #140).</summary>
+    private const string ChaveFilaWhatsAppWebhook = "whatsapp-webhook";
+
+    /// <summary>
+    /// Canal WhatsApp completo: o adapter (Task #139) mais o caminho de ENTRADA das mensagens
+    /// (Task #140).
+    ///
+    /// Ao contrário do Telegram, que busca mensagem sozinho (long polling), o WhatsApp é
+    /// empurrado pela Meta num webhook HTTP. Como o ECS do bot não expõe porta pública — e abrir
+    /// uma exigiria um load balancer a ~US$16/mês fixo, mais domínio e certificado —, quem recebe
+    /// o POST é uma Lambda (infra/lambda-whatsapp-webhook): ela confere a assinatura e publica o
+    /// corpo cru numa fila SQS. É essa fila que o consumidor registrado aqui drena.
+    ///
+    /// Efeito colateral bem-vindo: a fila é durável. Se o bot cair ou reiniciar no meio de um
+    /// deploy, as perguntas ficam guardadas e são respondidas quando ele volta — coisa que uma
+    /// entrega HTTP direta na porta do container não daria.
+    /// </summary>
+    public static IServiceCollection AddWhatsAppWebhook(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddWhatsAppChatChannel(config);
+        services.AddFilaVideoEtapa<WhatsAppWebhookMensagem>(ChaveFilaWhatsAppWebhook, config, "FilaWhatsAppWebhook");
+
+        services.AddSingleton(sp => new WhatsAppWebhookConsumidor(
+            sp.GetRequiredKeyedService<IFilaConsumer<WhatsAppWebhookMensagem>>(ChaveFilaWhatsAppWebhook),
+            sp.GetRequiredService<WhatsAppWebhookProcessor>(),
+            sp.GetRequiredService<ILogger<WhatsAppWebhookConsumidor>>()));
+
+        return services;
+    }
 
     /// <summary>VideoSource:Provider — YouTube (padrão, único por enquanto).</summary>
     public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
