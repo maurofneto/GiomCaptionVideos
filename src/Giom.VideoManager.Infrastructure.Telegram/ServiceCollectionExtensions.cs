@@ -15,7 +15,11 @@ public static class ServiceCollectionExtensions
         // Construído aqui (não dentro de TelegramChatChannel) — deixa a classe testável com um
         // ITelegramBotClient fake, sem token nem rede de verdade.
         services.AddSingleton<ITelegramBotClient>(sp => new TelegramBotClient(sp.GetRequiredService<IOptions<TelegramChatChannelOptions>>().Value.BotToken));
-        services.AddSingleton<IChatChannel, TelegramChatChannel>();
+        // Uma instância só, exposta pela chave do canal: desde a US #24 o bot pode subir mais de
+        // um canal ao mesmo tempo, e registrar direto em IChatChannel faria os canais disputarem
+        // a mesma resolução — o container entregaria só o último registrado, em silêncio.
+        services.AddSingleton<TelegramChatChannel>();
+        services.AddKeyedSingleton<IChatChannel>(TelegramChatChannel.ChaveCanal, (sp, _) => sp.GetRequiredService<TelegramChatChannel>());
 
         // Bug #128: o long-polling (getUpdates) roda a cada ~30s pra sempre e sozinho já
         // respondia por 82% das transações do Sentry — só ruído, sem valor de observabilidade.

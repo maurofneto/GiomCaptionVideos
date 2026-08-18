@@ -28,6 +28,9 @@ namespace Giom.VideoManager.Infrastructure.WhatsApp;
 /// </summary>
 public class WhatsAppChatChannel : IChatChannel
 {
+    /// <summary>Chave deste canal no container (US #24) — o bot sobe um ChatBotProcessor por canal ligado.</summary>
+    public const string ChaveCanal = "whatsapp";
+
     // Limite real do corpo de texto é 4096; a margem cobre o que a conversão pra marcação do
     // WhatsApp pode acrescentar (cada ** vira *, mas ``` cresce em relação a `).
     private const int LimiteSeguroPorMensagem = 3800;

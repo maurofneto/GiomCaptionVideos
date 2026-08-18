@@ -22,6 +22,9 @@ public class TelegramChatChannelOptions
 /// </summary>
 public class TelegramChatChannel : IChatChannel
 {
+    /// <summary>Chave deste canal no container (US #24) — o bot sobe um ChatBotProcessor por canal ligado.</summary>
+    public const string ChaveCanal = "telegram";
+
     private static readonly Regex TagHtml = new(@"<[^>]+>", RegexOptions.Compiled);
 
     // Telegram rejeita mensagens de texto acima de 4096 caracteres — margem de segurança

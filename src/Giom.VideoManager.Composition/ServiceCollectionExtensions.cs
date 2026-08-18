@@ -298,9 +298,13 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Channel:Provider — Telegram (único por enquanto; WhatsApp/Web futuramente).</summary>
+    /// <summary>Canal Telegram + o ChatBotProcessor que escuta ele (US #24 — um processor por canal).</summary>
     public static IServiceCollection AddChatChannel(this IServiceCollection services, IConfiguration config)
-        => services.AddTelegramChatChannel(config);
+    {
+        services.AddTelegramChatChannel(config);
+        services.AddChatBotProcessorDoCanal(TelegramChatChannel.ChaveCanal);
+        return services;
+    }
 
     /// <summary>Chave do keyed service da fila do webhook do WhatsApp (Task #140).</summary>
     private const string ChaveFilaWhatsAppWebhook = "whatsapp-webhook";
@@ -322,6 +326,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddWhatsAppWebhook(this IServiceCollection services, IConfiguration config)
     {
         services.AddWhatsAppChatChannel(config);
+        services.AddChatBotProcessorDoCanal(WhatsAppChatChannel.ChaveCanal);
         services.AddFilaVideoEtapa<WhatsAppWebhookMensagem>(ChaveFilaWhatsAppWebhook, config, "FilaWhatsAppWebhook");
 
         services.AddSingleton(sp => new WhatsAppWebhookConsumidor(
