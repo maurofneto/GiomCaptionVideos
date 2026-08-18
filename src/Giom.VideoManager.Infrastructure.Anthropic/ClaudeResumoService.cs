@@ -5,7 +5,6 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Observabilidade;
-using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -43,14 +42,16 @@ public class ClaudeResumoService : IResumoProvedorService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly ISessionContext _sessionContext;
     private readonly ITracingService _tracingService;
+    private readonly IPricingService _pricingService;
 
-    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService)
+    public ClaudeResumoService(IOptions<ClaudeResumoOptions> options, IHttpClientFactory httpClientFactory, ILogger<ClaudeResumoService> logger, IContextoTelemetria contextoTelemetria, ISessionContext sessionContext, ITracingService tracingService, IPricingService pricingService)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _sessionContext = sessionContext;
         _tracingService = tracingService;
+        _pricingService = pricingService;
         _client = new AnthropicClient(_options.ApiKey, httpClientFactory.CreateClient("anthropic"));
     }
 
@@ -94,7 +95,7 @@ public class ClaudeResumoService : IResumoProvedorService
             modelo: modelo,
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
-            custoEstimadoUsd: PricingCalculator.Calcular("Claude", modelo, response.Usage?.InputTokens, response.Usage?.OutputTokens),
+            custoEstimadoUsd: await _pricingService.CalcularAsync("Claude", modelo, response.Usage?.InputTokens, response.Usage?.OutputTokens, ct),
             detalhes: new { stopReason = response.StopReason });
 
         if (string.IsNullOrWhiteSpace(content))

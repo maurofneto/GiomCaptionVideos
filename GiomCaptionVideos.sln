@@ -95,6 +95,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Kimi", "src\Giom.VideoManager.Infrastructure.Kimi\Giom.VideoManager.Infrastructure.Kimi.csproj", "{04586682-66C8-425E-B6E3-4EC7E22A3D23}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.BackfillEmbeddings", "tools\Giom.VideoManager.BackfillEmbeddings\Giom.VideoManager.BackfillEmbeddings.csproj", "{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -597,6 +601,18 @@ Global
 		{04586682-66C8-425E-B6E3-4EC7E22A3D23}.Release|x64.Build.0 = Release|Any CPU
 		{04586682-66C8-425E-B6E3-4EC7E22A3D23}.Release|x86.ActiveCfg = Release|Any CPU
 		{04586682-66C8-425E-B6E3-4EC7E22A3D23}.Release|x86.Build.0 = Release|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Debug|x64.Build.0 = Debug|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Debug|x86.Build.0 = Debug|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|x64.ActiveCfg = Release|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|x64.Build.0 = Release|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|x86.ActiveCfg = Release|Any CPU
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -643,6 +659,7 @@ Global
 		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{9FCD39B5-2519-4E42-A78C-E1B035BAA35F} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{04586682-66C8-425E-B6E3-4EC7E22A3D23} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C7A72C10-8571-4565-BE89-8679CD2F3695}

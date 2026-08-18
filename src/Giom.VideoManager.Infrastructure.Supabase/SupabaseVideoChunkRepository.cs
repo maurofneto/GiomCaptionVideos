@@ -68,6 +68,17 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
         }
     }
 
+    public async Task<IReadOnlyList<string>> ListarVideoIdsPorOrigemAsync(string origem, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/rest/v1/video_chunk?select=video_id&origem=eq.{origem}", ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var linhas = JsonConvert.DeserializeObject<List<Dictionary<string, string>>>(json) ?? [];
+
+        return linhas.Select(l => l["video_id"]).Distinct().Order().ToList();
+    }
+
     public async Task<BuscaSemanticaResultado> BuscarSimilaresAsync(
         string pergunta,
         float[] embedding,

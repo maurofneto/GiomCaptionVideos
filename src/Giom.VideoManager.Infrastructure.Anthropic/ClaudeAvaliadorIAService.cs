@@ -2,7 +2,6 @@ using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Helicone;
-using Giom.VideoManager.Infrastructure.Precos;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -35,6 +34,7 @@ public class ClaudeAvaliadorIAService : IAvaliadorIAService
     private readonly ILogger<ClaudeAvaliadorIAService> _logger;
     private readonly ITelemetriaService _telemetriaService;
     private readonly ISessionContext _sessionContext;
+    private readonly IPricingService _pricingService;
 
     public ClaudeAvaliadorIAService(
         IOptions<ClaudeAvaliadorIAOptions> options,
@@ -42,12 +42,14 @@ public class ClaudeAvaliadorIAService : IAvaliadorIAService
         IHttpClientFactory httpClientFactory,
         ILogger<ClaudeAvaliadorIAService> logger,
         ITelemetriaService telemetriaService,
-        ISessionContext sessionContext)
+        ISessionContext sessionContext,
+        IPricingService pricingService)
     {
         _options = options.Value;
         _logger = logger;
         _telemetriaService = telemetriaService;
         _sessionContext = sessionContext;
+        _pricingService = pricingService;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
     }
 
@@ -88,7 +90,7 @@ public class ClaudeAvaliadorIAService : IAvaliadorIAService
 
             tokensEntrada = response.Usage?.InputTokens;
             tokensSaida = response.Usage?.OutputTokens;
-            custo = PricingCalculator.Calcular("Claude", _options.Model, tokensEntrada, tokensSaida);
+            custo = await _pricingService.CalcularAsync("Claude", _options.Model, tokensEntrada, tokensSaida, ct);
 
             var parseado = JsonConvert.DeserializeAnonymousType(json, new { aprovado = true, motivo = (string?)null });
             resultado = new AvaliacaoIA(parseado?.aprovado ?? true, parseado?.motivo);

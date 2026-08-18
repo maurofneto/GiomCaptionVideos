@@ -14,13 +14,23 @@ WORKDIR /app
 # dependem do binário yt-dlp (baixa legenda/áudio) + ffmpeg (yt-dlp usa pra extrair/converter
 # áudio) — nenhum dos dois nunca esteve nesta imagem. Isso nunca foi percebido em produção
 # porque a cadeia de fallback tinha um bug separado (Bug #134) que nunca deixava chegar até
-# esses elos. Binário standalone do yt-dlp (sem precisar de Python) — bem mais leve que a
-# alternativa (Whisper local via CLI Python + PyTorch, ~GB de dependências, nunca usado desde
-# a migração pra API de transcrição da OpenAI, ver WhisperTranscricaoService).
+# esses elos.
+#
+# Bug #137 — o asset "yt-dlp" do release (usado antes) NÃO é o binário standalone: é um script
+# Python zipapp que exige `python3` no PATH (shebang `#!/usr/bin/env python3`) — não documentado
+# claramente na página de release, fácil de confundir com o binário de verdade. Sem Python nesta
+# imagem, toda chamada falhava com "env: 'python3': No such file or directory" (exit 127),
+# derrubando as 3 camadas de fallback de transcrição em cascata (YtDlpCaption + Whisper, que
+# depende do yt-dlp pra baixar áudio). O asset CERTO pra binário standalone (sem precisar de
+# Python) é "yt-dlp_linux" — confirmado baixando os dois assets e comparando os magic bytes
+# antes de trocar aqui: "yt-dlp" começa com o shebang Python (`#!/usr/bin/env python3` + um
+# zip PK embutido), "yt-dlp_linux" é um ELF de verdade (`7f 45 4c 46`), ~40MB. `yt-dlp --version`
+# no fim do RUN faz o build FALHAR se o binário baixado não rodar — fail-fast, não silencioso.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
-    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && curl -fL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
+    && /usr/local/bin/yt-dlp --version \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*

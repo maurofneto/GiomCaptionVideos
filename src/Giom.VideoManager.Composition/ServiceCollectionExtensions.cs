@@ -12,6 +12,7 @@ using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Helicone;
 using Giom.VideoManager.Infrastructure.Kimi;
 using Giom.VideoManager.Infrastructure.Observabilidade;
+using Giom.VideoManager.Infrastructure.Precos;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Giom.VideoManager.Infrastructure.Redis;
 using Giom.VideoManager.Infrastructure.Sentry;
@@ -54,55 +55,36 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Transcrição — cadeia de fallback (Feature #101), configurável via Transcricao:FallbackChain
-    /// (default: YouTubeTranscript → YtDlpCaption → Whisper — mesma ordem de custo/quota de hoje,
-    /// só sem parar no primeiro que não achar nada). Cada nome do array vira um provider registrado
-    /// como Keyed Service; a cadeia tenta na ordem e só cai pro próximo em caso de falha/exceção
-    /// (ver FallbackChain/FallbackHandler). Valores aceitos: YouTubeTranscript, YouTubeCaption,
-    /// YtDlpCaption, Whisper.
+    /// Transcrição — cadeia de fallback por canal (US #129, mesmo mecanismo de AddSummaryService/
+    /// US #106). Os 4 providers (YouTubeCaption, YouTubeTranscript, YtDlpCaption, Whisper) são
+    /// sempre registrados como Keyed Service — não decidem mais sozinhos sua ordem/ativação por
+    /// canal, FallbackCaptionService (único ICaptionService público) resolve isso via
+    /// IEtapaProvedorConfigService a cada vídeo, pelo ChannelId. Transcricao:FallbackChain no
+    /// appsettings não é mais lido aqui (a ordem agora vem do banco).
     /// </summary>
     public static IServiceCollection AddTranscriptionService(this IServiceCollection services, IConfiguration config)
     {
-        var cadeiaNomes = config.GetSection("Transcricao:FallbackChain").Get<string[]>()
-            ?? ["YouTubeTranscript", "YtDlpCaption", "Whisper"];
+        services.AddEtapaProvedorConfigService(config);
 
-        foreach (var nome in cadeiaNomes)
-        {
-            switch (nome)
-            {
-                case "YouTubeCaption":
-                    // YouTubeCaptionService depende do YouTubeService (credencial OAuth) — não
-                    // pressupõe que quem chamou AddTranscriptionService também chamou
-                    // AddVideoSourceService (workers de etapa, ex: Transcricao.Worker, não
-                    // descobrem vídeo, só processam a etapa).
-                    services.AddYouTubeCredential(config);
-                    services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
-                    services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>(nome);
-                    break;
-                case "YtDlpCaption":
-                    services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
-                    services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>(nome);
-                    break;
-                case "Whisper":
-                    // AddWhisperTranscription (Bug #135) registra IContextoTelemetria + o
-                    // HttpClient "whisper" que WhisperTranscricaoService exige desde a migração
-                    // pra API — o switch aqui só cuidava de Configure/AddSingleton antes, quando
-                    // o serviço ainda era CLI local sem essas dependências.
-                    services.AddWhisperTranscription(config);
-                    services.AddKeyedSingleton<ICaptionService, WhisperCaptionService>(nome);
-                    break;
-                default: // YouTubeTranscript
-                    services.Configure<YouTubeTranscriptOptions>(config.GetSection("YouTubeTranscript"));
-                    services.AddKeyedSingleton<ICaptionService, YouTubeTranscriptService>(nome);
-                    break;
-            }
-        }
+        // YouTubeCaptionService depende do YouTubeService (credencial OAuth) — não pressupõe que
+        // quem chamou AddTranscriptionService também chamou AddVideoSourceService (workers de
+        // etapa, ex: Transcricao.Worker, não descobrem vídeo, só processam a etapa).
+        services.AddYouTubeCredential(config);
+        services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
+        services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>("YouTubeCaption");
 
-        services.AddSingleton<ICaptionService>(sp =>
-        {
-            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<ICaptionService>(nome))).ToList();
-            return new FallbackCaptionService(cadeia, sp.GetRequiredService<ILogger<FallbackCaptionService>>());
-        });
+        services.Configure<YouTubeTranscriptOptions>(config.GetSection("YouTubeTranscript"));
+        services.AddKeyedSingleton<ICaptionService, YouTubeTranscriptService>("YouTubeTranscript");
+
+        services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
+        services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>("YtDlpCaption");
+
+        // AddWhisperTranscription (Bug #135) registra IContextoTelemetria + o HttpClient
+        // "whisper" que WhisperTranscricaoService exige desde a migração pra API.
+        services.AddWhisperTranscription(config);
+        services.AddKeyedSingleton<ICaptionService, WhisperCaptionService>("Whisper");
+
+        services.AddSingleton<ICaptionService, FallbackCaptionService>();
         services.Decorate<ICaptionService, TelemetriaCaptionService>();
 
         return services;
@@ -145,6 +127,25 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Preço por 1M tokens de cada (provedor, modelo) — Task #130, substitui o antigo
+    /// PricingCalculator estático. Fonte: tabela provedor_preco (Supabase), decorada com cache em
+    /// memória (mesmo padrão de AddEtapaProvedorConfigService — sem Redis por enquanto, nenhum
+    /// worker tem conexão configurada hoje). Idempotente — todo provedor de IA (Claude/OpenAI/
+    /// Grok/Kimi/VoyageAI/Cohere) chama isso ao se registrar, podem coexistir no mesmo worker.
+    /// </summary>
+    public static IServiceCollection AddPricingService(this IServiceCollection services, IConfiguration config)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IPricingService)))
+            return services;
+
+        services.AddSupabasePricing(config);
+        services.Decorate<IPricingRepository, CachePricingRepository>();
+        services.AddSingleton<IPricingService, PricingService>();
+
+        return services;
+    }
+
+    /// <summary>
     /// Resumo — cadeia de fallback por canal (US #106; antes Feature #101, cadeia global fixa
     /// via Resumo:FallbackChain). Cada provedor (Claude/Grok/OpenAI) é registrado Keyed como
     /// IResumoProvedorService — não decide mais sozinho seu prompt/config, recebe por parâmetro
@@ -157,6 +158,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSummaryService(this IServiceCollection services, IConfiguration config)
     {
         services.AddEtapaProvedorConfigService(config);
+        services.AddPricingService(config);
 
         services.AddGrokSummary(config);
         services.AddKeyedSingleton<IResumoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokResumoService>());
@@ -183,6 +185,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCategorizacaoService(this IServiceCollection services, IConfiguration config)
     {
         services.AddEtapaProvedorConfigService(config);
+        services.AddPricingService(config);
 
         services.AddGrokCategorizacao(config);
         services.AddKeyedSingleton<ICategorizacaoProvedorService>("Grok", (sp, _) => sp.GetRequiredService<GrokCategorizacaoService>());
@@ -204,59 +207,48 @@ public static class ServiceCollectionExtensions
 
     /// <summary>Avaliador de conteúdo via IA (sempre Claude por enquanto) — usado pelo guardrail AvaliacaoIA.</summary>
     public static IServiceCollection AddAvaliadorIAService(this IServiceCollection services, IConfiguration config)
-        => services.AddClaudeAvaliadorIA(config);
+    {
+        services.AddPricingService(config);
+        return services.AddClaudeAvaliadorIA(config);
+    }
 
     /// <summary>
-    /// Embedding — configurável via Embedding:FallbackChain (default: só ["OpenAI"] por
-    /// enquanto; "VoyageAI"/"Cohere" também disponíveis). Cada provider embeda a pergunta/os
-    /// chunks do seu próprio lado e marca a origem (VideoChunk.Origem) — a busca
-    /// (IVideoChunkRepository.BuscarSimilaresAsync, Domain) filtra por origem antes de comparar
-    /// vetores, então adicionar um provider na cadeia não mistura espaços vetoriais
-    /// incompatíveis. Mesmo mecanismo de AddSummaryService.
+    /// Embedding — cadeia por canal (US #129, mesmo mecanismo de AddSummaryService/US #106). Os
+    /// 3 providers (OpenAI, VoyageAI, Cohere) são sempre registrados como Keyed Service — não
+    /// decidem mais sozinhos sua ordem/ativação por canal, PipelineEmbeddingService/
+    /// FallbackEmbeddingService resolvem isso via IEtapaProvedorConfigService (pelo ChannelId do
+    /// vídeo/canal da busca). Embedding:FallbackChain no appsettings não é mais lido aqui. Cada
+    /// provider embeda a pergunta/os chunks do seu próprio lado e marca a origem
+    /// (VideoChunk.Origem) — a busca (IVideoChunkRepository.BuscarSimilaresAsync, Domain) filtra
+    /// por origem antes de comparar vetores, então ter os 3 registrados não mistura espaços
+    /// vetoriais incompatíveis mesmo que só 1 esteja na cadeia real de um canal.
     ///
     /// Indexação (IVideoIndexingService) e busca (IBuscaSemanticaService) são interfaces
-    /// separadas (Feature #115, ISP) resolvidas SEMPRE pro mesmo combinator — sem config, sem
-    /// troca em runtime: PipelineEmbeddingService pra indexar (roda todos os providers) e
-    /// FallbackEmbeddingService pra buscar (para no primeiro que funcionar). Cada consumidor
-    /// (EmbeddingEtapaHandler indexa, ChatBotProcessor busca) injeta só a interface que usa.
+    /// separadas (Feature #115, ISP) — PipelineEmbeddingService pra indexar (roda todos os
+    /// providers da cadeia do canal) e FallbackEmbeddingService pra buscar (para no primeiro que
+    /// funcionar). Cada consumidor (EmbeddingEtapaHandler indexa, ChatBotProcessor busca) injeta
+    /// só a interface que usa.
     /// </summary>
     public static IServiceCollection AddEmbeddingService(this IServiceCollection services, IConfiguration config)
     {
-        var cadeiaNomes = config.GetSection("Embedding:FallbackChain").Get<string[]>() ?? ["OpenAI"];
+        services.AddPricingService(config);
+        services.AddEtapaProvedorConfigService(config);
 
-        foreach (var nome in cadeiaNomes)
-        {
-            switch (nome)
-            {
-                case "VoyageAI":
-                    services.AddSupabaseFarolRateLimiter(config); // Bug #122 — idempotente, seguro chamar de novo se Cohere também estiver na cadeia
-                    services.AddVoyageEmbedding(config);
-                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<VoyageEmbeddingService>());
-                    break;
-                case "Cohere":
-                    services.AddSupabaseFarolRateLimiter(config); // Bug #122
-                    services.AddCohereEmbedding(config);
-                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<CohereEmbeddingService>());
-                    break;
-                default: // OpenAI
-                    services.AddOpenAiEmbedding(config);
-                    services.AddKeyedSingleton<IEmbeddingService>(nome, (sp, _) => sp.GetRequiredService<OpenAIEmbeddingService>());
-                    break;
-            }
-        }
+        services.AddOpenAiEmbedding(config);
+        services.AddKeyedSingleton<IEmbeddingService>("OpenAI", (sp, _) => sp.GetRequiredService<OpenAIEmbeddingService>());
 
-        services.AddSingleton<IBuscaSemanticaService>(sp =>
-        {
-            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
-            return new FallbackEmbeddingService(cadeia, sp.GetRequiredService<ILogger<FallbackEmbeddingService>>());
-        });
+        services.AddSupabaseFarolRateLimiter(config); // Bug #122
+        services.AddVoyageEmbedding(config);
+        services.AddKeyedSingleton<IEmbeddingService>("VoyageAI", (sp, _) => sp.GetRequiredService<VoyageEmbeddingService>());
+
+        services.AddSupabaseFarolRateLimiter(config); // Bug #122 — idempotente
+        services.AddCohereEmbedding(config);
+        services.AddKeyedSingleton<IEmbeddingService>("Cohere", (sp, _) => sp.GetRequiredService<CohereEmbeddingService>());
+
+        services.AddSingleton<IBuscaSemanticaService, FallbackEmbeddingService>();
         services.Decorate<IBuscaSemanticaService, TelemetriaBuscaSemanticaService>();
 
-        services.AddSingleton<IVideoIndexingService>(sp =>
-        {
-            var cadeia = cadeiaNomes.Select(nome => (nome, sp.GetRequiredKeyedService<IEmbeddingService>(nome))).ToList();
-            return new PipelineEmbeddingService(cadeia, sp.GetRequiredService<ILogger<PipelineEmbeddingService>>());
-        });
+        services.AddSingleton<IVideoIndexingService, PipelineEmbeddingService>();
         services.Decorate<IVideoIndexingService, TelemetriaVideoIndexingService>();
 
         return services;
@@ -269,6 +261,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAgentService(this IServiceCollection services, IConfiguration config)
     {
+        services.AddPricingService(config);
         var cadeiaNomes = config.GetSection("Agent:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
 
         foreach (var nome in cadeiaNomes)
