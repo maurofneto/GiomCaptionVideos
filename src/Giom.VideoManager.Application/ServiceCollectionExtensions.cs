@@ -93,9 +93,12 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddChatBotProcessorDoCanal(this IServiceCollection services, string chaveDoCanal)
     {
-        services.AddSingleton(new CanalDeChatAtivo(chaveDoCanal));
         services.AddKeyedSingleton(chaveDoCanal, (IServiceProvider sp, object? chave) =>
             ActivatorUtilities.CreateInstance<ChatBotProcessor>(sp, sp.GetRequiredKeyedService<IChatChannel>(chave)));
+
+        services.AddSingleton(sp => new CanalDeChatAtivo(
+            chaveDoCanal,
+            ct => sp.GetRequiredKeyedService<ChatBotProcessor>(chaveDoCanal).RunAsync(ct)));
 
         return services;
     }
