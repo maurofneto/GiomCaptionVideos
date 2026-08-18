@@ -1,3 +1,4 @@
+using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,17 +9,10 @@ namespace Giom.VideoManager.Infrastructure.WhatsApp;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registra os TIPOS CONCRETOS, não IChatChannel — de propósito.
-    ///
-    /// O Telegram registra a si mesmo como IChatChannel (AddTelegramChatChannel), e o
-    /// ChatBotProcessor hoje recebe UM único IChatChannel. Se este projeto também se registrasse
-    /// na interface, os dois canais passariam a disputar a mesma resolução e o container
-    /// entregaria em silêncio só o último registrado — o Telegram, que está em produção,
-    /// simplesmente pararia de responder sem erro nenhum aparecer.
-    ///
-    /// Fazer os dois canais rodarem juntos é justamente o trabalho da task #141 (rodar N
-    /// ChatBotProcessor, um por canal, via keyed services). Enquanto isso não existe, a ligação
-    /// com a interface fica fora daqui.
+    /// Registra o canal sob a SUA chave (keyed service), nunca direto em IChatChannel: desde a
+    /// US #24 o bot sobe Telegram e WhatsApp no mesmo processo, e uma ligação direta na interface
+    /// faria os dois disputarem a mesma resolução — o container entregaria só o último
+    /// registrado, sem erro nenhum aparecer, e um dos canais ficaria mudo.
     /// </summary>
     public static IServiceCollection AddWhatsAppChatChannel(this IServiceCollection services, IConfiguration config)
     {
@@ -34,6 +28,7 @@ public static class ServiceCollectionExtensions
         // webhook e o canal enxergarem a mesma instância.
         services.AddSingleton<IWhatsAppInbox, WhatsAppInbox>();
         services.AddSingleton<WhatsAppChatChannel>();
+        services.AddKeyedSingleton<IChatChannel>(WhatsAppChatChannel.ChaveCanal, (sp, _) => sp.GetRequiredService<WhatsAppChatChannel>());
         services.AddSingleton<WhatsAppWebhookProcessor>();
 
         return services;

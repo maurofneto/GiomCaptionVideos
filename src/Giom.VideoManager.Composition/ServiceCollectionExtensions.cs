@@ -1,5 +1,6 @@
 using Giom.VideoManager.Application;
 using Giom.VideoManager.Application.Handlers;
+using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
@@ -298,11 +299,52 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Channel:Provider — Telegram (único por enquanto; WhatsApp/Web futuramente).</summary>
-    public static IServiceCollection AddChatChannel(this IServiceCollection services, IConfiguration config)
-        => services.AddTelegramChatChannel(config);
+    /// <summary>
+    /// Canais de chat ligados nesta execução — lista em <c>Chat:Canais</c> (default: Telegram).
+    /// Mesmo mecanismo de AddAgentService/AddEmbeddingService: a composição lê a config e decide
+    /// o que registrar, e quem chama (o worker) não precisa saber que Telegram ou WhatsApp
+    /// existem.
+    ///
+    /// É LISTA, e não um "Chat:Provider" único como em Persistence, porque canais coexistem: o
+    /// bot atende Telegram e WhatsApp ao mesmo tempo, cada um com o seu ChatBotProcessor.
+    ///
+    /// Estar na lista é a única chave que liga um canal — não existe mais uma flag "Habilitado"
+    /// em paralelo dizendo a mesma coisa por outro caminho.
+    /// </summary>
+    public static IServiceCollection AddChatChannels(this IServiceCollection services, IConfiguration config)
+    {
+        var canais = config.GetSection("Chat:Canais").Get<string[]>() ?? [TelegramChatChannel.ChaveCanal];
 
-    /// <summary>Chave do keyed service da fila do webhook do WhatsApp (Task #140).</summary>
+        foreach (var nome in canais)
+        {
+            switch (nome.ToLowerInvariant())
+            {
+                case TelegramChatChannel.ChaveCanal:
+                    services.AddTelegramChatChannel(config);
+                    services.AddChatBotProcessorDoCanal(TelegramChatChannel.ChaveCanal);
+                    break;
+
+                case WhatsAppChatChannel.ChaveCanal:
+                    // Além do canal, o WhatsApp precisa do caminho de entrada (fila + consumidor
+                    // do webhook, Task #140) — saber disso é justamente papel da composição.
+                    services.AddWhatsAppWebhook(config);
+                    services.AddChatBotProcessorDoCanal(WhatsAppChatChannel.ChaveCanal);
+                    break;
+
+                default:
+                    // Aqui NÃO se aplica o "default: provedor principal" que AddAgentService usa.
+                    // Naquele caso qualquer elo da cadeia responde e o bot funciona; aqui, um
+                    // typo em Chat:Canais deixaria o bot sem um canal inteiro — mudo pra quem
+                    // escrevesse por ele — sem erro nenhum aparecer. Melhor não subir.
+                    throw new InvalidOperationException(
+                        $"Canal de chat desconhecido em Chat:Canais: '{nome}'. Conhecidos: " +
+                        $"'{TelegramChatChannel.ChaveCanal}', '{WhatsAppChatChannel.ChaveCanal}'.");
+            }
+        }
+
+        return services;
+    }
+
     private const string ChaveFilaWhatsAppWebhook = "whatsapp-webhook";
 
     /// <summary>
@@ -319,7 +361,8 @@ public static class ServiceCollectionExtensions
     /// deploy, as perguntas ficam guardadas e são respondidas quando ele volta — coisa que uma
     /// entrega HTTP direta na porta do container não daria.
     /// </summary>
-    public static IServiceCollection AddWhatsAppWebhook(this IServiceCollection services, IConfiguration config)
+    /// Privado: quem liga o WhatsApp é a lista Chat:Canais, via AddChatChannels — não o worker.
+    private static IServiceCollection AddWhatsAppWebhook(this IServiceCollection services, IConfiguration config)
     {
         services.AddWhatsAppChatChannel(config);
         services.AddFilaVideoEtapa<WhatsAppWebhookMensagem>(ChaveFilaWhatsAppWebhook, config, "FilaWhatsAppWebhook");
@@ -328,6 +371,12 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredKeyedService<IFilaConsumer<WhatsAppWebhookMensagem>>(ChaveFilaWhatsAppWebhook),
             sp.GetRequiredService<WhatsAppWebhookProcessor>(),
             sp.GetRequiredService<ILogger<WhatsAppWebhookConsumidor>>()));
+
+        // O consumidor da fila é um laço próprio, ao lado do ChatBotProcessor do canal — o
+        // entrypoint roda os dois sem saber que um deles é "coisa de WhatsApp".
+        services.AddSingleton(sp => new CanalDeChatAtivo(
+            "whatsapp:webhook",
+            ct => sp.GetRequiredService<WhatsAppWebhookConsumidor>().ExecutarAsync(ct)));
 
         return services;
     }

@@ -3,7 +3,7 @@ using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
-using Giom.VideoManager.Infrastructure.WhatsApp;
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Sentry;
@@ -37,15 +37,7 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddIncertezaDetectorService(config); // Heuristica (padrão) — usado pelo agente pra marcar telemetria
         services.AddGuardRails(config);            // GuardRails:Habilitados — segurança/confiabilidade sobre pergunta e resposta
         services.AddAgentService(config);          // Claude
-        services.AddChatChannel(config);           // Telegram
-
-        // WhatsApp (US #24) fica DESLIGADO por padrão. O caminho de entrada já funciona ponta a
-        // ponta (Lambda -> fila -> processor), mas o ChatBotProcessor ainda escuta um único
-        // IChatChannel, que é o Telegram — então pergunta livre vinda do WhatsApp pararia no
-        // inbox sem ninguém ler. Só a Task #141 (rodar um processor por canal) fecha isso; até
-        // lá, ligar a flag entregaria um bot que responde /ajuda e engole pergunta de aluno.
-        if (config.GetValue<bool>("WhatsApp:Habilitado"))
-            services.AddWhatsAppWebhook(config);
+        services.AddChatChannels(config);          // Chat:Canais — Telegram, WhatsApp...
         services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB
         services.AddBotComandos(config);           // ajuda/sobre/limpar — cada canal decide como invocar
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
@@ -65,18 +57,13 @@ Log.Information("Diagnóstico Sentry — DsnLength={DsnLength} SentrySdk.IsEnabl
 await host.StartAsync();
 
 var lifetime  = host.Services.GetRequiredService<IHostApplicationLifetime>();
-var processor = host.Services.GetRequiredService<ChatBotProcessor>();
 
-// Task.WhenAll (e não um await só) porque o WhatsApp acrescenta um segundo laço infinito ao
-// processo: o ChatBotProcessor escutando o canal e o consumidor drenando a fila do webhook.
-// É o mesmo movimento de que a Task #141 vai precisar pra manter dois canais de pé.
-var tarefas = new List<Task> { processor.RunAsync(lifetime.ApplicationStopping) };
+// Os laços que o bot mantém rodando (um ChatBotProcessor por canal de chat, mais o consumidor
+// da fila do webhook do WhatsApp) são decididos pela composição a partir da config. Aqui só
+// rodamos todos em paralelo — este arquivo não sabe quais canais existem nem quantos são.
+var canaisAtivos = host.Services.GetServices<CanalDeChatAtivo>().ToList();
+Log.Information("Canais ativos: {Canais}", string.Join(", ", canaisAtivos.Select(c => c.Chave)));
 
-// GetService (e não GetRequiredService): quando WhatsApp:Habilitado é false o consumidor nem
-// chega a ser registrado, e aí o bot roda só com o Telegram, como sempre rodou.
-if (host.Services.GetService<WhatsAppWebhookConsumidor>() is { } consumidorWhatsApp)
-    tarefas.Add(consumidorWhatsApp.ExecutarAsync(lifetime.ApplicationStopping));
-
-await Task.WhenAll(tarefas);
+await Task.WhenAll(canaisAtivos.Select(canal => canal.Executar(lifetime.ApplicationStopping)));
 
 await host.StopAsync();
