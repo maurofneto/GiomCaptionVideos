@@ -6,6 +6,8 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
+using Giom.VideoManager.Infrastructure.Whisper;
+using Giom.VideoManager.Infrastructure.YouTube;
 using Giom.VideoManager.Transcricao.Worker;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -50,6 +52,20 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
 
         services.AddFilaVideoEtapa<EtapaConcluidaMensagem>("etapa-concluida", config, "FilaEtapaConcluida");
+
+        // Bug #144 — YouTube passou a bloquear ("Sign in to confirm you're not a bot") chamadas
+        // do yt-dlp sem sessão autenticada saindo de IP de datacenter (Fargate). Um único secret
+        // (YtDlp:CookiesContent, formato Netscape) alimenta os dois elos que dependem do yt-dlp
+        // (YtDlpCaption + Whisper) — escrito uma vez em disco no boot, referenciado por caminho
+        // porque o yt-dlp só aceita --cookies apontando pra um arquivo, não conteúdo inline.
+        var cookiesContent = config["YtDlp:CookiesContent"];
+        if (!string.IsNullOrWhiteSpace(cookiesContent))
+        {
+            var cookiesPath = Path.Combine(Path.GetTempPath(), "yt-dlp-cookies.txt");
+            File.WriteAllText(cookiesPath, cookiesContent);
+            services.Configure<YtDlpCaptionOptions>(o => o.CookiesFilePath = cookiesPath);
+            services.Configure<WhisperOptions>(o => o.CookiesFilePath = cookiesPath);
+        }
     })
     .Build();
 

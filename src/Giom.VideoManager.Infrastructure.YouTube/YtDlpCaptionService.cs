@@ -17,6 +17,12 @@ public class YtDlpCaptionOptions
 
     /// <summary>Diretório temporário para os arquivos .vtt baixados</summary>
     public string TempDirectory { get; init; } = Path.GetTempPath();
+
+    /// <summary>Caminho pro arquivo de cookies (formato Netscape) usado pelo yt-dlp — necessário
+    /// desde que o YouTube passou a bloquear requisições sem sessão autenticada vindas de IP de
+    /// datacenter (Bug #144). Escrito no boot a partir do secret YtDlp:CookiesContent (Program.cs).
+    /// Vazio = não passa --cookies (comportamento antigo, sem autenticação).</summary>
+    public string CookiesFilePath { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -52,9 +58,10 @@ public class YtDlpCaptionService : ICaptionService
             var langs = string.Join(",", _options.Languages);
             var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
             var url = $"https://www.youtube.com/watch?v={video.Id}";
+            var cookiesArg = string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? "" : $"--cookies \"{_options.CookiesFilePath}\" ";
 
             // Tenta legendas manuais primeiro, depois automáticas
-            var args = $"--write-subs --write-auto-subs --sub-lang \"{langs}\" " +
+            var args = $"{cookiesArg}--write-subs --write-auto-subs --sub-lang \"{langs}\" " +
                        $"--sub-format vtt --skip-download -o \"{outputTemplate}\" {url}";
 
             _logger.LogInformation("Baixando legendas via yt-dlp: {VideoId}", video.Id);
