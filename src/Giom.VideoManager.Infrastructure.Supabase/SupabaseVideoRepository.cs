@@ -21,11 +21,6 @@ public class SupabaseOptions
     /// </summary>
     public string RestPrefix { get; init; } = "/rest/v1";
 
-    /// <summary>
-    /// Cloud: true (Bearer + apikey). Railway sem PGRST_JWT_SECRET: false, senão PGRST300.
-    /// </summary>
-    public bool SendAuthHeaders { get; init; } = true;
-
     public string Rest(string pathAndQuery)
     {
         var prefix = string.IsNullOrWhiteSpace(RestPrefix) ? "" : RestPrefix.TrimEnd('/');

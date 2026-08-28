@@ -28,7 +28,7 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
 
-            if (opt.SendAuthHeaders && !string.IsNullOrWhiteSpace(opt.SecretKey))
+            if (!string.IsNullOrWhiteSpace(opt.RestPrefix) && !string.IsNullOrWhiteSpace(opt.SecretKey))
             {
                 client.DefaultRequestHeaders.Authorization =
                     new AuthenticationHeaderValue("Bearer", opt.SecretKey);
