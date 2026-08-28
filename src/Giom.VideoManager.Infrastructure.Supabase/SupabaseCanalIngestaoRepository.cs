@@ -10,18 +10,21 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
 {
     private readonly HttpClient _http;
+    private readonly SupabaseOptions _options;
 
-    public SupabaseCanalIngestaoRepository(IOptions<SupabaseOptions> options)
+    public SupabaseCanalIngestaoRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory)
     {
-        var opt = options.Value;
-        _http = new HttpClient { BaseAddress = new Uri(opt.Url) };
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", opt.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", opt.SecretKey);
+        this._options = options.Value;
+        _http = httpClientFactory.CreateClient("supabase");
     }
 
     public async Task<IReadOnlyList<CanalIngestaoConfig>> GetCanaisAtivosAsync(CancellationToken ct = default)
     {
-        var json = await _http.GetStringAsync("/rest/v1/canal_ingestao?ativo=eq.true", ct);
+        var response = await _http.SendAsync(new HttpRequestMessage(HttpMethod.Get, _options.Rest("/canal_ingestao?ativo=eq.true")), ct);
+        var json = await response.Content.ReadAsStringAsync();
+
+        response.EnsureSuccessStatusCode();
+
         var rows = JsonConvert.DeserializeObject<List<CanalIngestaoRow>>(json) ?? [];
 
         return rows.Select(r => new CanalIngestaoConfig(

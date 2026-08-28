@@ -19,16 +19,14 @@ public class SupabaseFarolRateLimiter : IFarolRateLimiter
     private static readonly TimeSpan IntervaloPoll = TimeSpan.FromSeconds(1);
 
     private readonly HttpClient _http;
+    private readonly SupabaseOptions _options;
     private readonly ILogger<SupabaseFarolRateLimiter> _logger;
 
     public SupabaseFarolRateLimiter(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory, ILogger<SupabaseFarolRateLimiter> logger)
     {
-        var opts = options.Value;
+        this._options = options.Value;
         _logger = logger;
         _http = httpClientFactory.CreateClient("supabase");
-        _http.BaseAddress = new Uri(opts.Url);
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", opts.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", opts.SecretKey);
     }
 
     public async Task AguardarAsync(string provedor, IReadOnlyDictionary<string, double> consumo, CancellationToken ct = default)
@@ -50,7 +48,7 @@ public class SupabaseFarolRateLimiter : IFarolRateLimiter
     {
         var payload = JsonConvert.SerializeObject(new { p_provedor = provedor, p_consumo = consumo });
         var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        var response = await _http.PostAsync("/rest/v1/rpc/farol_consumir", content, ct);
+        var response = await _http.PostAsync(_options.Rest("/rpc/farol_consumir"), content, ct);
 
         if (!response.IsSuccessStatusCode)
         {
