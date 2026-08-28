@@ -1,0 +1,22 @@
+﻿{
+    "profiles":  {
+                     "GiomTranscricao - DEV":  {
+                                                   "commandName":  "Project",
+                                                   "dotnetRunMessages":  true,
+                                                   "environmentVariables":  {
+                                                                                "DOTNET_ENVIRONMENT":  "Development",
+                                                                                "ASPNETCORE_ENVIRONMENT":  "Development",
+                                                                                "AWS_REGION":  "us-east-1"
+                                                                            }
+                                               },
+                     "GiomTranscricao - PROD":  {
+                                                    "commandName":  "Project",
+                                                    "dotnetRunMessages":  true,
+                                                    "environmentVariables":  {
+                                                                                 "DOTNET_ENVIRONMENT":  "Production",
+                                                                                 "ASPNETCORE_ENVIRONMENT":  "Production",
+                                                                                 "AWS_REGION":  "us-east-1"
+                                                                             }
+                                                }
+                 }
+}

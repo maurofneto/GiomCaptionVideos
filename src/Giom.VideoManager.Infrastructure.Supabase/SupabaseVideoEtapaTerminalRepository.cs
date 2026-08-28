@@ -12,6 +12,7 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 public class SupabaseVideoEtapaTerminalRepository : IVideoEtapaTerminalRepository
 {
     private readonly HttpClient _http;
+    private readonly SupabaseOptions _options;
     private readonly ILogger<SupabaseVideoEtapaTerminalRepository> _logger;
 
     private static readonly JsonSerializerSettings JsonSettings = new()
@@ -22,18 +23,15 @@ public class SupabaseVideoEtapaTerminalRepository : IVideoEtapaTerminalRepositor
 
     public SupabaseVideoEtapaTerminalRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory, ILogger<SupabaseVideoEtapaTerminalRepository> logger)
     {
-        var opts = options.Value;
+        _options = options.Value;
         _logger = logger;
         _http = httpClientFactory.CreateClient("supabase");
-        _http.BaseAddress = new Uri(opts.Url);
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", opts.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", opts.SecretKey);
     }
 
     public async Task<IReadOnlySet<string>> RegistrarConclusaoAsync(string videoId, string etapa, CancellationToken ct = default)
     {
         var content = new StringContent(JsonConvert.SerializeObject(new VideoEtapaTerminalDto(videoId, etapa), JsonSettings), Encoding.UTF8, "application/json");
-        var upsertRequest = new HttpRequestMessage(HttpMethod.Post, "/rest/v1/video_etapa_terminal?on_conflict=video_id,etapa") { Content = content };
+        var upsertRequest = new HttpRequestMessage(HttpMethod.Post, _options.Rest("/video_etapa_terminal?on_conflict=video_id,etapa")) { Content = content };
         upsertRequest.Headers.Add("Prefer", "resolution=merge-duplicates");
         var upsertResponse = await _http.SendAsync(upsertRequest, ct);
 
@@ -44,7 +42,7 @@ public class SupabaseVideoEtapaTerminalRepository : IVideoEtapaTerminalRepositor
             throw new HttpRequestException($"Supabase upsert video_etapa_terminal falhou: {upsertResponse.StatusCode}");
         }
 
-        var response = await _http.GetAsync($"/rest/v1/video_etapa_terminal?video_id=eq.{videoId}&select=etapa", ct);
+        var response = await _http.GetAsync(_options.Rest($"/video_etapa_terminal?video_id=eq.{videoId}&select=etapa"), ct);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);

@@ -10,19 +10,18 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 public class SupabaseEtapaProvedorConfigRepository : IEtapaProvedorConfigRepository
 {
     private readonly HttpClient _http;
+    private readonly SupabaseOptions _options;
 
-    public SupabaseEtapaProvedorConfigRepository(IOptions<SupabaseOptions> options)
+    public SupabaseEtapaProvedorConfigRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory)
     {
-        var opt = options.Value;
-        _http = new HttpClient { BaseAddress = new Uri(opt.Url) };
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", opt.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", opt.SecretKey);
+        this._options = options.Value;
+        _http = httpClientFactory.CreateClient("supabase");
     }
 
     public async Task<IReadOnlyList<EtapaProvedorConfig>> ObterCadeiaAsync(string channelId, string etapa, CancellationToken ct = default)
     {
         var json = await _http.GetStringAsync(
-            $"/rest/v1/etapa_provedor_config?channel_id=eq.{Uri.EscapeDataString(channelId)}&etapa=eq.{Uri.EscapeDataString(etapa)}&order=ordem.asc",
+            _options.Rest($"/etapa_provedor_config?channel_id=eq.{Uri.EscapeDataString(channelId)}&etapa=eq.{Uri.EscapeDataString(etapa)}&order=ordem.asc"),
             ct);
         var rows = JsonConvert.DeserializeObject<List<EtapaProvedorConfigRow>>(json) ?? [];
 

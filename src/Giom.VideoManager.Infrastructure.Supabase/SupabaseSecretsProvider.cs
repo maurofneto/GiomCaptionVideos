@@ -1,4 +1,5 @@
 using Giom.VideoManager.Infrastructure.Secrets;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using System.Net.Http.Headers;
 
@@ -22,8 +23,13 @@ public class SupabaseSecretsProviderOptions
 public class SupabaseSecretsProvider : ISecretsProvider
 {
     private readonly SupabaseSecretsProviderOptions _options;
+    private readonly SupabaseOptions _dbOptions;
 
-    public SupabaseSecretsProvider(SupabaseSecretsProviderOptions options) => _options = options;
+    public SupabaseSecretsProvider(SupabaseSecretsProviderOptions options, IOptions<SupabaseOptions> dbOptions)
+    {
+        _options = options;
+        this._dbOptions = dbOptions.Value;
+    }
 
     public IDictionary<string, string?> Load()
     {
@@ -31,7 +37,7 @@ public class SupabaseSecretsProvider : ISecretsProvider
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.SecretKey);
         http.DefaultRequestHeaders.Add("apikey", _options.SecretKey);
 
-        var json = http.GetStringAsync($"/rest/v1/{_options.Table}?select=key,value").GetAwaiter().GetResult();
+        var json = http.GetStringAsync(_dbOptions.Rest($"/{_options.Table}?select=key,value")).GetAwaiter().GetResult();
         var rows = JsonConvert.DeserializeObject<List<SecretRow>>(json) ?? [];
 
         return rows.ToDictionary(r => r.key, r => (string?)r.value);

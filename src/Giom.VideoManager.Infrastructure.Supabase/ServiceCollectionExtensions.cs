@@ -3,6 +3,8 @@ using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using System.Net.Http.Headers;
 
 namespace Giom.VideoManager.Infrastructure.Supabase;
 
@@ -16,7 +18,25 @@ public static class ServiceCollectionExtensions
             return services;
 
         services.AddSingleton<SupabaseHttpClientMarker>();
-        services.AddHttpClient("supabase").AddStandardResilienceHandler(options => options.RegistrarEventoDeRetryNoSpan("Supabase"));
+
+        services.AddHttpClient("supabase", (sp, client) =>
+        {
+            var opt = sp.GetRequiredService<IOptions<SupabaseOptions>>().Value;
+            client.BaseAddress = new Uri(opt.Url.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromMinutes(2);
+            client.DefaultRequestHeaders.Accept.Clear();
+            client.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json"));
+
+            if (!string.IsNullOrWhiteSpace(opt.RestPrefix) && !string.IsNullOrWhiteSpace(opt.SecretKey))
+            {
+                client.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", opt.SecretKey);
+                client.DefaultRequestHeaders.TryAddWithoutValidation("apikey", opt.SecretKey);
+            }
+        })
+        .AddStandardResilienceHandler(o => o.RegistrarEventoDeRetryNoSpan("Supabase"));
+
         return services;
     }
 
@@ -34,6 +54,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSupabaseEmbedding(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseEmbeddingOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
         services.AddSingleton<IEmbeddingService, SupabaseEmbeddingService>();
         return services;
     }
@@ -69,6 +90,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSupabaseCanalIngestao(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
         services.AddSingleton<ICanalIngestaoRepository, SupabaseCanalIngestaoRepository>();
         return services;
     }
@@ -77,6 +99,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSupabaseEtapaProvedorConfig(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
         services.AddSingleton<IEtapaProvedorConfigRepository, SupabaseEtapaProvedorConfigRepository>();
         return services;
     }
@@ -85,6 +108,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSupabasePricing(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
         services.AddSingleton<IPricingRepository, SupabasePricingRepository>();
         return services;
     }
