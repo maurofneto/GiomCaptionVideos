@@ -20,6 +20,12 @@ public class WhisperOptions
 
     /// <summary>Diretório temporário para download do áudio.</summary>
     public string TempDirectory { get; init; } = Path.GetTempPath();
+
+    /// <summary>Caminho pro arquivo de cookies (formato Netscape) usado pelo yt-dlp — necessário
+    /// desde que o YouTube passou a bloquear requisições sem sessão autenticada vindas de IP de
+    /// datacenter (Bug #144). Escrito no boot a partir do secret YtDlp:CookiesContent (Program.cs).
+    /// Vazio = não passa --cookies (comportamento antigo, sem autenticação).</summary>
+    public string CookiesFilePath { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -87,7 +93,8 @@ public class WhisperTranscricaoService : ITranscricaoService
     private async Task<string> DownloadAudioAsync(string videoId, string workDir, CancellationToken ct)
     {
         var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
-        var args = $"-x --audio-format mp3 -o \"{outputTemplate}\" https://www.youtube.com/watch?v={videoId}";
+        var cookiesArg = string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? "" : $"--cookies \"{_options.CookiesFilePath}\" ";
+        var args = $"{cookiesArg}-x --audio-format mp3 -o \"{outputTemplate}\" https://www.youtube.com/watch?v={videoId}";
 
         _logger.LogInformation("Baixando áudio do vídeo {VideoId} com yt-dlp", videoId);
         var exitCode = await RunProcessAsync(_options.YtDlpPath, args, ct);
