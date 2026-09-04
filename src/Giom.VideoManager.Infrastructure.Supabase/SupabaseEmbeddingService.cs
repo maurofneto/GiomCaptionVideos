@@ -18,16 +18,11 @@ public class SupabaseEmbeddingOptions
 }
 
 /// <summary>
-/// Implementação de IEmbeddingService usando Supabase Edge Functions + pgvector.
-///
-/// Indexação:
-///   Chama /functions/v1/indexar-video com a transcrição completa.
-///   A Edge Function divide em chunks, gera embeddings (OpenAI) e persiste.
-///
-/// Busca:
-///   Chama /functions/v1/buscar-similar.
-///   A Edge Function gera o embedding da pergunta, chama RPC match_chunks
-///   e retorna chunks de múltiplos vídeos + contexto formatado para o Claude.
+/// Implementação legado de IEmbeddingService via Edge Functions. NÃO é o caminho de
+/// busca/indexação em produção: Composition registra OpenAI/Voyage/Cohere keyed
+/// (AddEmbeddingService) e a busca passa por IVideoChunkRepository.BuscarSimilaresAsync
+/// (RPC PostgREST match_chunks_hibrido). AddSupabaseEmbedding não é chamado.
+/// IndexarAsync ainda aponta para /functions/v1/indexar-video (sem equivalente no PostgREST).
 /// </summary>
 public class SupabaseEmbeddingService : IEmbeddingService
 {
@@ -66,6 +61,10 @@ public class SupabaseEmbeddingService : IEmbeddingService
         _logger.LogInformation("Indexação concluída: {VideoId} — {Chunks} chunks", video.Id, result?.chunks_indexados);
     }
 
+    /// <summary>
+    /// Não usado: a busca semântica vai por OpenAI/Voyage/Cohere + IVideoChunkRepository.
+    /// Mantido só porque a classe ainda implementa IEmbeddingService.
+    /// </summary>
     public async Task<BuscaSemanticaResultado> BuscarAsync(
         string pergunta,
         string? area = null,
