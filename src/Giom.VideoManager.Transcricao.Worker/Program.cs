@@ -6,8 +6,6 @@ using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
-using Giom.VideoManager.Infrastructure.Whisper;
-using Giom.VideoManager.Infrastructure.YouTube;
 using Giom.VideoManager.Transcricao.Worker;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -18,7 +16,7 @@ using var host = Host.CreateDefaultBuilder(args)
         config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
         config.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production"}.json", optional: true);
         config.AddEnvironmentVariables();
-        // Pluggable secrets — troque "Configuration" por "AwsParameterStore" ou "AzureAppConfiguration" em produção
+        // Pluggable secrets — Paths carrega pipeline/ + canais/ (US #146)
         config.AddSecretsProvider(config.Build());
     })
     .UseSerilog((context, _, configuration) =>
@@ -37,7 +35,10 @@ using var host = Host.CreateDefaultBuilder(args)
         var config = ctx.Configuration;
 
         services.AddPersistence(config);          // Supabase — compartilhado entre canais, não é por-canal
-        services.AddTranscriptionService(config);  // Fallback YouTubeCaption→YtDlpCaption→Whisper (Feature #101), mesmo pros 2 canais
+        services.AddTranscriptionService(config);  // Fallback YouTubeCaption→YtDlpCaption→Whisper (Feature #101)
+        // US #146 — OAuth Google + cookies yt-dlp keyed por ChannelId (mesmo padrão da Ingestão #105).
+        // Substitui o cookie único escrito em disco no boot (Bug #144 / pipeline/YtDlp/CookiesContent).
+        services.AddTranscricaoMultiCanal(config);
         services.AddTelemetriaService(config);
         services.AddTracingService(config);
         services.AddObservabilidadeExterna(config);
@@ -52,20 +53,6 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddEtapaConsumer<IEtapaTranscricaoHandler>("transcricao", "video.transcricao", (h, v, ct) => h.ProcessarAsync(v, ct));
 
         services.AddFilaVideoEtapa<EtapaConcluidaMensagem>("etapa-concluida", config, "FilaEtapaConcluida");
-
-        // Bug #144 — YouTube passou a bloquear ("Sign in to confirm you're not a bot") chamadas
-        // do yt-dlp sem sessão autenticada saindo de IP de datacenter (Fargate). Um único secret
-        // (YtDlp:CookiesContent, formato Netscape) alimenta os dois elos que dependem do yt-dlp
-        // (YtDlpCaption + Whisper) — escrito uma vez em disco no boot, referenciado por caminho
-        // porque o yt-dlp só aceita --cookies apontando pra um arquivo, não conteúdo inline.
-        var cookiesContent = config["YtDlp:CookiesContent"];
-        if (!string.IsNullOrWhiteSpace(cookiesContent))
-        {
-            var cookiesPath = Path.Combine(Path.GetTempPath(), "yt-dlp-cookies.txt");
-            File.WriteAllText(cookiesPath, cookiesContent);
-            services.Configure<YtDlpCaptionOptions>(o => o.CookiesFilePath = cookiesPath);
-            services.Configure<WhisperOptions>(o => o.CookiesFilePath = cookiesPath);
-        }
     })
     .Build();
 

@@ -21,10 +21,8 @@ public class WhisperOptions
     /// <summary>Diretório temporário para download do áudio.</summary>
     public string TempDirectory { get; init; } = Path.GetTempPath();
 
-    /// <summary>Caminho pro arquivo de cookies (formato Netscape) usado pelo yt-dlp — necessário
-    /// desde que o YouTube passou a bloquear requisições sem sessão autenticada vindas de IP de
-    /// datacenter (Bug #144). Escrito no boot a partir do secret YtDlp:CookiesContent (Program.cs).
-    /// Vazio = não passa --cookies (comportamento antigo, sem autenticação).</summary>
+    /// <summary>Fallback legado (US #144) — um único arquivo compartilhado. Preferir
+    /// <see cref="IChannelYtDlpCookies"/> por ChannelId (US #146). Vazio = sem --cookies.</summary>
     public string CookiesFilePath { get; set; } = string.Empty;
 }
 
@@ -50,28 +48,31 @@ public class WhisperTranscricaoService : ITranscricaoService
     private readonly HttpClient _http;
     private readonly ILogger<WhisperTranscricaoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
+    private readonly IChannelYtDlpCookies _channelCookies;
 
     public WhisperTranscricaoService(
         IOptions<WhisperOptions> options,
         IHttpClientFactory httpClientFactory,
         ILogger<WhisperTranscricaoService> logger,
-        IContextoTelemetria contextoTelemetria)
+        IContextoTelemetria contextoTelemetria,
+        IChannelYtDlpCookies channelCookies)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
+        _channelCookies = channelCookies;
         _http = httpClientFactory.CreateClient("whisper");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
     }
 
-    public async Task<Transcricao?> TranscreverAsync(string videoId, CancellationToken ct = default)
+    public async Task<Transcricao?> TranscreverAsync(string videoId, string? channelId = null, CancellationToken ct = default)
     {
         var workDir = Path.Combine(_options.TempDirectory, "giom_whisper", videoId);
         Directory.CreateDirectory(workDir);
 
         try
         {
-            var audioPath = await DownloadAudioAsync(videoId, workDir, ct);
+            var audioPath = await DownloadAudioAsync(videoId, channelId, workDir, ct);
             var texto = await TranscreverViaApiAsync(audioPath, videoId, ct);
 
             return new Transcricao
@@ -90,10 +91,11 @@ public class WhisperTranscricaoService : ITranscricaoService
         }
     }
 
-    private async Task<string> DownloadAudioAsync(string videoId, string workDir, CancellationToken ct)
+    private async Task<string> DownloadAudioAsync(string videoId, string? channelId, string workDir, CancellationToken ct)
     {
         var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
-        var cookiesArg = string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? "" : $"--cookies \"{_options.CookiesFilePath}\" ";
+        var cookiesPath = ResolverCookiesPath(channelId);
+        var cookiesArg = string.IsNullOrWhiteSpace(cookiesPath) ? "" : $"--cookies \"{cookiesPath}\" ";
         var args = $"{cookiesArg}-x --audio-format mp3 -o \"{outputTemplate}\" https://www.youtube.com/watch?v={videoId}";
 
         _logger.LogInformation("Baixando áudio do vídeo {VideoId} com yt-dlp", videoId);
@@ -163,6 +165,18 @@ public class WhisperTranscricaoService : ITranscricaoService
         process.Start();
         await process.WaitForExitAsync(ct);
         return process.ExitCode;
+    }
+
+    private string? ResolverCookiesPath(string? channelId)
+    {
+        if (!string.IsNullOrWhiteSpace(channelId))
+        {
+            var porCanal = _channelCookies.GetCookiesFilePath(channelId);
+            if (!string.IsNullOrWhiteSpace(porCanal))
+                return porCanal;
+        }
+
+        return string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? null : _options.CookiesFilePath;
     }
 
     private void TryCleanup(string workDir)

@@ -93,6 +93,116 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Legenda via YouTube Data API (Captions.list/download). Credencial OAuth: keyed por
+    /// ChannelId (AddYouTubeCredenciaisPorCanal / US #146) ou singleton (AddYouTubeCredential).
+    /// </summary>
+    public static IServiceCollection AddYouTubeCaption(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
+        services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>("YouTubeCaption");
+        return services;
+    }
+
+    /// <summary>Legenda via youtube-transcript (HTTP, sem OAuth / sem quota da Data API).</summary>
+    public static IServiceCollection AddYouTubeTranscript(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<YouTubeTranscriptOptions>(config.GetSection("YouTubeTranscript"));
+        services.AddKeyedSingleton<ICaptionService, YouTubeTranscriptService>("YouTubeTranscript");
+        return services;
+    }
+
+    /// <summary>
+    /// Legenda via yt-dlp. Registra <see cref="NullChannelYtDlpCookies"/> se ainda não houver
+    /// <see cref="IChannelYtDlpCookies"/> — Composition/Smoke não precisam saber disso; o
+    /// Transcricao.Worker substitui com <see cref="AddYtDlpCookiesPorCanal"/>.
+    /// </summary>
+    public static IServiceCollection AddYtDlpCaption(this IServiceCollection services, IConfiguration config)
+    {
+        if (!services.Any(d => d.ServiceType == typeof(IChannelYtDlpCookies)))
+            services.AddSingleton<IChannelYtDlpCookies, NullChannelYtDlpCookies>();
+
+        services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
+        services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>("YtDlpCaption");
+        return services;
+    }
+
+    /// <summary>
+    /// Escreve cookies Netscape por canal em arquivos temp e registra
+    /// <see cref="IChannelYtDlpCookies"/> (US #146). Lê
+    /// <c>{secrets_key}:YtDlp:CookiesContent</c>; fallback legado <c>YtDlp:CookiesContent</c>
+    /// (pipeline, Bug #144). Substitui o Null de <see cref="AddYtDlpCaption"/>.
+    /// </summary>
+    public static IServiceCollection AddYtDlpCookiesPorCanal(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IReadOnlyList<(string ChannelId, string SecretsKey)> canais,
+        ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(canais);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        var paths = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var (channelId, secretsKey) in canais)
+        {
+            if (string.IsNullOrWhiteSpace(channelId) || string.IsNullOrWhiteSpace(secretsKey))
+                continue;
+
+            var content = configuration[$"{secretsKey}:YtDlp:CookiesContent"];
+            var fromLegacy = false;
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                content = configuration["YtDlp:CookiesContent"];
+                fromLegacy = !string.IsNullOrWhiteSpace(content);
+            }
+
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                logger.LogWarning(
+                    "Sem cookies yt-dlp para ChannelId={ChannelId} (nem {{secrets_key}}:YtDlp:CookiesContent nem legado YtDlp:CookiesContent)",
+                    channelId);
+                continue;
+            }
+
+            var filePath = Path.Combine(Path.GetTempPath(), $"yt-dlp-cookies-{SanitizeSecretsKey(secretsKey)}.txt");
+            File.WriteAllText(filePath, content);
+            paths[channelId] = filePath;
+
+            logger.LogInformation(
+                "Cookies yt-dlp carregados para ChannelId={ChannelId}, contentSha256Prefix={Hash}{Legacy}",
+                channelId,
+                ShortContentHash(content),
+                fromLegacy ? " (legado pipeline)" : "");
+        }
+
+        if (paths.Count == 0)
+        {
+            logger.LogWarning(
+                "Nenhum cookie yt-dlp por canal carregado. Configure {{secrets_key}}:YtDlp:CookiesContent no SSM canais/.");
+        }
+
+        services.AddSingleton<IChannelYtDlpCookies>(new ChannelYtDlpCookiesStore(paths));
+        return services;
+    }
+
+    private static string SanitizeSecretsKey(string secretsKey) =>
+        secretsKey.Replace(':', '-').Replace('/', '-');
+
+    private static string ShortContentHash(string content)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content));
+        return Convert.ToHexString(hash.AsSpan(0, 4)).ToLowerInvariant();
+    }
+
+    private sealed class ChannelYtDlpCookiesStore(IReadOnlyDictionary<string, string> paths) : IChannelYtDlpCookies
+    {
+        public string? GetCookiesFilePath(string channelId) =>
+            string.IsNullOrWhiteSpace(channelId) ? null
+            : paths.TryGetValue(channelId, out var path) ? path : null;
+    }
+
+    /// <summary>
     /// Resolve a credencial Google e registra um YouTubeService keyed por canal (US #105) — cada
     /// CanalIngestaoConfig pode ter Client Secret/Refresh Token diferentes, buscados de
     /// "{SecretsKey}:Google:ClientSecret"/"RefreshToken" em IConfiguration (convenção do

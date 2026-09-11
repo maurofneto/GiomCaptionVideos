@@ -10,6 +10,7 @@ using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Telemetria;
+using Giom.VideoManager.Infrastructure.YouTube;
 using Giom.VideoManager.SmokeTests;
 using Giom.VideoManager.Resumo.Worker;
 using Giom.VideoManager.Transcricao.Worker;
@@ -78,6 +79,9 @@ using var host = Host.CreateDefaultBuilder(args)
         // senão a etapa "transcricao" nunca abre span/métrica nesta ferramenta).
         if (config.GetSection("Transcricao:FallbackChain").Exists())
         {
+            // US #146 — AddTranscriptionService não registra mais OAuth única; smoke com cadeia
+            // real precisa da credencial (singleton legado) ou de AddTranscricaoMultiCanal.
+            services.AddYouTubeCredential(config);
             services.AddTranscriptionService(config);
         }
         else

@@ -18,10 +18,8 @@ public class YtDlpCaptionOptions
     /// <summary>Diretório temporário para os arquivos .vtt baixados</summary>
     public string TempDirectory { get; init; } = Path.GetTempPath();
 
-    /// <summary>Caminho pro arquivo de cookies (formato Netscape) usado pelo yt-dlp — necessário
-    /// desde que o YouTube passou a bloquear requisições sem sessão autenticada vindas de IP de
-    /// datacenter (Bug #144). Escrito no boot a partir do secret YtDlp:CookiesContent (Program.cs).
-    /// Vazio = não passa --cookies (comportamento antigo, sem autenticação).</summary>
+    /// <summary>Fallback legado (US #144) — um único arquivo compartilhado. Preferir
+    /// <see cref="IChannelYtDlpCookies"/> por ChannelId (US #146). Vazio = sem --cookies.</summary>
     public string CookiesFilePath { get; set; } = string.Empty;
 }
 
@@ -35,12 +33,18 @@ public class YtDlpCaptionService : ICaptionService
     private readonly YtDlpCaptionOptions _options;
     private readonly ILogger<YtDlpCaptionService> _logger;
     private readonly ITracingService _tracingService;
+    private readonly IChannelYtDlpCookies _channelCookies;
 
-    public YtDlpCaptionService(IOptions<YtDlpCaptionOptions> options, ILogger<YtDlpCaptionService> logger, ITracingService tracingService)
+    public YtDlpCaptionService(
+        IOptions<YtDlpCaptionOptions> options,
+        ILogger<YtDlpCaptionService> logger,
+        ITracingService tracingService,
+        IChannelYtDlpCookies channelCookies)
     {
         _options = options.Value;
         _logger = logger;
         _tracingService = tracingService;
+        _channelCookies = channelCookies;
     }
 
     public async Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
@@ -58,8 +62,8 @@ public class YtDlpCaptionService : ICaptionService
             var langs = string.Join(",", _options.Languages);
             var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
             var url = $"https://www.youtube.com/watch?v={video.Id}";
-            var cookiesArg = string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? "" : $"--cookies \"{_options.CookiesFilePath}\" ";
-
+            var cookiesPath = ResolverCookiesPath(video.ChannelId);
+            var cookiesArg = string.IsNullOrWhiteSpace(cookiesPath) ? "" : $"--cookies \"{cookiesPath}\" ";
             // Tenta legendas manuais primeiro, depois automáticas
             var args = $"{cookiesArg}--write-subs --write-auto-subs --sub-lang \"{langs}\" " +
                        $"--sub-format vtt --skip-download -o \"{outputTemplate}\" {url}";
@@ -178,6 +182,18 @@ public class YtDlpCaptionService : ICaptionService
         process.Start();
         await process.WaitForExitAsync(ct);
         return process.ExitCode;
+    }
+
+    private string? ResolverCookiesPath(string? channelId)
+    {
+        if (!string.IsNullOrWhiteSpace(channelId))
+        {
+            var porCanal = _channelCookies.GetCookiesFilePath(channelId);
+            if (!string.IsNullOrWhiteSpace(porCanal))
+                return porCanal;
+        }
+
+        return string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? null : _options.CookiesFilePath;
     }
 
     private void TryCleanup(string workDir)

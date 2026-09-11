@@ -57,37 +57,53 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Transcrição — cadeia de fallback por canal (US #129, mesmo mecanismo de AddSummaryService/
-    /// US #106). Os 4 providers (YouTubeCaption, YouTubeTranscript, YtDlpCaption, Whisper) são
-    /// sempre registrados como Keyed Service — não decidem mais sozinhos sua ordem/ativação por
-    /// canal, FallbackCaptionService (único ICaptionService público) resolve isso via
-    /// IEtapaProvedorConfigService a cada vídeo, pelo ChannelId. Transcricao:FallbackChain no
-    /// appsettings não é mais lido aqui (a ordem agora vem do banco).
+    /// Transcrição — cadeia de fallback por canal (US #129). Cada adapter se registra via
+    /// AddYouTubeCaption / AddYouTubeTranscript / AddYtDlpCaption / AddWhisperTranscription;
+    /// FallbackCaptionService (único ICaptionService público) resolve a ordem via
+    /// IEtapaProvedorConfigService pelo ChannelId. Credencial OAuth multi-canal:
+    /// <see cref="AddTranscricaoMultiCanal"/> (US #146).
     /// </summary>
     public static IServiceCollection AddTranscriptionService(this IServiceCollection services, IConfiguration config)
     {
         services.AddEtapaProvedorConfigService(config);
 
-        // YouTubeCaptionService depende do YouTubeService (credencial OAuth) — não pressupõe que
-        // quem chamou AddTranscriptionService também chamou AddVideoSourceService (workers de
-        // etapa, ex: Transcricao.Worker, não descobrem vídeo, só processam a etapa).
-        services.AddYouTubeCredential(config);
-        services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
-        services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>("YouTubeCaption");
-
-        services.Configure<YouTubeTranscriptOptions>(config.GetSection("YouTubeTranscript"));
-        services.AddKeyedSingleton<ICaptionService, YouTubeTranscriptService>("YouTubeTranscript");
-
-        services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
-        services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>("YtDlpCaption");
-
-        // AddWhisperTranscription (Bug #135) registra IContextoTelemetria + o HttpClient
-        // "whisper" que WhisperTranscricaoService exige desde a migração pra API.
+        services.AddYouTubeCaption(config);
+        services.AddYouTubeTranscript(config);
+        services.AddYtDlpCaption(config);
         services.AddWhisperTranscription(config);
-        services.AddKeyedSingleton<ICaptionService, WhisperCaptionService>("Whisper");
 
         services.AddSingleton<ICaptionService, FallbackCaptionService>();
         services.Decorate<ICaptionService, TelemetriaCaptionService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Bootstrap multi-canal da Transcrição (US #146) — espelha <see cref="AddIngestaoMultiCanal"/>
+    /// só no que a etapa precisa: OAuth Google keyed por ChannelId + cookies yt-dlp por canal.
+    /// Não registra handlers de descoberta de vídeo. Lê canais ativos de canal_ingestao.
+    /// </summary>
+    public static IServiceCollection AddTranscricaoMultiCanal(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddSupabaseCanalIngestao(config);
+
+        using (var bootstrapProvider = services.BuildServiceProvider())
+        {
+            var canalRepository = bootstrapProvider.GetRequiredService<ICanalIngestaoRepository>();
+            var canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+
+            var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("Giom.VideoManager.Composition.AddTranscricaoMultiCanal");
+
+            var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+
+            var cookiesCanais = canaisValidos
+                .Select(c => (c.ChannelId, c.SecretsKey))
+                .ToList();
+            services.AddYtDlpCookiesPorCanal(config, cookiesCanais, logger);
+
+            services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
+        }
 
         return services;
     }

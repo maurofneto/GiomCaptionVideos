@@ -15,5 +15,5 @@ namespace Giom.VideoManager.Infrastructure.Whisper;
 public class WhisperCaptionService(ITranscricaoService transcricaoService) : ICaptionService
 {
     public Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
-        => transcricaoService.TranscreverAsync(video.Id, ct);
+        => transcricaoService.TranscreverAsync(video.Id, video.ChannelId, ct);
 }
