@@ -97,7 +97,10 @@ public static class ServiceCollectionExtensions
 
             var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
 
-            var cookiesCanais = canaisValidos
+            // Cookies yt-dlp são independentes do OAuth — carregar pra TODOS os canais ativos,
+            // mesmo se o RefreshToken estiver inválido (invalid_grant). Sem isso, YtDlpCaption
+            // fica sem --cookies e a cadeia perde o provedor que a US #146 quer isolar por canal.
+            var cookiesCanais = canais
                 .Select(c => (c.ChannelId, c.SecretsKey))
                 .ToList();
             services.AddYtDlpCookiesPorCanal(config, cookiesCanais, logger);
