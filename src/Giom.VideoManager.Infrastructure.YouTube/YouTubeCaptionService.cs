@@ -3,6 +3,7 @@ using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Google.Apis.YouTube.v3;
 using Giom.VideoManager.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,29 +17,33 @@ public class YouTubeCaptionOptions
 
 /// <summary>
 /// Baixa a legenda do vídeo diretamente da YouTube Data API (sem download de áudio).
+/// Desde a US #146, resolve <see cref="YouTubeService"/> keyed por <see cref="Video.ChannelId"/>
+/// (mesmo padrão da Ingestão #105) — cada canal autenticado com sua própria OAuth.
+/// Fallback: singleton <see cref="YouTubeService"/> (credencial única) pra smoke/dev legado.
 /// </summary>
 public class YouTubeCaptionService : ICaptionService
 {
-    private readonly ResilientYouTubeApiService _api;
-    private readonly YouTubeService _youtube;
+    private readonly IServiceProvider _serviceProvider;
     private readonly YouTubeCaptionOptions _options;
     private readonly ILogger<YouTubeCaptionService> _logger;
 
     public YouTubeCaptionService(
-        YouTubeService youtube,
+        IServiceProvider serviceProvider,
         IOptions<YouTubeCaptionOptions> options,
         ILogger<YouTubeCaptionService> logger)
     {
-        _youtube = youtube;
+        _serviceProvider = serviceProvider;
         _options = options.Value;
         _logger  = logger;
-        _api     = new ResilientYouTubeApiService(youtube, Microsoft.Extensions.Logging.Abstractions.NullLogger<ResilientYouTubeApiService>.Instance);
     }
 
     public async Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
     {
-        var listRequest  = _youtube.Captions.List("snippet", video.Id);
-        var listResponse = await _api.ListCaptionsAsync(listRequest);
+        var youtube = ResolverYouTube(video.ChannelId);
+        var api = new ResilientYouTubeApiService(youtube, Microsoft.Extensions.Logging.Abstractions.NullLogger<ResilientYouTubeApiService>.Instance);
+
+        var listRequest  = youtube.Captions.List("snippet", video.Id);
+        var listResponse = await api.ListCaptionsAsync(listRequest);
 
         var caption = listResponse.Items?.FirstOrDefault(c => c.Snippet?.Status != "failed");
         if (caption == null)
@@ -51,11 +56,11 @@ public class YouTubeCaptionService : ICaptionService
             throw new NenhumResultadoEncontradoException("YouTubeCaption", $"nenhuma legenda disponível pro vídeo {video.Id}");
         }
 
-        var downloadRequest  = _youtube.Captions.Download(caption.Id);
+        var downloadRequest  = youtube.Captions.Download(caption.Id);
         downloadRequest.Tfmt = _options.Formato;
 
         using var memory = new MemoryStream();
-        await _api.DownloadCaptionAsync(downloadRequest, memory);
+        await api.DownloadCaptionAsync(downloadRequest, memory);
 
         var conteudo = System.Text.Encoding.UTF8.GetString(memory.ToArray());
         if (string.IsNullOrWhiteSpace(conteudo))
@@ -76,5 +81,18 @@ public class YouTubeCaptionService : ICaptionService
             Origem        = "YouTubeCaption",
             GeradoEm      = DateTime.UtcNow
         };
+    }
+
+    private YouTubeService ResolverYouTube(string? channelId)
+    {
+        if (!string.IsNullOrWhiteSpace(channelId))
+        {
+            var keyed = _serviceProvider.GetKeyedService<YouTubeService>(channelId);
+            if (keyed is not null)
+                return keyed;
+        }
+
+        // SmokeTests / composição sem AddTranscricaoMultiCanal — credencial única do appsettings.
+        return _serviceProvider.GetRequiredService<YouTubeService>();
     }
 }

@@ -8,5 +8,6 @@ namespace Giom.VideoManager.Domain.Interfaces;
 /// </summary>
 public interface ITranscricaoService
 {
-    Task<Transcricao?> TranscreverAsync(string videoId, CancellationToken ct = default);
+    /// <param name="channelId">ChannelId do vídeo — usado pra cookies yt-dlp por canal (US #146).</param>
+    Task<Transcricao?> TranscreverAsync(string videoId, string? channelId = null, CancellationToken ct = default);
 }
