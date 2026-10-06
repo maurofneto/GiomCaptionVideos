@@ -9,6 +9,7 @@ using Google.Apis.Util.Store;
 using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -211,10 +212,14 @@ public static class ServiceCollectionExtensions
     /// Composition só passa a lista de canais e recebe de volta só os que autenticaram OK.
     /// Falha ao resolver credencial de UM canal não derruba os demais — loga (via
     /// <paramref name="logger"/>, chega em Serilog/Sentry como qualquer outro log) e pula esse
-    /// canal.
+    /// canal. <paramref name="aoFalhar"/> recebe cada canal descartado + a exceção — o log acima
+    /// roda dentro de ConfigureServices, ANTES do SentrySdk.Init (SentryBootstrapHostedService),
+    /// então não vira incidente no Sentry; quem chama usa o callback pra reportar depois (ver
+    /// <see cref="AddReporteFalhasCredencialCanais"/>, Bug #147).
     /// </summary>
     public static IReadOnlyList<CanalIngestaoConfig> AddYouTubeCredenciaisPorCanal(
-        this IServiceCollection services, IConfiguration config, IReadOnlyList<CanalIngestaoConfig> canais, ILogger logger)
+        this IServiceCollection services, IConfiguration config, IReadOnlyList<CanalIngestaoConfig> canais, ILogger logger,
+        Action<CanalIngestaoConfig, Exception>? aoFalhar = null)
     {
         var clientId = config["Google:ClientId"] ?? string.Empty;
         var user = config["Google:User"] ?? "user";
@@ -240,10 +245,27 @@ public static class ServiceCollectionExtensions
             catch (Exception ex)
             {
                 logger.LogError(ex, "Falha ao resolver credencial do canal {CanalNome} ({ChannelId}) — pulando", canal.Nome, canal.ChannelId);
+                aoFalhar?.Invoke(canal, ex);
             }
         }
 
         return canaisValidos;
+    }
+
+    /// <summary>
+    /// Reporta (Error por canal com a exceção + Critical se NENHUM canal autenticou) só depois
+    /// que todos os hosted services iniciaram — inclui o SentryBootstrapHostedService, então o
+    /// sink do Serilog já encaminha pro Sentry. Não altera o exit code do processo (Bug #147).
+    /// No-op se não houve falha.
+    /// </summary>
+    public static IServiceCollection AddReporteFalhasCredencialCanais(
+        this IServiceCollection services, IReadOnlyList<FalhaCredencialCanal> falhas, int totalCanaisAtivos, int canaisValidos)
+    {
+        if (falhas.Count == 0) return services;
+
+        services.AddSingleton<IHostedService>(sp => new ReporteFalhasCredencialCanais(
+            falhas, totalCanaisAtivos, canaisValidos, sp.GetRequiredService<ILogger<ReporteFalhasCredencialCanais>>()));
+        return services;
     }
 
     /// <summary>

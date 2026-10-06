@@ -95,7 +95,9 @@ public static class ServiceCollectionExtensions
             var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>()
                 .CreateLogger("Giom.VideoManager.Composition.AddTranscricaoMultiCanal");
 
-            var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+            var falhas = new List<FalhaCredencialCanal>();
+            var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger, (c, e) => falhas.Add(new(c, e)));
+            services.AddReporteFalhasCredencialCanais(falhas, canais.Count, canaisValidos.Count);
 
             // Cookies yt-dlp são independentes do OAuth — carregar pra TODOS os canais ativos,
             // mesmo se o RefreshToken estiver inválido (invalid_grant). Sem isso, YtDlpCaption
@@ -437,7 +439,9 @@ public static class ServiceCollectionExtensions
             // using: o logger não precisa sobreviver ao descarte do provider temporário, só
             // durante esta chamada síncrona.
             var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Giom.VideoManager.Composition.AddIngestaoMultiCanal");
-            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+            var falhas = new List<FalhaCredencialCanal>();
+            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger, (c, e) => falhas.Add(new(c, e)));
+            services.AddReporteFalhasCredencialCanais(falhas, canais.Count, canaisValidos.Count);
         }
 
         services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
