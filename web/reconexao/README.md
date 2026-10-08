@@ -238,7 +238,8 @@ parâmetro; só vale usar se o `cookies.txt` filtrado passar de 4 KB. Sem `kms:G
   estáticos da env permanecem registrados no processo.
 - Scrubbing: `src/lib/redact.ts` + `src/lib/log.ts` (único ponto de log). Nunca se loga nem se
   devolve `code`, `state`, tokens, ClientSecret ou conteúdo de cookies; erros saem sem stack.
-- Headers: CSP com nonce (proxy), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+- Headers: CSP com nonce (proxy), `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`
+  (Origin real no POST same-origin; nada vaza para o Google),
   `Cache-Control: no-store`, HSTS, `nosniff`.
 
 ### Se ligar Sentry depois

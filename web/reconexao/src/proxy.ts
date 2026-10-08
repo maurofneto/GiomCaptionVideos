@@ -4,9 +4,10 @@ import { loadAuthEnv } from "@/lib/env";
 import { authorize } from "@/lib/session";
 
 // Únicas rotas sem sessão: o início do sign-in e o retorno dele (o callback aplica a allowlist e
-// responde 403 a qualquer outro e-mail). Todo o resto exige sessão + allowlist — inclusive
-// /api/youtube/callback e as APIs. Os handlers repetem a checagem (defesa em profundidade).
-const PUBLIC_PATHS = new Set(["/api/auth/login", "/api/auth/callback"]);
+// responde 403 a qualquer outro e-mail) e o logout, público de propósito (idempotente: só limpa
+// cookies; o CSRF é checado pela Origin no handler). Todo o resto exige sessão + allowlist —
+// inclusive /api/youtube/callback e as APIs. Os handlers repetem a checagem (defesa em profundidade).
+const PUBLIC_PATHS = new Set(["/api/auth/login", "/api/auth/callback", "/api/auth/logout"]);
 
 export function buildCsp(nonce: string): string {
   return [
@@ -25,9 +26,16 @@ export function buildCsp(nonce: string): string {
   ].join("; ");
 }
 
+function wantsHtml(req: NextRequest): boolean {
+  return req.headers.get("sec-fetch-dest") === "document" || !!req.headers.get("accept")?.includes("text/html");
+}
+
+// 403 de GET de documento com sessão válida fora da allowlist: dá uma saída (Sair → escolher outra conta).
+// Sem script inline, sem e-mail nem dado de sessão; o POST do form passa pela checagem de Origin do handler.
+const FORBIDDEN_HTML = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Acesso negado</title></head><body><p>Acesso negado</p><form method="post" action="/api/auth/logout"><button type="submit">Sair</button></form></body></html>`;
+
 function deny(req: NextRequest, csp: string, status: 403 | 503): NextResponse {
-  const wantsHtml = req.headers.get("sec-fetch-dest") === "document" || req.headers.get("accept")?.includes("text/html");
-  if (status === 403 && wantsHtml && req.method === "GET") {
+  if (status === 403 && wantsHtml(req) && req.method === "GET") {
     // Navegação sem sessão → manda para o sign-in. (Sessão válida porém fora da allowlist cai no 403 abaixo.)
     return NextResponse.redirect(new URL("/api/auth/login", req.url), 303);
   }
@@ -51,7 +59,9 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
     const auth = await authorize(req.headers.get("cookie"), env);
     if (!auth.ok) {
       if (auth.reason === "forbidden") {
-        const res = new NextResponse("Acesso negado", { status: 403 });
+        const html = req.method === "GET" && wantsHtml(req);
+        const res = new NextResponse(html ? FORBIDDEN_HTML : "Acesso negado", { status: 403 });
+        if (html) res.headers.set("Content-Type", "text/html; charset=utf-8");
         res.headers.set("Content-Security-Policy", csp);
         res.headers.set("Cache-Control", "no-store");
         return res;

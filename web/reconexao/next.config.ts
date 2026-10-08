@@ -11,7 +11,9 @@ const config: NextConfig = {
         source: "/:path*",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },
-          { key: "Referrer-Policy", value: "no-referrer" },
+          // Não usar no-referrer: o navegador passa a mandar "Origin: null" nos POSTs e a
+          // checagem estrita de CSRF (Origin == publicOrigin) rejeita todo login válido.
+          { key: "Referrer-Policy", value: "same-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Cache-Control", value: "no-store, max-age=0" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
