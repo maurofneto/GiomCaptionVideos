@@ -1,0 +1,168 @@
+# Pipeline da página de reconexão (web/reconexao) — SEPARADO do azure-pipelines.yml raiz (.NET/AWS).
+#
+# O Mauro precisa REGISTRAR este pipeline no ADO (Pipelines > New pipeline > Azure Repos Git >
+# Existing Azure Pipelines YAML file > /web/reconexao/azure-pipelines.yml). Pré-requisitos (fora
+# do código, ver web/reconexao/README.md):
+#   - Variable group "giom-reconexao" (Pipelines > Library) com VERCEL_TOKEN (secreto),
+#     VERCEL_ORG_ID, VERCEL_PROJECT_ID e RECONEXAO_PREVIEW_ALIAS (domínio fixo de Preview, sem
+#     https://, ex.: reconexao-dev.exemplo.com). NUNCA colocar token/IDs neste arquivo.
+#     Opcional: VERCEL_SCOPE (slug do time) — vira `--scope` só quando definido.
+#   - Environment "reconexao-prod" (Pipelines > Environments) com Approvals and checks => aprovação
+#     manual antes do deploy de produção.
+#   - Projeto Vercel com Root Directory VAZIO: o CLI roda DENTRO de web/reconexao, então o
+#     conteúdo enviado é só este app (nada do código .NET sobe pra Vercel).
+#   - Env vars do app configuradas no projeto Vercel (Preview = dev, Production = prod).
+
+# Separação de builds: o pipeline RAIZ (.NET + migrations) exclui `web/**` do próprio trigger
+# (PR-03b), então mexer na página nunca builda o .NET; e este pipeline só dispara com mudanças em
+# web/reconexao/**, então mexer no .NET nunca builda/deploya a página. Por isso aqui há só
+# `paths.include`, sem exclude e sem outros paths.
+trigger:
+  branches:
+    include:
+      - master
+      - dev
+  paths:
+    include:
+      - web/reconexao/**
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: giom-reconexao
+  # Versão FIXA do Vercel CLI (nunca "latest": o deploy tem que ser reproduzível). Precisa ser
+  # recente o bastante para ler VERCEL_TOKEN do ambiente sem cair no prompt de login (48.x não lê).
+  - name: vercelCliVersion
+    value: '63.1.0'
+  - name: nodeVersion
+    value: '20.x'
+  # As conditions dos stages de deploy seguem a regra do pipeline raiz — igualdade explícita,
+  # nunca "!= dev" (senão qualquer outra branch cairia no "senão" e viraria deploy de produção).
+  # Comparam o ref COMPLETO (Build.SourceBranch), mais estrito que Build.SourceBranchName:
+  # "feature/dev" tem SourceBranchName "dev" mas ref "refs/heads/feature/dev".
+
+stages:
+  # Build/test roda em qualquer branch (serve também de validação de PR via branch policy) e não
+  # usa nenhum segredo: as env vars abaixo são valores FICTÍCIOS só para o `next build` compilar.
+  - stage: Build
+    displayName: 'Build e testes'
+    jobs:
+      - job: BuildETestar
+        displayName: 'npm ci + lint + typecheck + test + next build'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Instalar Node'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - script: npm ci
+            displayName: 'npm ci'
+            workingDirectory: web/reconexao
+
+          - script: npm run lint
+            displayName: 'lint'
+            workingDirectory: web/reconexao
+
+          - script: npm run typecheck
+            displayName: 'typecheck'
+            workingDirectory: web/reconexao
+
+          - script: npm test
+            displayName: 'testes (vitest)'
+            workingDirectory: web/reconexao
+
+          - script: npm run build
+            displayName: 'next build'
+            workingDirectory: web/reconexao
+            env:
+              SESSION_SECRET: build-only-fake-session-secret-0123456789abcdef
+              ALLOWED_EMAILS: build@example.invalid
+              AUTH_GOOGLE_CLIENT_ID: build-fake
+              AUTH_GOOGLE_CLIENT_SECRET: build-fake
+              AUTH_REDIRECT_URI: https://build.example.invalid/api/auth/callback
+              YOUTUBE_GOOGLE_CLIENT_ID: build-fake
+              YOUTUBE_GOOGLE_CLIENT_SECRET: build-fake
+              YOUTUBE_REDIRECT_URI: https://build.example.invalid/api/youtube/callback
+              OAUTH_APP_MODE: testing
+              RECONEXAO_AWS_REGION: us-east-1
+              RECONEXAO_AWS_ACCESS_KEY_ID: build-fake
+              RECONEXAO_AWS_SECRET_ACCESS_KEY: build-fake
+              SSM_PREFIX: /giom/build
+              SSM_KMS_KEY_ID: build-fake
+              SSM_COOKIES_TIER: Standard
+              CANAIS_API_URL: https://build.example.invalid
+              CANAIS_API_REST_PREFIX: /rest/v1
+              CANAIS_API_TOKEN: build-fake
+              CANAIS_API_KEY: build-fake
+
+  # dev => Preview + alias fixo (o redirect URI do Google exige URL exata).
+  - stage: DeployPreview
+    displayName: 'Deploy Preview (dev)'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
+    jobs:
+      - job: VercelPreview
+        displayName: 'vercel deploy (preview) + alias'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - script: |
+              set -euo pipefail
+              # VERCEL_SCOPE é opcional: variável não definida no group chega como o literal
+              # '$(VERCEL_SCOPE)' (macro do ADO sem valor) — tratado como vazio.
+              SCOPE_ARGS=()
+              if [ -n "${VERCEL_SCOPE:-}" ] && [ "${VERCEL_SCOPE}" != '$(VERCEL_SCOPE)' ]; then
+                SCOPE_ARGS=(--scope "${VERCEL_SCOPE}")
+              fi
+              # stdout do `vercel deploy` é só a URL do deployment; progresso vai pro stderr.
+              DEPLOY_URL="$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --yes "${SCOPE_ARGS[@]}")"
+              echo "Deployment: ${DEPLOY_URL}"
+              npx --yes "vercel@${VERCEL_CLI_VERSION}" alias set "${DEPLOY_URL}" "${PREVIEW_ALIAS}" "${SCOPE_ARGS[@]}"
+            displayName: 'Vercel deploy Preview + alias set'
+            workingDirectory: web/reconexao
+            env:
+              VERCEL_CLI_VERSION: $(vercelCliVersion)
+              VERCEL_SCOPE: $(VERCEL_SCOPE)
+              VERCEL_TOKEN: $(VERCEL_TOKEN)
+              VERCEL_ORG_ID: $(VERCEL_ORG_ID)
+              VERCEL_PROJECT_ID: $(VERCEL_PROJECT_ID)
+              PREVIEW_ALIAS: $(RECONEXAO_PREVIEW_ALIAS)
+
+  # master => Production, num deployment job ligado ao environment "reconexao-prod" (aprovação
+  # manual configurada pelo Mauro em Approvals and checks).
+  - stage: DeployProd
+    displayName: 'Deploy Production (master)'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+    jobs:
+      - deployment: VercelProd
+        displayName: 'vercel deploy --prod'
+        environment: 'reconexao-prod'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  inputs:
+                    versionSpec: $(nodeVersion)
+
+                - script: |
+                    set -euo pipefail
+                    SCOPE_ARGS=()
+                    if [ -n "${VERCEL_SCOPE:-}" ] && [ "${VERCEL_SCOPE}" != '$(VERCEL_SCOPE)' ]; then
+                      SCOPE_ARGS=(--scope "${VERCEL_SCOPE}")
+                    fi
+                    npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prod --yes "${SCOPE_ARGS[@]}"
+                  displayName: 'Vercel deploy Production'
+                  workingDirectory: web/reconexao
+                  env:
+                    VERCEL_CLI_VERSION: $(vercelCliVersion)
+                    VERCEL_SCOPE: $(VERCEL_SCOPE)
+                    VERCEL_TOKEN: $(VERCEL_TOKEN)
+                    VERCEL_ORG_ID: $(VERCEL_ORG_ID)
+                    VERCEL_PROJECT_ID: $(VERCEL_PROJECT_ID)
