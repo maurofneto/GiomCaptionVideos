@@ -162,7 +162,8 @@ pipeline faz. O `GoogleAuthorizationCodeFlow` do .NET lista também `youtube`, `
 5. **ADO**: registrar `web/reconexao/azure-pipelines.yml` (Pipelines > New > Existing YAML);
    criar o variable group `giom-reconexao` (`VERCEL_TOKEN` secreto, `VERCEL_ORG_ID`,
    `VERCEL_PROJECT_ID`, `RECONEXAO_PREVIEW_ALIAS` e, opcional, `VERCEL_SCOPE` — slug do time,
-   passado como `--scope` só quando definido) e o environment `reconexao-prod` com aprovação
+   passado como `--scope` só quando definido; **não definir com token de time/projeto**, pois
+   `--scope` faz o CLI chamar `/v2/user`; o `VERCEL_ORG_ID` já seleciona o time) e o environment `reconexao-prod` com aprovação
    manual.
 
 ### Policy IAM mínima
@@ -255,7 +256,7 @@ O `code` do OAuth chega na URL do callback, então sem esse filtro ele vazaria c
 `paths.include: web/reconexao/**`. O pipeline raiz (.NET) exclui `web/**` (PR-03b), então mexer
 na página nunca builda o .NET e mexer no .NET nunca builda a página. Build (npm ci, lint, typecheck, test, next build) →
 `dev`: `vercel pull --environment=preview` → `vercel build` → `vercel deploy --prebuilt --target=preview`
-→ `vercel inspect --json` (falha o job se o deployment não for Preview) → `vercel alias set`;
+→ espera READY e confere o target via REST API (`GET /v13/deployments`; falha o job se não for Preview) → alias via REST (`POST /v2/deployments/{id}/aliases`). `inspect`/`alias` não usam o CLI porque ele chama `GET /v2/user`, que dá "User not found" com token de time/projeto;
 `master`: `vercel pull --environment=production` → `vercel build --prod` →
 `vercel deploy --prebuilt --prod` num deployment job do environment `reconexao-prod`. O build do
 deploy roda no agente (Node 24, `UseNode@1`); `.vercel/` (env pulada) é gitignored e nunca é impressa.
