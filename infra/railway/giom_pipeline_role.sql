@@ -102,8 +102,9 @@ GRANT DELETE ON public.categoria_teologica TO giom_pipeline;
 -- titulo = EXCLUDED.titulo, conteudo = EXCLUDED.conteudo, embedding = EXCLUDED.embedding, ...
 -- e o Postgres exige SELECT nas colunas lidas via EXCLUDED e nas do alvo de conflito (id) —
 -- sem isso o PostgREST v12.2.12 devolve 403 (achado do Seal). Regra: colunas do SET do upsert
--- precisam de SELECT. Efeito colateral aceito (decisão do Mauro): a role passa a poder ler
--- titulo/conteudo/embedding; o grant continua por coluna, fora dele fica o resto (ex.: indexado_em).
+-- precisam de SELECT. Efeito colateral aceito (opção escolhida por Codex/Titus após a
+-- validação do Seal, 08/10/2026): a role passa a poder ler titulo/conteudo/embedding; o grant
+-- continua por coluna, fora dele fica o resto (ex.: indexado_em).
 GRANT SELECT (id, video_id, titulo, chunk_index, conteudo, embedding, origem) ON public.video_chunk TO giom_pipeline;
 GRANT INSERT (video_id, titulo, chunk_index, conteudo, embedding, origem),
       UPDATE (video_id, titulo, chunk_index, conteudo, embedding, origem)

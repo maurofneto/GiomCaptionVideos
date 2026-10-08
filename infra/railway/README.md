@@ -141,8 +141,9 @@ inertes.
   `INSERT … ON CONFLICT("id") DO UPDATE SET conteudo = EXCLUDED.conteudo, embedding =
   EXCLUDED.embedding, titulo = EXCLUDED.titulo, …` exige SELECT nas colunas lidas via `EXCLUDED`
   e nas do alvo de conflito. **Regra: as colunas do SET do upsert (as do corpo enviado) e as do
-  alvo de conflito precisam de SELECT.** Decisão do Mauro: manter o grant por coluna e dar
-  SELECT também em `titulo`, `conteudo` e `embedding` (o SELECT de `video_chunk` agora é
+  alvo de conflito precisam de SELECT.** Opção escolhida por Codex/Titus após a validação do
+  Seal (08/10/2026): manter o grant por coluna e dar SELECT também em `titulo`, `conteudo` e
+  `embedding` (o SELECT de `video_chunk` agora é
   `id, video_id, titulo, chunk_index, conteudo, embedding, origem`; só `indexado_em` fica de
   fora). Efeito: a role pode ler o conteúdo e o embedding dos chunks; o código C# não mudou.
 - Revisão dos demais upserts contra essa regra (nada a corrigir além de `video_chunk`):
