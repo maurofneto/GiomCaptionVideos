@@ -6,7 +6,9 @@
 #   - Variable group "giom-reconexao" (Pipelines > Library) com VERCEL_TOKEN (secreto),
 #     VERCEL_ORG_ID, VERCEL_PROJECT_ID e RECONEXAO_PREVIEW_ALIAS (domínio fixo de Preview, sem
 #     https://, ex.: reconexao-dev.exemplo.com). NUNCA colocar token/IDs neste arquivo.
-#     Opcional: VERCEL_SCOPE (slug do time) — vira `--scope` só quando definido.
+#     VERCEL_SCOPE (slug do time) é opcional e NÃO deve ser definido com token de time/projeto:
+#     `--scope` faz o CLI chamar GET /v2/user, que a Vercel responde 404 "User not found" para
+#     esse tipo de token. O VERCEL_ORG_ID já seleciona o time. Vira `--scope` só quando definido.
 #   - Environment "reconexao-prod" (Pipelines > Environments) com Approvals and checks => aprovação
 #     manual antes do deploy de produção.
 #   - Projeto Vercel com Root Directory VAZIO: o CLI roda DENTRO de web/reconexao, então o
@@ -109,8 +111,12 @@ stages:
   #   - `vercel pull --environment=preview` + `vercel build` (sem --prod): build no agente com as
   #     env vars de Preview;
   #   - `vercel deploy --prebuilt --target=preview`: target EXPLÍCITO, nunca --prod;
-  #   - ANTES do alias, `vercel inspect --json` confirma que o deployment é de Preview; se vier
-  #     qualquer outra coisa (ex.: production), o job FALHA e o alias não é aplicado.
+  #   - ANTES do alias, a REST API (GET /v13/deployments) confirma que o deployment é de Preview;
+  #     se vier qualquer outra coisa (ex.: production), o job FALHA e o alias não é aplicado.
+  # inspect/alias NÃO usam o CLI: eles resolvem o contexto via GET /v2/user, e com token de
+  # time/projeto a Vercel responde 404 "User not found" (pull/build/deploy usam VERCEL_ORG_ID/
+  # VERCEL_PROJECT_ID e não passam por aí). Por isso o poll, a guarda de target e o alias são
+  # feitos com fetch (Node 24) na REST API, com teamId=VERCEL_ORG_ID e o token só no header.
   - stage: DeployPreview
     displayName: 'Deploy Preview (dev)'
     dependsOn: Build
@@ -141,19 +147,66 @@ stages:
               DEPLOY_URL="$("${VERCEL[@]}" deploy --prebuilt --target=preview "${SCOPE_ARGS[@]}")"
               echo "Deployment: ${DEPLOY_URL}"
 
-              # Guarda: só aplica o alias se o deployment é de Preview. Na API da Vercel o target
-              # de Preview é null/"preview"; "production" (ou ambiente custom) falha o job.
-              "${VERCEL[@]}" inspect "${DEPLOY_URL}" --json --wait "${SCOPE_ARGS[@]}" > "${AGENT_TEMPDIRECTORY}/inspect.json"
-              node -e '
-                const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-                const o = d.deployment ?? d;
-                if (!Object.hasOwn(o, "target")) { console.error("inspect --json sem campo target; abortando sem alias"); process.exit(1); }
-                const t = o.target;
-                if (t !== null && t !== "preview") { console.error("Deployment NAO eh Preview (target=" + t + "); abortando sem alias"); process.exit(1); }
-                console.log("Confirmado: deployment de Preview (target=" + t + ")");
-              ' "${AGENT_TEMPDIRECTORY}/inspect.json"
+              # Guarda de target + alias via REST API (ver comentário do stage): espera o deployment
+              # ficar READY, confirma que é Preview e só então aplica o alias. Token só por env.
+              export DEPLOY_URL
+              node - <<'NODE'
+              const { VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID, PREVIEW_ALIAS, DEPLOY_URL } = process.env;
+              const API = "https://api.vercel.com";
+              const POLL_MS = 3000;
+              const TIMEOUT_MS = 3 * 60 * 1000;
+              const EM_ANDAMENTO = ["QUEUED", "INITIALIZING", "BUILDING"];
 
-              "${VERCEL[@]}" alias set "${DEPLOY_URL}" "${PREVIEW_ALIAS}" "${SCOPE_ARGS[@]}"
+              const falha = (msg) => { console.error(msg); process.exit(1); };
+              const vazio = (v) => !v || /^\$\(/.test(v);
+              if (vazio(VERCEL_TOKEN) || vazio(VERCEL_ORG_ID) || vazio(PREVIEW_ALIAS) || vazio(DEPLOY_URL)) {
+                falha("Faltam VERCEL_TOKEN, VERCEL_ORG_ID, RECONEXAO_PREVIEW_ALIAS ou a URL do deployment");
+              }
+              const host = DEPLOY_URL.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+
+              // Só status + error.code/message da Vercel em caso de erro: nunca headers nem o objeto inteiro.
+              async function chamar(metodo, caminho, corpo) {
+                const url = `${API}${caminho}?teamId=${encodeURIComponent(VERCEL_ORG_ID)}`;
+                const headers = { Authorization: `Bearer ${VERCEL_TOKEN}` };
+                if (corpo !== undefined) headers["Content-Type"] = "application/json";
+                let res;
+                try {
+                  res = await fetch(url, { method: metodo, headers, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
+                } catch (e) {
+                  falha(`${metodo} ${caminho}: falha de rede (${e?.message ?? e})`);
+                }
+                let json = null;
+                try { json = await res.json(); } catch { /* corpo vazio ou não-JSON */ }
+                if (!res.ok) {
+                  falha(`${metodo} ${caminho}: HTTP ${res.status} ${json?.error?.code ?? ""} ${json?.error?.message ?? ""}`.trim());
+                }
+                return json;
+              }
+
+              // Equivale ao `vercel inspect --wait`: poll até sair de QUEUED/INITIALIZING/BUILDING.
+              const limite = Date.now() + TIMEOUT_MS;
+              let d = await chamar("GET", `/v13/deployments/${encodeURIComponent(host)}`);
+              while (EM_ANDAMENTO.includes(d.readyState)) {
+                if (Date.now() > limite) falha(`Timeout de 3 min esperando o deployment (readyState=${d.readyState})`);
+                await new Promise((r) => setTimeout(r, POLL_MS));
+                d = await chamar("GET", `/v13/deployments/${encodeURIComponent(host)}`);
+              }
+              if (d.readyState !== "READY") falha(`Deployment nao ficou READY (readyState=${d.readyState})`);
+
+              // Guarda: só aplica o alias se o deployment é de Preview. Na API da Vercel o target de Preview
+              // é null/"preview"; "production" (ou ambiente custom) falha o job.
+              if (!Object.hasOwn(d, "target")) falha("Resposta da API sem campo target; abortando sem alias");
+              if (d.target !== null && d.target !== "preview") {
+                falha(`Deployment NAO eh Preview (target=${d.target}); abortando sem alias`);
+              }
+              if (d.projectId && !vazio(VERCEL_PROJECT_ID) && d.projectId !== VERCEL_PROJECT_ID) {
+                falha("Deployment pertence a outro projeto (projectId != VERCEL_PROJECT_ID); abortando sem alias");
+              }
+              console.log(`Confirmado: deployment de Preview (id=${d.id}, url=${d.url}, target=${d.target}, readyState=${d.readyState})`);
+
+              const r = await chamar("POST", `/v2/deployments/${encodeURIComponent(d.id)}/aliases`, { alias: PREVIEW_ALIAS });
+              console.log(`Alias aplicado: ${r?.alias ?? PREVIEW_ALIAS}`);
+              NODE
             displayName: 'Vercel pull + build + deploy Preview, checa target, alias set'
             workingDirectory: web/reconexao
             env:
