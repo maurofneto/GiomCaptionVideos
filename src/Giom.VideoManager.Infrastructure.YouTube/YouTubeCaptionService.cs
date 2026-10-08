@@ -19,7 +19,8 @@ public class YouTubeCaptionOptions
 /// Baixa a legenda do vídeo diretamente da YouTube Data API (sem download de áudio).
 /// Desde a US #146, resolve <see cref="YouTubeService"/> keyed por <see cref="Video.ChannelId"/>
 /// (mesmo padrão da Ingestão #105) — cada canal autenticado com sua própria OAuth.
-/// Fallback: singleton <see cref="YouTubeService"/> (credencial única) pra smoke/dev legado.
+/// Sem keyed pro canal, lança <see cref="CredencialCanalIndisponivelException"/> — nunca usa
+/// credencial global.
 /// </summary>
 public class YouTubeCaptionService : ICaptionService
 {
@@ -83,16 +84,21 @@ public class YouTubeCaptionService : ICaptionService
         };
     }
 
-    private YouTubeService ResolverYouTube(string? channelId)
+    internal YouTubeService ResolverYouTube(string? channelId)
     {
-        if (!string.IsNullOrWhiteSpace(channelId))
-        {
-            var keyed = _serviceProvider.GetKeyedService<YouTubeService>(channelId);
-            if (keyed is not null)
-                return keyed;
-        }
+        if (string.IsNullOrWhiteSpace(channelId))
+            throw new CredencialCanalIndisponivelException("(vazio)", "vídeo sem ChannelId");
 
-        // SmokeTests / composição sem AddTranscricaoMultiCanal — credencial única do appsettings.
-        return _serviceProvider.GetRequiredService<YouTubeService>();
+        var keyed = _serviceProvider.GetKeyedService<YouTubeService>(channelId);
+        if (keyed is not null)
+            return keyed;
+
+        // Sem fallback pra credencial global: um canal sem keyed falhou no boot (ou não está em
+        // canal_ingestao ativo). Erro classificável com o motivo real, pro FallbackHandler seguir
+        // pro próximo elo e o log dizer a causa em vez de "No service for type YouTubeService".
+        var motivo = _serviceProvider.GetService<FalhasCredencialPorCanal>() is { } falhas && falhas.TentarObterMotivo(channelId, out var m)
+            ? m
+            : "canal sem credencial registrada no boot (fora de canal_ingestao ativo?)";
+        throw new CredencialCanalIndisponivelException(channelId, motivo);
     }
 }

@@ -18,7 +18,7 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 
 // Mesma composição do Giom.VideoManager.Instituto.Worker (Program.cs) — só troca
-// AddVideoSourceService (YouTube real) pelo FakeVideoSource, e roda uma vez só.
+// a descoberta de vídeo real do YouTube pelo FakeVideoSource, e roda uma vez só.
 // Objetivo: exercitar o pipeline real (resumo/categorização/embedding, Sentry, Helicone,
 // CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — todo o CONTEÚDO de
 // entrada (legenda/resumo/categoria/embedding) é 100% sintético (Fake*Service), sem nenhuma
@@ -79,10 +79,10 @@ using var host = Host.CreateDefaultBuilder(args)
         // senão a etapa "transcricao" nunca abre span/métrica nesta ferramenta).
         if (config.GetSection("Transcricao:FallbackChain").Exists())
         {
-            // US #146 — AddTranscriptionService não registra mais OAuth única; smoke com cadeia
-            // real precisa da credencial (singleton legado) ou de AddTranscricaoMultiCanal.
-            services.AddYouTubeCredential(config);
+            // Credencial OAuth só por canal ({secrets_key}:Google:*), igual aos workers — lê
+            // canal_ingestao do Supabase dev; canal sem credencial é pulado (cadeia segue).
             services.AddTranscriptionService(config);
+            services.AddTranscricaoMultiCanal(config);
         }
         else
         {

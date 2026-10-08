@@ -108,8 +108,12 @@ keyed por `ChannelId` e escreve cookies yt-dlp Netscape por canal a partir de
 `{secrets_key}:YtDlp:CookiesContent` (SSM `/giom/{env}/canais/{instituto|ministerio}/`).
 `YouTubeCaptionService` / `YtDlpCaptionService` / Whisper resolvem a credencial/cookie pelo
 `Video.ChannelId`. O worker carrega dois prefixos SSM (`Secrets:Aws:Paths`: `pipeline/` +
-`canais/`). Fallback legado: `pipeline/YtDlp/CookiesContent` (Bug #144) até os cookies por
-canal existirem. Runbook de rotação: [`docs/runbook-ytdlp-cookies.md`](runbook-ytdlp-cookies.md).
+`canais/`). `pipeline/Google/*` **não** é fonte de credencial: só `{secrets_key}:Google:*`
+(`ClientId` por canal opcional, senão `Google:ClientId` compartilhado). Credencial inválida/ausente
+de um canal pula só esse canal (`FalhasCredencialPorCanal` guarda o motivo) e
+`YouTubeCaptionService` lança `CredencialCanalIndisponivelException` pra cadeia de fallback
+seguir; nunca há login interativo. Fallback legado: `pipeline/YtDlp/CookiesContent` (Bug #144)
+até os cookies por canal existirem. Runbook de rotação: [`docs/runbook-ytdlp-cookies.md`](runbook-ytdlp-cookies.md).
 
 **Topologia de execução**: cada worker de etapa é 1 processo, 1 consumer só (não mais
 `Task.WhenAll` de várias etapas no mesmo processo). Migração 2026-07
