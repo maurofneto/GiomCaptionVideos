@@ -18,7 +18,7 @@ vi.mock("@aws-sdk/client-ssm", () => ({
 import { POST as cookiesPost } from "@/app/api/cookies/route";
 import { POST as connectPost } from "@/app/api/youtube/connect/route";
 import { GET as ytCallback } from "@/app/api/youtube/callback/route";
-import { middleware } from "@/middleware";
+import { proxy } from "@/proxy";
 
 const OUTSIDER = "intruso@example.test";
 
@@ -28,30 +28,30 @@ beforeEach(() => {
   vi.spyOn(console, "info").mockImplementation(() => undefined);
 });
 
-describe("allowlist — middleware", () => {
+describe("allowlist — proxy", () => {
   it("e-mail fora da allowlist recebe 403 em páginas e APIs", async () => {
     const { header } = await sessionCookie(OUTSIDER);
     for (const path of ["/", "/api/cookies", "/api/youtube/connect", "/api/youtube/callback?code=x&state=y"]) {
-      const res = await middleware(new NextRequest(`${ORIGIN}${path}`, { headers: { cookie: header } }));
+      const res = await proxy(new NextRequest(`${ORIGIN}${path}`, { headers: { cookie: header } }));
       expect(res.status, path).toBe(403);
     }
   });
 
   it("sem sessão: API recebe 403; navegação é levada ao sign-in; rotas de login ficam abertas", async () => {
-    const api = await middleware(new NextRequest(`${ORIGIN}/api/cookies`, { method: "POST" }));
+    const api = await proxy(new NextRequest(`${ORIGIN}/api/cookies`, { method: "POST" }));
     expect(api.status).toBe(403);
 
-    const nav = await middleware(new NextRequest(`${ORIGIN}/`, { headers: { accept: "text/html" } }));
+    const nav = await proxy(new NextRequest(`${ORIGIN}/`, { headers: { accept: "text/html" } }));
     expect(nav.status).toBe(303);
     expect(nav.headers.get("location")).toContain("/api/auth/login");
 
-    const login = await middleware(new NextRequest(`${ORIGIN}/api/auth/login`));
+    const login = await proxy(new NextRequest(`${ORIGIN}/api/auth/login`));
     expect(login.status).toBe(200);
   });
 
   it("e-mail da allowlist passa e a resposta leva CSP com nonce", async () => {
     const { header } = await sessionCookie();
-    const res = await middleware(new NextRequest(`${ORIGIN}/`, { headers: { cookie: header } }));
+    const res = await proxy(new NextRequest(`${ORIGIN}/`, { headers: { cookie: header } }));
     expect(res.status).toBe(200);
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toMatch(/script-src 'self' 'nonce-[\w-]+' 'strict-dynamic'/);
@@ -61,7 +61,7 @@ describe("allowlist — middleware", () => {
 
   it("sessão adulterada é tratada como sem sessão", async () => {
     const { header } = await sessionCookie();
-    const res = await middleware(new NextRequest(`${ORIGIN}/api/cookies`, { headers: { cookie: `${header}x` } }));
+    const res = await proxy(new NextRequest(`${ORIGIN}/api/cookies`, { headers: { cookie: `${header}x` } }));
     expect(res.status).toBe(403);
   });
 });

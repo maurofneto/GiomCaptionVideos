@@ -73,6 +73,8 @@ está no código** — tudo vem de env var.
 
 ## Rodar local
 
+Requer Node 24 (`engines: 24.x`, exigido pela Vercel).
+
 ```bash
 cd web/reconexao
 cp .env.example .env.local     # preencher (nunca commitar)
@@ -212,7 +214,7 @@ parâmetro; só vale usar se o `cookies.txt` filtrado passar de 4 KB. Sem `kms:G
 
 - Acesso: sign-in Google separado (`openid email`), sessão em cookie `__Host-` httpOnly/Secure/
   Lax assinado (8 h), allowlist re-checada a cada requisição. Fora da allowlist → 403 em todas as
-  rotas, inclusive `/api/youtube/callback`; checado no middleware **e** em cada handler. Únicas
+  rotas, inclusive `/api/youtube/callback`; checado no proxy (`src/proxy.ts`, antigo middleware) **e** em cada handler. Únicas
   rotas sem sessão: `/api/auth/login` e `/api/auth/callback` (este responde 403 a quem não está
   na allowlist). Navegação (HTML) sem sessão é redirecionada ao sign-in; chamadas de API sem
   sessão recebem 403. POSTs exigem `Origin` igual à origem pública.
@@ -236,7 +238,7 @@ parâmetro; só vale usar se o `cookies.txt` filtrado passar de 4 KB. Sem `kms:G
   estáticos da env permanecem registrados no processo.
 - Scrubbing: `src/lib/redact.ts` + `src/lib/log.ts` (único ponto de log). Nunca se loga nem se
   devolve `code`, `state`, tokens, ClientSecret ou conteúdo de cookies; erros saem sem stack.
-- Headers: CSP com nonce (middleware), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+- Headers: CSP com nonce (proxy), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
   `Cache-Control: no-store`, HSTS, `nosniff`.
 
 ### Se ligar Sentry depois
@@ -251,9 +253,19 @@ O `code` do OAuth chega na URL do callback, então sem esse filtro ele vazaria c
 
 `azure-pipelines.yml` (neste diretório): trigger em `dev`/`master` só com
 `paths.include: web/reconexao/**`. O pipeline raiz (.NET) exclui `web/**` (PR-03b), então mexer
-na página nunca builda o .NET e mexer no .NET nunca builda a página. Build (npm ci, lint, typecheck, test, next build) → `dev`: `vercel deploy` Preview +
-`vercel alias set`; `master`: `vercel deploy --prod` num deployment job do environment
-`reconexao-prod`. Outras branches só buildam/testam. Vercel CLI com versão fixa
+na página nunca builda o .NET e mexer no .NET nunca builda a página. Build (npm ci, lint, typecheck, test, next build) →
+`dev`: `vercel pull --environment=preview` → `vercel build` → `vercel deploy --prebuilt --target=preview`
+→ `vercel inspect --json` (falha o job se o deployment não for Preview) → `vercel alias set`;
+`master`: `vercel pull --environment=production` → `vercel build --prod` →
+`vercel deploy --prebuilt --prod` num deployment job do environment `reconexao-prod`. O build do
+deploy roda no agente (Node 24, `UseNode@1`); `.vercel/` (env pulada) é gitignored e nunca é impressa.
+Outras branches só buildam/testam.
+
+**Armadilha do primeiro deploy:** a Vercel trata o PRIMEIRO deployment de um projeto como produção
+mesmo sem `--prod` (doc do `vercel deploy`, seção Prod). No CLI isso só ocorre quando não há
+`--target` explícito. Se esse primeiro deploy falha, o projeto continua sem produção e o próximo
+deploy "implícito" viraria produção de novo. Por isso o Preview usa `--target=preview` e confere o
+target antes de aplicar o alias. Vercel CLI com versão fixa
 (`vercelCliVersion: 63.1.0`; versões antigas, como a 48.x, não leem `VERCEL_TOKEN` do ambiente
 e podem cair no prompt de login). O token vai só por `VERCEL_TOKEN` (env), nunca por flag. O pipeline **precisa ser registrado no ADO pelo Mauro**.
 

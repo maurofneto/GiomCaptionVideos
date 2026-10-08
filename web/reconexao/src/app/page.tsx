@@ -42,7 +42,7 @@ async function safeStatus(secretsKey: string, kind: "refreshToken" | "cookies"):
 const fmt = (d?: Date): string => (d ? d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "—");
 
 export default async function Page({ searchParams }: { searchParams: Promise<Search> }) {
-  // Defesa em profundidade: o middleware já barrou, mas a página também confere.
+  // Defesa em profundidade: o proxy já barrou, mas a página também confere.
   const env = getEnv();
   const auth = await authorize((await headers()).get("cookie"), env);
   if (!auth.ok) return <main><p>Acesso negado.</p></main>;

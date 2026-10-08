@@ -33,10 +33,11 @@ variables:
   - group: giom-reconexao
   # Versão FIXA do Vercel CLI (nunca "latest": o deploy tem que ser reproduzível). Precisa ser
   # recente o bastante para ler VERCEL_TOKEN do ambiente sem cair no prompt de login (48.x não lê).
+  # 63.1.0 era a última estável no npm (`npm view vercel version`) em 2026-10-08.
   - name: vercelCliVersion
     value: '63.1.0'
   - name: nodeVersion
-    value: '20.x'
+    value: '24.x'
   # As conditions dos stages de deploy seguem a regra do pipeline raiz — igualdade explícita,
   # nunca "!= dev" (senão qualquer outra branch cairia no "senão" e viraria deploy de produção).
   # Comparam o ref COMPLETO (Build.SourceBranch), mais estrito que Build.SourceBranchName:
@@ -51,10 +52,12 @@ stages:
       - job: BuildETestar
         displayName: 'npm ci + lint + typecheck + test + next build'
         steps:
-          - task: NodeTool@0
+          # NodeTool@0 está deprecado na doc da Microsoft; a task recomendada é UseNode@1
+          # (a entrada se chama `version`, não `versionSpec`).
+          - task: UseNode@1
             displayName: 'Instalar Node'
             inputs:
-              versionSpec: $(nodeVersion)
+              version: $(nodeVersion)
 
           - script: npm ci
             displayName: 'npm ci'
@@ -97,17 +100,28 @@ stages:
               CANAIS_API_KEY: build-fake
 
   # dev => Preview + alias fixo (o redirect URI do Google exige URL exata).
+  #
+  # ARMADILHA DO PRIMEIRO DEPLOY: a Vercel trata o PRIMEIRO deployment de um projeto novo como
+  # PRODUÇÃO mesmo sem `--prod` (vercel.com/docs/cli/deploy, seção Prod). No CLI isso só vale
+  # quando NÃO há `--target` (isImplicitProduction = target==="production" && !target). Um deploy
+  # que falha (ERROR) não cria produção, então o projeto segue "sem produção" e o próximo deploy
+  # sem target explícito cairia em produção de novo. Por isso aqui:
+  #   - `vercel pull --environment=preview` + `vercel build` (sem --prod): build no agente com as
+  #     env vars de Preview;
+  #   - `vercel deploy --prebuilt --target=preview`: target EXPLÍCITO, nunca --prod;
+  #   - ANTES do alias, `vercel inspect --json` confirma que o deployment é de Preview; se vier
+  #     qualquer outra coisa (ex.: production), o job FALHA e o alias não é aplicado.
   - stage: DeployPreview
     displayName: 'Deploy Preview (dev)'
     dependsOn: Build
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
     jobs:
       - job: VercelPreview
-        displayName: 'vercel deploy (preview) + alias'
+        displayName: 'vercel pull/build/deploy (preview) + alias'
         steps:
-          - task: NodeTool@0
+          - task: UseNode@1
             inputs:
-              versionSpec: $(nodeVersion)
+              version: $(nodeVersion)
 
           - script: |
               set -euo pipefail
@@ -117,11 +131,30 @@ stages:
               if [ -n "${VERCEL_SCOPE:-}" ] && [ "${VERCEL_SCOPE}" != '$(VERCEL_SCOPE)' ]; then
                 SCOPE_ARGS=(--scope "${VERCEL_SCOPE}")
               fi
+              VERCEL=(npx --yes "vercel@${VERCEL_CLI_VERSION}")
+
+              # Grava .vercel/project.json e .vercel/.env.preview.local (gitignored; NUNCA imprimir).
+              "${VERCEL[@]}" pull --yes --environment=preview "${SCOPE_ARGS[@]}"
+              # Sem --prod: usa as env vars de Preview.
+              "${VERCEL[@]}" build --yes "${SCOPE_ARGS[@]}"
               # stdout do `vercel deploy` é só a URL do deployment; progresso vai pro stderr.
-              DEPLOY_URL="$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --yes "${SCOPE_ARGS[@]}")"
+              DEPLOY_URL="$("${VERCEL[@]}" deploy --prebuilt --target=preview "${SCOPE_ARGS[@]}")"
               echo "Deployment: ${DEPLOY_URL}"
-              npx --yes "vercel@${VERCEL_CLI_VERSION}" alias set "${DEPLOY_URL}" "${PREVIEW_ALIAS}" "${SCOPE_ARGS[@]}"
-            displayName: 'Vercel deploy Preview + alias set'
+
+              # Guarda: só aplica o alias se o deployment é de Preview. Na API da Vercel o target
+              # de Preview é null/"preview"; "production" (ou ambiente custom) falha o job.
+              "${VERCEL[@]}" inspect "${DEPLOY_URL}" --json --wait "${SCOPE_ARGS[@]}" > "${AGENT_TEMPDIRECTORY}/inspect.json"
+              node -e '
+                const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+                const o = d.deployment ?? d;
+                if (!Object.hasOwn(o, "target")) { console.error("inspect --json sem campo target; abortando sem alias"); process.exit(1); }
+                const t = o.target;
+                if (t !== null && t !== "preview") { console.error("Deployment NAO eh Preview (target=" + t + "); abortando sem alias"); process.exit(1); }
+                console.log("Confirmado: deployment de Preview (target=" + t + ")");
+              ' "${AGENT_TEMPDIRECTORY}/inspect.json"
+
+              "${VERCEL[@]}" alias set "${DEPLOY_URL}" "${PREVIEW_ALIAS}" "${SCOPE_ARGS[@]}"
+            displayName: 'Vercel pull + build + deploy Preview, checa target, alias set'
             workingDirectory: web/reconexao
             env:
               VERCEL_CLI_VERSION: $(vercelCliVersion)
@@ -132,14 +165,15 @@ stages:
               PREVIEW_ALIAS: $(RECONEXAO_PREVIEW_ALIAS)
 
   # master => Production, num deployment job ligado ao environment "reconexao-prod" (aprovação
-  # manual configurada pelo Mauro em Approvals and checks).
+  # manual configurada pelo Mauro em Approvals and checks). Build no agente com as env vars de
+  # Production (`pull --environment=production` + `build --prod`) e `deploy --prebuilt --prod`.
   - stage: DeployProd
     displayName: 'Deploy Production (master)'
     dependsOn: Build
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
     jobs:
       - deployment: VercelProd
-        displayName: 'vercel deploy --prod'
+        displayName: 'vercel pull/build/deploy --prod'
         environment: 'reconexao-prod'
         strategy:
           runOnce:
@@ -147,9 +181,9 @@ stages:
               steps:
                 - checkout: self
 
-                - task: NodeTool@0
+                - task: UseNode@1
                   inputs:
-                    versionSpec: $(nodeVersion)
+                    version: $(nodeVersion)
 
                 - script: |
                     set -euo pipefail
@@ -157,8 +191,12 @@ stages:
                     if [ -n "${VERCEL_SCOPE:-}" ] && [ "${VERCEL_SCOPE}" != '$(VERCEL_SCOPE)' ]; then
                       SCOPE_ARGS=(--scope "${VERCEL_SCOPE}")
                     fi
-                    npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prod --yes "${SCOPE_ARGS[@]}"
-                  displayName: 'Vercel deploy Production'
+                    VERCEL=(npx --yes "vercel@${VERCEL_CLI_VERSION}")
+                    # Grava .vercel/.env.production.local (gitignored; NUNCA imprimir).
+                    "${VERCEL[@]}" pull --yes --environment=production "${SCOPE_ARGS[@]}"
+                    "${VERCEL[@]}" build --prod --yes "${SCOPE_ARGS[@]}"
+                    "${VERCEL[@]}" deploy --prebuilt --prod "${SCOPE_ARGS[@]}"
+                  displayName: 'Vercel pull + build + deploy Production'
                   workingDirectory: web/reconexao
                   env:
                     VERCEL_CLI_VERSION: $(vercelCliVersion)

@@ -4,29 +4,29 @@
   "private": true,
   "description": "Página de reconexão por canal (OAuth YouTube + cookies yt-dlp) — Giom",
   "engines": {
-    "node": ">=20 <21"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint --max-warnings 0",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-ssm": "3.896.0",
-    "next": "15.5.9",
-    "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "@aws-sdk/client-ssm": "3.1147.0",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@types/node": "20.19.17",
-    "@types/react": "19.1.13",
-    "@types/react-dom": "19.1.9",
-    "eslint": "8.57.1",
-    "eslint-config-next": "15.5.9",
-    "typescript": "5.9.2",
-    "vitest": "3.2.4"
+    "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "10.12.0",
+    "eslint-config-next": "16.4.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
   }
 }

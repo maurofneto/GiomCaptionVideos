@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-// CSP (com nonce) é montada no middleware — aqui ficam os headers estáticos. Tudo na página é
+// CSP (com nonce) é montada no proxy — aqui ficam os headers estáticos. Tudo na página é
 // sensível (status de credenciais), então no-store vale para todas as rotas.
 const config: NextConfig = {
   poweredByHeader: false,

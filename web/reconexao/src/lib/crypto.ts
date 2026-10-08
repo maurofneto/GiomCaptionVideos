@@ -1,4 +1,4 @@
-// Web Crypto puro (roda no Edge do middleware e no Node 20) — sem dependências.
+// Web Crypto puro (roda no proxy e no Node 24) — sem dependências.
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

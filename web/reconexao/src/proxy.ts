@@ -37,7 +37,7 @@ function deny(req: NextRequest, csp: string, status: 403 | 503): NextResponse {
   return res;
 }
 
-export async function middleware(req: NextRequest): Promise<NextResponse> {
+export async function proxy(req: NextRequest): Promise<NextResponse> {
   const nonce = randomToken(16);
   const csp = buildCsp(nonce);
 
