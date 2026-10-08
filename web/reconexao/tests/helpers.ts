@@ -66,5 +66,5 @@ export const GOOGLE = {
   channels: "https://www.googleapis.com/youtube/v3/channels",
   playlistItems: "https://www.googleapis.com/youtube/v3/playlistItems",
   captions: "https://www.googleapis.com/youtube/v3/captions",
-  supabase: "https://supabase.example.test/rest/v1/canal_ingestao",
+  supabase: "https://canais.example.test/canal_ingestao",
 };

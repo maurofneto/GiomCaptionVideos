@@ -55,7 +55,19 @@ beforeEach(() => {
 });
 
 describe("callback do YouTube — validação mine=true", () => {
-  it("canal ausente em mine=true: não grava, revoga o token e avisa", async () => {
+  it("padrão (OAUTH_REVOKE_ON_MISMATCH não definido): canal ausente não grava e NÃO revoga", async () => {
+    const f = googleRoutes({ managed: ["UCoutroCanal"] });
+    const res = await callback();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(f.calls.some((c) => c.url.startsWith(GOOGLE.revoke))).toBe(false);
+    const loc = new URL(res.headers.get("location") as string);
+    expect(loc.searchParams.get("res")).toBe("canal_nao_gerenciado");
+    expect(loc.searchParams.get("rev")).toBe("desativada");
+  });
+
+  it("OAUTH_REVOKE_ON_MISMATCH=true explícito: canal ausente não grava, revoga o token e avisa", async () => {
+    vi.stubEnv("OAUTH_REVOKE_ON_MISMATCH", "true");
     const f = googleRoutes({ managed: ["UCoutroCanal"] });
     const res = await callback();
 
@@ -93,7 +105,9 @@ describe("callback do YouTube — validação mine=true", () => {
 
   it("a mensagem diz se houve revogação", () => {
     expect(mensagemResultado("canal_nao_gerenciado", "X", { revogacao: "sim" }).text).toMatch(/foi revogado/);
-    expect(mensagemResultado("canal_nao_gerenciado", "X", { revogacao: "desativada" }).text).toMatch(/NÃO foi revogado/);
+    const off = mensagemResultado("canal_nao_gerenciado", "X", { revogacao: "desativada" }).text;
+    expect(off).toMatch(/Nada foi gravado\./);
+    expect(off).toMatch(/Nada foi revogado\. Entre com a conta dona do canal/);
     expect(mensagemResultado("canal_nao_gerenciado", "X", { revogacao: "falhou" }).text).toMatch(/recusou/);
     expect(mensagemResultado("canal_nao_gerenciado", "Canal X").text).toContain(
       "A conta autenticada não gerencia o canal Canal X. Entre com a conta dona do canal ou selecione o canal/Brand Account correto na tela do Google.",
@@ -117,7 +131,11 @@ describe("callback do YouTube — validação mine=true", () => {
     expect(cmd.input).not.toHaveProperty("Tags");
     const description = String(cmd.input.Description);
     expect(description).toContain(`ChannelId=${CANAL.channel_id}`);
+    expect(description).toContain("ClientId=yt-client-id.test");
     expect(description).not.toContain(SENTINEL.refresh);
+    expect(description).not.toContain("YT-CLIENT-SECRET-TEST");
+    const conectado = logs.find((l) => l.includes('"event":"conectado"')) ?? "";
+    expect(conectado).toContain('"clientId":"yt-client-id.test"');
     expect(f.calls.some((c) => c.url.startsWith(GOOGLE.captions))).toBe(true);
     expect(f.calls.some((c) => c.url.startsWith(GOOGLE.revoke))).toBe(false);
 
@@ -133,7 +151,8 @@ describe("callback do YouTube — validação mine=true", () => {
     expect(new URL(res.headers.get("location") as string).searchParams.get("res")).toBe("sem_refresh_token");
   });
 
-  it("escopo sem youtube.force-ssl: nada gravado e token revogado", async () => {
+  it("OAUTH_REVOKE_ON_MISMATCH=true: escopo sem youtube.force-ssl não grava e revoga o token", async () => {
+    vi.stubEnv("OAUTH_REVOKE_ON_MISMATCH", "true");
     const f = googleRoutes({ managed: [CANAL.channel_id], token: { ...tokenOk, scope: "openid" } });
     const res = await callback();
     expect(send).not.toHaveBeenCalled();

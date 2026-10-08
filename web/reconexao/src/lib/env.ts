@@ -25,8 +25,14 @@ export interface Env extends AuthEnv {
   ssmPrefix: string;
   kmsKeyId: string;
   cookiesTier: "Standard" | "Advanced";
-  supabaseUrl: string;
-  supabaseReconexaoJwt: string;
+  /** Origem do PostgREST que serve canal_ingestao (dev: Railway; prod: Supabase). Sem barra final. */
+  canaisApiUrl: string;
+  /** Espelha Supabase:RestPrefix dos workers: "" (padrão) ou ex. "/rest/v1". */
+  canaisApiRestPrefix: string;
+  /** JWT da role reconexao_leitura — SEMPRE enviado como Authorization: Bearer. */
+  canaisApiToken: string;
+  /** Header `apikey` (gateway do Supabase); só é enviado quando definido. */
+  canaisApiKey?: string;
 }
 
 type Source = Record<string, string | undefined>;
@@ -94,7 +100,15 @@ export function loadEnv(src: Source = process.env): Env {
 
   const authRedirectUri = httpsUrl(c, "AUTH_REDIRECT_URI");
   const youtubeRedirectUri = httpsUrl(c, "YOUTUBE_REDIRECT_URI");
-  const supabaseUrl = httpsUrl(c, "SUPABASE_URL");
+  const canaisApiUrl = httpsUrl(c, "CANAIS_API_URL").replace(/\/+$/, "");
+  if (canaisApiUrl && new URL(canaisApiUrl).pathname !== "/") {
+    c.fail("CANAIS_API_URL", "deve ser só a origem (o caminho vai em CANAIS_API_REST_PREFIX)");
+  }
+  const restPrefix = c.optional("CANAIS_API_REST_PREFIX", "");
+  if (!/^(\/[A-Za-z0-9._-]+)*$/.test(restPrefix) || restPrefix.includes("..")) {
+    c.fail("CANAIS_API_REST_PREFIX", "inválido (vazio ou ex.: /rest/v1, sem barra final)");
+  }
+  const canaisApiKey = c.optional("CANAIS_API_KEY", "");
 
   const mode = c.optional("OAUTH_APP_MODE", "");
   if (mode !== "testing" && mode !== "production") c.fail("OAUTH_APP_MODE", "deve ser 'testing' ou 'production'");
@@ -102,7 +116,9 @@ export function loadEnv(src: Source = process.env): Env {
   const days = Number(c.optional("OAUTH_TESTING_EXPIRY_DAYS", "7"));
   if (!Number.isInteger(days) || days < 1 || days > 365) c.fail("OAUTH_TESTING_EXPIRY_DAYS", "deve ser inteiro 1..365");
 
-  const revoke = c.optional("OAUTH_REVOKE_ON_MISMATCH", "true").toLowerCase();
+  // Padrão false: os dois canais compartilham o client OAuth, e revogar derrubaria o grant que o
+  // outro canal pode estar usando.
+  const revoke = c.optional("OAUTH_REVOKE_ON_MISMATCH", "false").toLowerCase();
   if (revoke !== "true" && revoke !== "false") c.fail("OAUTH_REVOKE_ON_MISMATCH", "deve ser 'true' ou 'false'");
 
   const tier = c.optional("SSM_COOKIES_TIER", "");
@@ -122,15 +138,18 @@ export function loadEnv(src: Source = process.env): Env {
     publicOrigin: "",
     oauthAppMode: mode === "production" ? "production" : "testing",
     oauthTestingExpiryDays: days,
-    revokeOnMismatch: revoke !== "false",
+    revokeOnMismatch: revoke === "true",
     awsRegion: c.required("RECONEXAO_AWS_REGION"),
     awsAccessKeyId: c.required("RECONEXAO_AWS_ACCESS_KEY_ID"),
     awsSecretAccessKey: c.required("RECONEXAO_AWS_SECRET_ACCESS_KEY"),
     ssmPrefix,
     kmsKeyId: c.required("SSM_KMS_KEY_ID"),
     cookiesTier: tier === "Advanced" ? "Advanced" : "Standard",
-    supabaseUrl,
-    supabaseReconexaoJwt: c.required("SUPABASE_RECONEXAO_JWT"),
+    canaisApiUrl,
+    canaisApiRestPrefix: restPrefix,
+    // Obrigatório: o PostgREST de dev aceita leitura anônima, e o app não pode depender disso.
+    canaisApiToken: c.required("CANAIS_API_TOKEN"),
+    ...(canaisApiKey ? { canaisApiKey } : {}),
   };
 
   if (c.problems.length) throw new Error(`Configuração inválida: ${c.problems.join("; ")}`);
@@ -152,7 +171,8 @@ export function getEnv(): Env {
       cached.authClientSecret,
       cached.youtubeClientSecret,
       cached.awsSecretAccessKey,
-      cached.supabaseReconexaoJwt,
+      cached.canaisApiToken,
+      cached.canaisApiKey,
     ]) {
       registerSecret(s);
     }

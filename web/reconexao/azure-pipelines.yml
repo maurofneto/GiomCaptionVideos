@@ -13,6 +13,10 @@
 #     conteúdo enviado é só este app (nada do código .NET sobe pra Vercel).
 #   - Env vars do app configuradas no projeto Vercel (Preview = dev, Production = prod).
 
+# Separação de builds: o pipeline RAIZ (.NET + migrations) exclui `web/**` do próprio trigger
+# (PR-03b), então mexer na página nunca builda o .NET; e este pipeline só dispara com mudanças em
+# web/reconexao/**, então mexer no .NET nunca builda/deploya a página. Por isso aqui há só
+# `paths.include`, sem exclude e sem outros paths.
 trigger:
   branches:
     include:
@@ -87,8 +91,10 @@ stages:
               SSM_PREFIX: /giom/build
               SSM_KMS_KEY_ID: build-fake
               SSM_COOKIES_TIER: Standard
-              SUPABASE_URL: https://build.example.invalid
-              SUPABASE_RECONEXAO_JWT: build-fake
+              CANAIS_API_URL: https://build.example.invalid
+              CANAIS_API_REST_PREFIX: /rest/v1
+              CANAIS_API_TOKEN: build-fake
+              CANAIS_API_KEY: build-fake
 
   # dev => Preview + alias fixo (o redirect URI do Google exige URL exata).
   - stage: DeployPreview

@@ -22,6 +22,8 @@ export function resetSsmClientForTests(): void {
 
 export interface RefreshTokenMeta {
   channelId: string;
+  /** Client OAuth que emitiu o token (público) — compara com o log de boot dos workers. */
+  clientId: string;
   scope: string;
   accountHash: string;
 }
@@ -45,6 +47,7 @@ export async function putRefreshToken(secretsKey: string, token: string, meta: R
       Overwrite: true,
       Description: describe({
         ChannelId: meta.channelId,
+        ClientId: meta.clientId,
         Conta: meta.accountHash,
         Escopo: meta.scope.replace("https://www.googleapis.com/auth/", ""),
         ModoApp: env.oauthAppMode,

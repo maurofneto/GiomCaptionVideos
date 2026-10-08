@@ -35,10 +35,39 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ ...TEST_ENV, [name]: value })).toThrow(name);
   });
 
-  it("OAUTH_REVOKE_ON_MISMATCH: padrão true, aceita false, rejeita lixo", () => {
-    expect(loadEnv(TEST_ENV).revokeOnMismatch).toBe(true);
+  it("OAUTH_REVOKE_ON_MISMATCH: padrão false, aceita true explícito, rejeita lixo", () => {
+    expect(loadEnv(TEST_ENV).revokeOnMismatch).toBe(false);
+    expect(loadEnv({ ...TEST_ENV, OAUTH_REVOKE_ON_MISMATCH: "true" }).revokeOnMismatch).toBe(true);
     expect(loadEnv({ ...TEST_ENV, OAUTH_REVOKE_ON_MISMATCH: "false" }).revokeOnMismatch).toBe(false);
     expect(() => loadEnv({ ...TEST_ENV, OAUTH_REVOKE_ON_MISMATCH: "talvez" })).toThrow("OAUTH_REVOKE_ON_MISMATCH");
+  });
+
+  it("sem CANAIS_API_TOKEN o app não sobe (erro lista só o nome)", () => {
+    const { CANAIS_API_TOKEN: _omit, ...rest } = TEST_ENV;
+    expect(() => loadEnv(rest)).toThrow("CANAIS_API_TOKEN ausente");
+    expect(() => loadEnv({ ...rest, CANAIS_API_TOKEN: "   " })).toThrow("CANAIS_API_TOKEN");
+  });
+
+  it("CANAIS_API_*: prefixo padrão vazio, validações de URL/prefixo, apikey opcional", () => {
+    const env = loadEnv(TEST_ENV);
+    expect(env.canaisApiRestPrefix).toBe("");
+    expect(env.canaisApiKey).toBeUndefined();
+    expect(loadEnv({ ...TEST_ENV, CANAIS_API_URL: "https://x.example.test/", CANAIS_API_REST_PREFIX: "/rest/v1", CANAIS_API_KEY: "k" })).toMatchObject({
+      canaisApiUrl: "https://x.example.test",
+      canaisApiRestPrefix: "/rest/v1",
+      canaisApiKey: "k",
+    });
+    expect(loadEnv({ ...TEST_ENV, CANAIS_API_URL: "http://localhost:3000" }).canaisApiUrl).toBe("http://localhost:3000");
+    for (const [name, value] of [
+      ["CANAIS_API_URL", "http://canais.example.test"],
+      ["CANAIS_API_URL", "https://x.example.test/rest/v1"],
+      ["CANAIS_API_REST_PREFIX", "rest/v1"],
+      ["CANAIS_API_REST_PREFIX", "/rest/v1/"],
+      ["CANAIS_API_REST_PREFIX", "/../x"],
+      ["CANAIS_API_REST_PREFIX", "/a?b=1"],
+    ] as const) {
+      expect(() => loadEnv({ ...TEST_ENV, [name]: value }), `${name}=${value}`).toThrow(name);
+    }
   });
 
   it("OAUTH_TESTING_EXPIRY_DAYS tem padrão 7", () => {

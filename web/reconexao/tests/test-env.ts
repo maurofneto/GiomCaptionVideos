@@ -16,6 +16,6 @@ export const TEST_ENV: Record<string, string> = {
   SSM_PREFIX: "/giom/dev",
   SSM_KMS_KEY_ID: "alias/giom-dev-test",
   SSM_COOKIES_TIER: "Standard",
-  SUPABASE_URL: "https://supabase.example.test",
-  SUPABASE_RECONEXAO_JWT: "supabase.jwt.test-value",
+  CANAIS_API_URL: "https://canais.example.test",
+  CANAIS_API_TOKEN: "canais-api-token-test-value",
 };

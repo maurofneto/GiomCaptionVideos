@@ -99,7 +99,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
 
       {banner && <div className={`banner ${banner.tone}`} role="status">{banner.text}</div>}
       {bannerTeste && <div className={`banner ${bannerTeste.tone}`} role="status">{bannerTeste.text}</div>}
-      {erroLista && <div className="banner erro">Não foi possível ler a lista de canais (Supabase).</div>}
+      {erroLista && <div className="banner erro">Não foi possível ler a lista de canais. Verifique a configuração da fonte de canais.</div>}
       {!erroLista && canais.length === 0 && <p>Nenhum canal ativo em canal_ingestao.</p>}
 
       {canais.map((c, i) => {
@@ -140,11 +140,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                   <input type="hidden" name="secretsKey" value={c.secretsKey} />
                   <button type="submit">Conectar YouTube</button>
                 </form>
-                {env.revokeOnMismatch && (
-                  <p className="meta">
-                    Atenção: entrar com a conta de outro canal pode revogar a autorização dessa conta para este app.
-                  </p>
-                )}
+                <p className="meta">
+                  {env.revokeOnMismatch
+                    ? "Atenção: entrar com a conta de outro canal pode revogar a autorização dessa conta para este app."
+                    : "Dica: entre com a conta dona deste canal."}
+                </p>
               </div>
 
               <div>

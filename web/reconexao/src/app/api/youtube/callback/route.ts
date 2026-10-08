@@ -81,9 +81,10 @@ async function handle(req: Request, access: Access, scope: SecretScope): Promise
   scope.add(tokens.refreshToken);
 
   // Revoga só quando a conta/escopo está comprovadamente errado (preferindo o refresh token, que
-  // invalida também o access token) e OAUTH_REVOKE_ON_MISMATCH=true. Trade-off: o Google trata a
-  // revogação como revogação do grant da conta para este client, o que pode derrubar um token
-  // bom já gravado para OUTRO canal se a mesma conta foi usada. Em falhas de infra (SSM, rede)
+  // invalida também o access token) e OAUTH_REVOKE_ON_MISMATCH=true explícito (padrão false).
+  // Trade-off: os canais compartilham o client OAuth e o Google trata a revogação como
+  // revogação do grant da conta para este client, o que pode derrubar um token bom já gravado
+  // para OUTRO canal se a mesma conta foi usada. Em falhas de infra (SSM, rede)
   // nunca revoga.
   const revokeObtained = async (): Promise<Revogacao> => {
     if (!env.revokeOnMismatch) {
@@ -120,6 +121,7 @@ async function handle(req: Request, access: Access, scope: SecretScope): Promise
   try {
     await putRefreshToken(secretsKey, tokens.refreshToken, {
       channelId,
+      clientId: env.youtubeClientId,
       scope: tokens.scope,
       accountHash: (await sha256Hex([...managed].sort().join(","))).slice(0, 8),
     });
@@ -129,6 +131,7 @@ async function handle(req: Request, access: Access, scope: SecretScope): Promise
   }
 
   const teste = await testConnection(client, tokens.refreshToken);
-  log("info", "conectado", { canal: secretsKey, teste: teste.code, detalhe: teste.detail });
+  // clientId é identificador público: permite comparar com o log de boot dos workers.
+  log("info", "conectado", { canal: secretsKey, clientId: env.youtubeClientId, teste: teste.code, detalhe: teste.detail });
   return done("conectado", secretsKey, teste.code);
 }

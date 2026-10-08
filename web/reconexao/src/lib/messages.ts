@@ -45,7 +45,7 @@ function sufixoRevogacao(r?: Revogacao): string {
     case "sim":
       return " O token obtido foi revogado (isso pode revogar também a autorização anterior dessa conta para este app).";
     case "desativada":
-      return " O token obtido NÃO foi revogado (revogação desativada por configuração); revogue em myaccount.google.com/permissions se necessário.";
+      return " Nada foi revogado. Entre com a conta dona do canal e tente de novo.";
     case "falhou":
       return " Tentei revogar o token obtido, mas o Google recusou; revogue em myaccount.google.com/permissions.";
     default:

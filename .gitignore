@@ -376,12 +376,3 @@ supabase/.temp/
 # Artefato de build da Lambda watchman — gerado a partir de lambda_function.py (fonte versionada),
 # nunca precisa ir pro repo; o pipeline gera o zip na hora do deploy (ver azure-pipelines.yml).
 infra/lambda-fila-watchman/function.zip
-
-# App Next.js de reconexão (web/reconexao) — dependências, build e env locais (só .env.example é versionado)
-web/reconexao/node_modules/
-web/reconexao/.next/
-web/reconexao/.env*
-!web/reconexao/.env.example
-web/reconexao/next-env.d.ts
-web/reconexao/*.tsbuildinfo
-.vercel/
