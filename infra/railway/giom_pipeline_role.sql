@@ -42,9 +42,12 @@ END $$;
 -- Reafirma os atributos mesmo se a role já existia com outros.
 ALTER ROLE giom_pipeline NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 
--- O PostgREST conecta como authenticator (LOGIN NOINHERIT, criada pelo Lamp) e troca para a
--- role do claim "role" do JWT com SET ROLE — por isso authenticator precisa ser MEMBER.
--- Guardado por existência: sem authenticator, só avisa (rodar de novo depois que o Lamp criar).
+-- No FECHAMENTO da anônima o PostgREST passa a conectar como authenticator (LOGIN NOINHERIT,
+-- criada pelo Lamp) e troca para a role do claim "role" do JWT com SET ROLE — por isso
+-- authenticator precisa ser MEMBER. Até lá a conexão é postgres (superusuário, que pode
+-- SET ROLE para qualquer role) e authenticator não existe.
+-- Guardado por existência: sem authenticator, só avisa (esperado antes do fechamento; rode
+-- este script de novo, ou só o GRANT, depois que o Lamp criar a role).
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
@@ -94,9 +97,14 @@ GRANT INSERT (video_id, area, subcategoria, peso),
     ON public.categoria_teologica TO giom_pipeline;
 GRANT DELETE ON public.categoria_teologica TO giom_pipeline;
 
--- video_chunk (SupabaseVideoChunkRepository): leitura só dos metadados (nunca conteudo/
--- embedding via PostgREST); id entra no SELECT por ser o alvo de conflito do merge-duplicates.
-GRANT SELECT (id, video_id, chunk_index, origem) ON public.video_chunk TO giom_pipeline;
+-- video_chunk (SupabaseVideoChunkRepository): SELECT por coluna, mas com TODAS as colunas do
+-- corpo do upsert. O POST merge-duplicates vira INSERT ... ON CONFLICT("id") DO UPDATE SET
+-- titulo = EXCLUDED.titulo, conteudo = EXCLUDED.conteudo, embedding = EXCLUDED.embedding, ...
+-- e o Postgres exige SELECT nas colunas lidas via EXCLUDED e nas do alvo de conflito (id) —
+-- sem isso o PostgREST v12.2.12 devolve 403 (achado do Seal). Regra: colunas do SET do upsert
+-- precisam de SELECT. Efeito colateral aceito (decisão do Mauro): a role passa a poder ler
+-- titulo/conteudo/embedding; o grant continua por coluna, fora dele fica o resto (ex.: indexado_em).
+GRANT SELECT (id, video_id, titulo, chunk_index, conteudo, embedding, origem) ON public.video_chunk TO giom_pipeline;
 GRANT INSERT (video_id, titulo, chunk_index, conteudo, embedding, origem),
       UPDATE (video_id, titulo, chunk_index, conteudo, embedding, origem)
     ON public.video_chunk TO giom_pipeline;

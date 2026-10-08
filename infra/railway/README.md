@@ -102,7 +102,7 @@ relativos a `src/Giom.VideoManager.Infrastructure.Supabase/` (abrev. **IS**) sal
 | `resumo` | SELECT; INSERT+UPDATE (`on_conflict=video_id`) | SELECT `*`; escrita: `video_id,descricao,origem,gerado_em` | Resumo (+ qualquer `UpsertAsync`) | `…VideoRepository.cs:65,77,165` |
 | `capitulo` | SELECT | `*` (embed `resumo(*,capitulo(*))`) | todos que chamam `GetByIdAsync` | `…VideoRepository.cs:65` — nenhum código grava capítulo |
 | `categoria_teologica` | SELECT; DELETE; INSERT+UPDATE (POST merge-duplicates) | SELECT `video_id,area,subcategoria,peso`; escrita: `video_id,area,subcategoria,peso` | Categorizacao (+ qualquer `UpsertAsync` com categorias) | `…VideoRepository.cs:65,85,95-96,171` |
-| `video_chunk` | SELECT; DELETE; INSERT+UPDATE (POST merge-duplicates) | SELECT `id,video_id,chunk_index,origem`; escrita: `video_id,titulo,chunk_index,conteudo,embedding,origem` | Embedding (+ `GetByIdAsync` em todos pelo embed) | `IS/SupabaseVideoChunkRepository.cs:30-31,55-56,71`; `…VideoRepository.cs:65` |
+| `video_chunk` | SELECT; DELETE; INSERT+UPDATE (POST merge-duplicates) | SELECT `id,video_id,titulo,chunk_index,conteudo,embedding,origem` (as do SET do upsert; ver §3); escrita: `video_id,titulo,chunk_index,conteudo,embedding,origem` | Embedding (+ `GetByIdAsync` em todos pelo embed) | `IS/SupabaseVideoChunkRepository.cs:30-31,55-56,71`; `…VideoRepository.cs:65` |
 | `video_etapa_terminal` | SELECT; INSERT+UPDATE (`on_conflict=video_id,etapa`) | SELECT `etapa` (+ chave); escrita: `video_id,etapa` | Orquestracao, Smoke | `IS/SupabaseVideoEtapaTerminalRepository.cs:34-35,45` |
 | `processamento_progresso` | SELECT; INSERT+UPDATE (POST merge-duplicates) | SELECT `last_page_token`, `last_processed_date`; escrita: `channel_key,playlist_id,last_page_token,last_processed_date,last_execution_date` | Ingestao | `IS/SupabaseProgressoRepository.cs:36,48,70-71` |
 | `canal_ingestao` | **só SELECT** (policy só `ativo`) | `*` | Ingestao, Transcricao | `IS/SupabaseCanalIngestaoRepository.cs:23` |
@@ -136,11 +136,31 @@ inertes.
 - O `UpsertAsync` em `video_chunk` e `categoria_teologica` usa `merge-duplicates` **sem**
   `on_conflict`, ou seja, conflito na PK `id` (que o corpo nunca envia). Na prática é só
   INSERT, mas o PostgREST ainda emite `ON CONFLICT (id) DO UPDATE SET …`, por isso o UPDATE
-  por coluna e o `SELECT (id)` em `video_chunk`. O Seal deve exercitar exatamente essas
-  chamadas no banco descartável.
-- Os grants por coluna em `video_chunk` impedem a role de **ler** `conteudo`/`embedding` via
-  PostgREST (o código nunca faz). Se algum dia alguém fizer `select=*` ali, vira 403 — é o
-  efeito desejado.
+  por coluna e o `SELECT` em `video_chunk`.
+- **Achado do Seal (PostgREST v12.2.12):** o upsert em `video_chunk` voltava 403 porque o
+  `INSERT … ON CONFLICT("id") DO UPDATE SET conteudo = EXCLUDED.conteudo, embedding =
+  EXCLUDED.embedding, titulo = EXCLUDED.titulo, …` exige SELECT nas colunas lidas via `EXCLUDED`
+  e nas do alvo de conflito. **Regra: as colunas do SET do upsert (as do corpo enviado) e as do
+  alvo de conflito precisam de SELECT.** Decisão do Mauro: manter o grant por coluna e dar
+  SELECT também em `titulo`, `conteudo` e `embedding` (o SELECT de `video_chunk` agora é
+  `id, video_id, titulo, chunk_index, conteudo, embedding, origem`; só `indexado_em` fica de
+  fora). Efeito: a role pode ler o conteúdo e o embedding dos chunks; o código C# não mudou.
+- Revisão dos demais upserts contra essa regra (nada a corrigir além de `video_chunk`):
+
+  | Tabela | Alvo de conflito | Colunas do SET | SELECT concedido | Resultado |
+  |---|---|---|---|---|
+  | `video` | `id` | `id,title,description,channel_id,channel_title,playlist_id,length,privacy_status,uploaded_at,processed_at` | tabela inteira | ok |
+  | `transcricao` | `video_id` | `video_id,conteudo,formato,origem,gerado_em` | tabela inteira | ok |
+  | `resumo` | `video_id` | `video_id,descricao,origem,gerado_em` | tabela inteira | ok |
+  | `categoria_teologica` | `id` (PK) | `video_id,area,subcategoria,peso` | tabela inteira | ok |
+  | `video_etapa_terminal` | `video_id,etapa` | `video_id,etapa` | tabela inteira | ok |
+  | `processamento_progresso` | `channel_key,playlist_id` | as 5 colunas do corpo | tabela inteira | ok |
+  | `chat_sessao` | `chat_id` (PK assumida) | `chat_id,geracao,atualizado_em` | tabela inteira | ok |
+  | `video_chunk` | `id` (PK) | `video_id,titulo,chunk_index,conteudo,embedding,origem` | por coluna, **faltavam `titulo`, `conteudo`, `embedding`** | corrigido |
+
+  `conversa_historico` (POST simples + PATCH), `interacao_log` (POST simples) e
+  `provedor_rate_limit` (UPDATE dentro da função) não são upsert; `conversa_historico` e
+  `provedor_rate_limit` têm SELECT de tabela inteira.
 
 ### Para o Seal validar no banco descartável (os grants não mudam)
 
@@ -149,8 +169,9 @@ inertes.
   esperado é `RETURNING 1`/sem `RETURNING`; se vier `RETURNING` com colunas, o SELECT e a
   policy de SELECT passam a ser exigidos — aí o grant precisa ser revisto.
 - [ ] **Upsert `merge-duplicates` sem `on_conflict`** em `video_chunk` e `categoria_teologica`
-  (conflito na PK `id`): funciona com `SELECT (id, video_id, chunk_index, origem)` por coluna
-  em `video_chunk` + `INSERT`/`UPDATE` por coluna?
+  (conflito na PK `id`): funciona com `SELECT (id, video_id, titulo, chunk_index, conteudo,
+  embedding, origem)` por coluna em `video_chunk` + `INSERT`/`UPDATE` por coluna? (A versão
+  anterior, sem `titulo/conteudo/embedding`, deu 403 no PostgREST v12.2.12 — corrigido; reconfirmar.)
 - [ ] **`farol_consumir`**: o `SELECT … FOR UPDATE` dentro da função funciona só com
   `UPDATE (saldo, atualizado_em)` + `SELECT` em `provedor_rate_limit`, com RLS ligado?
 - [ ] **Embeds** `video?select=*,transcricao(*),resumo(*,capitulo(*)),categoria_teologica(…),video_chunk(chunk_index,origem)`
@@ -158,7 +179,8 @@ inertes.
 - [ ] **Idempotência**: rodar `giom_pipeline_role.sql` duas vezes seguidas sem erro e com o
   mesmo estado final (`\dp`, `\dRp`/`pg_policies`, `pg_auth_members`).
 - [ ] **Sem `authenticator`**: rodar o script num banco sem essa role deve terminar com
-  sucesso, emitindo só o `WARNING` do `GRANT … TO authenticator` pendente.
+  sucesso, emitindo só o `WARNING` do `GRANT … TO authenticator` pendente (é o estado de
+  dev até o fechamento).
 
 ## 4. Chaves SSM por worker (dev)
 
@@ -184,24 +206,32 @@ Total: **3 parâmetros** (`pipeline/`, `canais/`, `agenteinstituto/`). Prod não
 
 Nada abaixo foi executado por esta mudança. Ordem importa.
 
-1. **Lamp** cria no Railway dev a role `authenticator` (`LOGIN NOINHERIT`) e configura o
-   `PGRST_JWT_SECRET` (≥ 32 caracteres) e o `PGRST_DB_URI` com ela. **Não** remove ainda o
-   `PGRST_DB_ANON_ROLE`.
-2. **Aplicar** `giom_pipeline_role.sql` no Railway dev (após conferir o §3):
+**Estado de partida (dev):** o PostgREST conecta como `postgres` e o `PGRST_JWT_SECRET` já foi
+rotacionado pelo Lamp. Até o fechamento isso basta: `postgres` é superusuário e pode fazer
+`SET ROLE` para qualquer role, então, quando a requisição traz um token com
+`{"role":"giom_pipeline"}`, o PostgREST troca para `giom_pipeline` e os grants/policies deste
+SQL valem de verdade (erro de grant aparece já, mesmo com a anônima aberta). `authenticator` e
+a troca de `PGRST_DB_URI` só entram no **fechamento** (passo 5).
+
+1. **Validar e aplicar o SQL.** O Seal valida (feito, com a correção do `video_chunk` do §3) e
+   o SQL é aplicado no Railway dev **com a conexão atual**:
    `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/railway/giom_pipeline_role.sql`.
-   Se `authenticator` ainda não existia, o script avisa (`WARNING`) — rode de novo depois.
-   Opcional, se o PostgREST estava de pé antes: `NOTIFY pgrst, 'reload schema';`.
-3. **Gerar o JWT HS256** com payload `{"role":"giom_pipeline"}` assinado com o
-   `PGRST_JWT_SECRET`, **sem colar o segredo em nenhum lugar** (nem chat, nem arquivo versionado,
-   nem argumento de comando). Recomenda-se **`exp`** (p.ex. 180 dias) para limitar o estrago de
-   um vazamento — sem `exp` o token vale até o `PGRST_JWT_SECRET` ser trocado; anote a data de
-   renovação. Exemplo (Git Bash; o segredo entra por `read -rs` e por variável de ambiente, não
-   aparece na tela, no histórico nem na lista de processos):
+   O `WARNING` de `authenticator` inexistente é **esperado** nesta etapa. Opcional, se o
+   PostgREST estava de pé antes: `NOTIFY pgrst, 'reload schema';`.
+2. **O Lamp assina o JWT** HS256 com payload `{"role":"giom_pipeline"}`, usando o
+   `PGRST_JWT_SECRET` já rotacionado, e grava o resultado em
+   `/home/box/secrets/giom_pipeline_token_dev` (arquivo fora do repositório, em pasta de
+   segredos nunca versionada nem colada em chat/log). Ninguém cola segredo nem token em chat,
+   log ou argumento de comando.
+   Recomenda-se **`exp`** (p.ex. 180 dias) para limitar o estrago de um vazamento — sem `exp`
+   o token vale até o `PGRST_JWT_SECRET` ser trocado; anote a data de renovação. Exemplo para
+   o Lamp (o segredo entra por `read -rs` e por variável de ambiente, não aparece na tela, no
+   histórico nem na lista de processos):
 
    ```bash
    read -rs PGRST_JWT_SECRET && export PGRST_JWT_SECRET
    umask 077
-   python3 -I - > pgrst.tok <<'PY'
+   python3 -I - > /home/box/secrets/giom_pipeline_token_dev <<'PY'
    import base64, hashlib, hmac, json, os, time
    b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=")
    head = b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
@@ -211,38 +241,41 @@ Nada abaixo foi executado por esta mudança. Ordem importa.
    PY
    unset PGRST_JWT_SECRET
    ```
-4. **Gravar como SecureString** nos 3 paths (o arquivo evita o token em `argv`; no Git Bash,
-   `MSYS_NO_PATHCONV=1` por causa do `/` inicial — ver `docs/ENGINEERING_STANDARDS.md`):
+3. **O Mauro grava no SSM** (SecureString, os 3 paths) a partir desse arquivo. `file://`
+   evita o token em `argv`; no Git Bash, `MSYS_NO_PATHCONV=1` por causa do `/` inicial (ver
+   `docs/ENGINEERING_STANDARDS.md`). Ajuste o caminho do `file://` se o arquivo estiver em
+   outro lugar:
 
    ```bash
    for p in pipeline canais agenteinstituto; do
      MSYS_NO_PATHCONV=1 aws ssm put-parameter --name "/giom/dev/$p/Supabase/PostgrestToken" \
-       --type SecureString --overwrite --value file://pgrst.tok
+       --type SecureString --overwrite --value file:///home/box/secrets/giom_pipeline_token_dev
    done
-   rm -f pgrst.tok
    ```
-5. **Reiniciar/redeployar os workers dev.** Eles só leem o SSM no boot. Services de longa duração
-   (Transcricao, Resumo, Categorizacao, Embedding, Orquestracao, AgenteInstituto):
-   `aws ecs update-service --cluster giom-cluster --service <svc-dev> --force-new-deployment`
-   (ação de infra: confirmar antes). A Ingestao dev roda por schedule/`run-task` e pega o token
-   na próxima execução. Os smoke tests, na próxima rodada.
-6. **Conferir nos logs** (CloudWatch dos workers dev e saída dos smoke tests): nenhum
+4. **O Mauro força novo deploy dos workers dev** (eles só leem o SSM no boot). Services de
+   longa duração (Transcricao, Resumo, Categorizacao, Embedding, Orquestracao,
+   AgenteInstituto): `aws ecs update-service --cluster giom-cluster --service <svc-dev>
+   --force-new-deployment` (ação de infra: confirmar antes). A Ingestao dev roda por
+   schedule/`run-task` e pega o token na próxima execução; os smoke tests, na próxima rodada.
+   **Conferir os logs** (CloudWatch dos workers dev e saída dos smoke tests): nenhum
    `Unauthorized`/`401`/`403`, `permission denied for table|sequence`, `JWSError`/`JWT`, e as
-   escritas acontecendo (vídeo avança de etapa, `interacao_log` ganha linhas). Com o token
-   presente o PostgREST **não** cai para a anônima — então erro de grant ou de assinatura
-   aparece aqui, mesmo com a anônima ainda aberta. O token nunca é logado; se aparecer em
-   algum log, é bug.
-7. **Só depois** de **todos** os workers (inclusive AgenteInstituto) e os smoke tests
-   funcionando com o token, o Lamp remove `PGRST_DB_ANON_ROLE` (fecha a anônima).
-   **Remover antes derruba os workers**: qualquer cliente sem token — worker que ainda não
-   reiniciou, smoke test local, `BackfillEmbeddings` apontado ao Railway — passa a receber
-   401 (`PGRST302`).
+   escritas acontecendo (vídeo avança de etapa, `interacao_log` ganha linhas). O token nunca é
+   logado; se aparecer em algum log, é bug.
+5. **Fechamento**, só depois de **todos** os workers (inclusive AgenteInstituto) e os smoke
+   tests OK com o token. O Lamp faz tudo junto: cria `authenticator` (`LOGIN NOINHERIT`), roda
+   o SQL de novo (ou só `GRANT giom_pipeline TO authenticator`) para dar a membership, troca o
+   `PGRST_DB_URI` para `authenticator` e remove `PGRST_DB_ANON_ROLE`. Depois, reconfere os
+   logs. **Remover a anônima antes do passo 4 derruba os workers**: qualquer cliente sem
+   token — worker que ainda não reiniciou, smoke test local, `BackfillEmbeddings` apontado ao
+   Railway — passa a receber 401 (`PGRST302`). Trocar o `PGRST_DB_URI` sem a membership dá
+   falha parecida (`permission denied to set role "giom_pipeline"`).
 
-**Rollback:** recolocar `PGRST_DB_ANON_ROLE` restaura a leitura anônima instantaneamente. Para
-desligar o token num worker, apague o parâmetro SSM e reinicie (token vazio = comportamento
-antigo). Para revogar tudo: trocar o `PGRST_JWT_SECRET` invalida todos os tokens emitidos.
-**Rotação:** regerar (passo 3), sobrescrever os 3 parâmetros (passo 4) e reiniciar (passo 5)
-antes do `exp`.
+**Rollback:** antes do fechamento, para desligar o token num worker apague o parâmetro SSM e
+reinicie (token vazio = leitura anônima, comportamento antigo). Se o fechamento der errado,
+desfaça o bloco inteiro: recolocar `PGRST_DB_ANON_ROLE` e voltar o `PGRST_DB_URI` para
+`postgres` restaura tudo na hora. Para revogar todos os tokens: trocar o `PGRST_JWT_SECRET`.
+**Rotação:** o Lamp reassina (passo 2), o Mauro sobrescreve os 3 parâmetros (passo 3) e força
+novo deploy (passo 4) antes do `exp`.
 
 ## 6. Dúvidas / limites conhecidos
 
