@@ -115,6 +115,17 @@ de um canal pula só esse canal (`FalhasCredencialPorCanal` guarda o motivo) e
 seguir; nunca há login interativo. Fallback legado: `pipeline/YtDlp/CookiesContent` (Bug #144)
 até os cookies por canal existirem. Runbook de rotação: [`docs/runbook-ytdlp-cookies.md`](runbook-ytdlp-cookies.md).
 
+**Client OAuth da credencial por canal** — o client tem de ser **Web application**, o mesmo da
+página de reconexão (`web/reconexao`, PR-03), que é quem emite o refresh token. O fluxo
+Desktop/loopback (`GoogleWebAuthorizationBroker` + `LocalServerCodeReceiver`) era o fluxo antigo
+e não é mais suportado. O refresh token fica **amarrado ao client que o emitiu**: trocar o
+ClientId exige reconectar os dois canais pela página e gravar o ClientSecret do client Web em
+`/giom/{env}/canais/{secrets_key}/Google/ClientSecret`. O boot loga `clientId=` por canal
+(identificador público; `projeto=` sozinho não distingue Desktop de Web, que compartilham o
+número do projeto) para conferir com o ClientId da página. Refresh recusado
+(`invalid_grant`/`unauthorized_client`) é registrado com a dica de token revogado/expirado ou
+emitido por outro client.
+
 **Topologia de execução**: cada worker de etapa é 1 processo, 1 consumer só (não mais
 `Task.WhenAll` de várias etapas no mesmo processo). Migração 2026-07
 (`infra/ecs-services-etapas/`): deixou de ser `run-task` sob demanda (disparado por uma Lambda

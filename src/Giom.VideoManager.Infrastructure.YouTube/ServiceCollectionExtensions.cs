@@ -202,9 +202,11 @@ public static class ServiceCollectionExtensions
                     User = user
                 };
 
+                // clientId inteiro no log: o client Desktop (legado) e o Web (página de reconexão)
+                // têm o MESMO número de projeto, então só "projeto=" não diferencia qual está em uso.
                 logger.LogInformation(
-                    "Credencial Google do canal {CanalNome} ({ChannelId}), secrets_key={SecretsKey}: ClientId origem={Origem}, projeto={Projeto}",
-                    canal.Nome, canal.ChannelId, canal.SecretsKey, porCanal ? "por-canal" : "compartilhado", PrefixoProjeto(options.ClientId));
+                    "Credencial Google do canal {CanalNome} ({ChannelId}), secrets_key={SecretsKey}: ClientId origem={Origem}, projeto={Projeto}, clientId={ClientId}",
+                    canal.Nome, canal.ChannelId, canal.SecretsKey, porCanal ? "por-canal" : "compartilhado", PrefixoProjeto(options.ClientId), options.ClientId);
 
                 ExigirCampos(canal.ChannelId, canal.SecretsKey, options);
 
@@ -213,8 +215,8 @@ public static class ServiceCollectionExtensions
                 // Hash curto do RefreshToken: permite provar nos logs que canais usam credenciais
                 // distintas sem expor o valor.
                 logger.LogInformation(
-                    "Credencial Google OK para canal {CanalNome} ({ChannelId}), secrets_key={SecretsKey}, projeto={Projeto}, refreshTokenSha256Prefix={Hash}",
-                    canal.Nome, canal.ChannelId, canal.SecretsKey, PrefixoProjeto(options.ClientId), ShortContentHash(options.RefreshToken!));
+                    "Credencial Google OK para canal {CanalNome} ({ChannelId}), secrets_key={SecretsKey}, projeto={Projeto}, clientId={ClientId}, refreshTokenSha256Prefix={Hash}",
+                    canal.Nome, canal.ChannelId, canal.SecretsKey, PrefixoProjeto(options.ClientId), options.ClientId, ShortContentHash(options.RefreshToken!));
                 var youtubeService = new YouTubeService(new BaseClientService.Initializer
                 {
                     HttpClientInitializer = credencial,
@@ -229,9 +231,10 @@ public static class ServiceCollectionExtensions
                 var motivo = ex is CredencialCanalIndisponivelException indisponivel ? indisponivel.Motivo : ResumirMotivo(ex);
                 falhas[canal.ChannelId] = motivo;
 
-                // Exceção crua só pra tipos cujo texto é conhecido e seguro; qualquer outra pode
-                // carregar texto arbitrário (URL, corpo de resposta) — nesse caso só tipo + motivo.
-                if (ex is TokenResponseException or CredencialCanalIndisponivelException)
+                // Exceção crua só pro nosso tipo (texto próprio, sem segredo); qualquer outra —
+                // inclusive TokenResponseException, cujo texto traz o error_description do Google —
+                // pode carregar texto de terceiros: nesse caso só tipo + motivo.
+                if (ex is CredencialCanalIndisponivelException)
                 {
                     logger.LogError(ex, "Falha ao resolver credencial do canal {CanalNome} ({ChannelId}), secrets_key={SecretsKey} — pulando. Motivo: {Motivo}",
                         canal.Nome, canal.ChannelId, canal.SecretsKey, motivo);
@@ -258,7 +261,12 @@ public static class ServiceCollectionExtensions
             throw new CredencialCanalIndisponivelException(channelId, $"RefreshToken ausente ({secretsKey}:Google:RefreshToken)");
     }
 
-    /// <summary>Só a parte numérica antes do primeiro '-' (número do projeto) — o ClientId inteiro não vai pro log.</summary>
+    /// <summary>
+    /// Só a parte numérica antes do primeiro '-' (número do projeto Google). NÃO identifica o client:
+    /// Desktop e Web do mesmo projeto compartilham o número — por isso o log também traz o
+    /// clientId inteiro (identificador público, aparece na URL de autorização). ClientSecret e
+    /// RefreshToken nunca vão pro log.
+    /// </summary>
     private static string PrefixoProjeto(string clientId)
     {
         var idx = clientId.IndexOf('-');
@@ -266,9 +274,14 @@ public static class ServiceCollectionExtensions
         return prefixo.Length > 0 && prefixo.All(char.IsDigit) ? prefixo : "indisponivel";
     }
 
-    /// <summary>Resumo sem segredo: código OAuth (invalid_grant/invalid_client) ou só o tipo da exceção.</summary>
+    /// <summary>
+    /// Resumo sem segredo: código OAuth (invalid_grant/unauthorized_client/invalid_client) ou só o
+    /// tipo da exceção. O error_description cru do Google NÃO entra (texto de terceiros).
+    /// </summary>
     private static string ResumirMotivo(Exception ex) => ex is TokenResponseException token
-        ? $"refresh recusado pelo Google ({token.Error?.Error ?? "erro desconhecido"})"
+        ? $"refresh recusado pelo Google ({token.Error?.Error ?? "erro desconhecido"}); causa provável: token revogado/expirado "
+          + "ou token emitido por outro client OAuth (ClientId diferente do usado na reconexão) — "
+          + "confira clientId= no log de boot e reconecte o canal pela página de reconexão"
         : $"falha ao renovar token ({ex.GetType().Name})";
 
     private static async Task<IConfigurableHttpClientInitializer> RenovarCredencialAsync(GoogleCredentialOptions options, CancellationToken ct)

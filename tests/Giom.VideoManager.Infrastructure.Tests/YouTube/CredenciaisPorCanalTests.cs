@@ -1,5 +1,6 @@
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Infrastructure.YouTube;
+using Google.Apis.Auth.OAuth2.Responses;
 using Google.Apis.Http;
 using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.Configuration;
@@ -101,9 +102,68 @@ public class CredenciaisPorCanalTests
 
         Assert.Equal("222-proprio.apps.googleusercontent.com", fabrica.Chamadas[0].ClientId);
         Assert.Equal("111-compartilhado.apps.googleusercontent.com", fabrica.Chamadas[1].ClientId);
-        Assert.Contains(logger.Mensagens, m => m.Contains("por-canal") && m.Contains("projeto=222"));
-        Assert.Contains(logger.Mensagens, m => m.Contains("compartilhado") && m.Contains("projeto=111"));
-        Assert.DoesNotContain(logger.Mensagens, m => m.Contains("apps.googleusercontent.com"));
+        Assert.Contains(logger.Mensagens, m => m.Contains("por-canal") && m.Contains("projeto=222")
+            && m.Contains("clientId=222-proprio.apps.googleusercontent.com"));
+        Assert.Contains(logger.Mensagens, m => m.Contains("compartilhado") && m.Contains("projeto=111")
+            && m.Contains("clientId=111-compartilhado.apps.googleusercontent.com"));
+    }
+
+    [Fact]
+    public void LogDeBoot_TrazClientIdInteiroNasDuasLinhas_SemClientSecretNemRefreshToken()
+    {
+        const string clientId = "1069116336751-clientweb.apps.googleusercontent.com";
+        var config = Config(new()
+        {
+            ["Google:ClientId"] = clientId,
+            ["instituto:Google:ClientSecret"] = SegredoInstituto,
+            ["instituto:Google:RefreshToken"] = TokenInstituto,
+        });
+        var logger = new LoggerCapturador();
+
+        new ServiceCollection().AddYouTubeCredenciaisPorCanal(config, [Canal("UC-i", "instituto")], logger, new Fabrica().Criar);
+
+        var origem = Assert.Single(logger.Mensagens, m => m.Contains("ClientId origem="));
+        var ok = Assert.Single(logger.Mensagens, m => m.StartsWith("Credencial Google OK"));
+        foreach (var linha in new[] { origem, ok })
+        {
+            Assert.Contains($"clientId={clientId}", linha);
+            Assert.Contains("projeto=1069116336751", linha);
+            Assert.DoesNotContain(SegredoInstituto, linha);
+            Assert.DoesNotContain(TokenInstituto, linha);
+        }
+    }
+
+    [Theory]
+    [InlineData("invalid_grant")]
+    [InlineData("unauthorized_client")]
+    public void RefreshRecusadoPeloGoogle_MotivoTrazCodigoEDicaDeOutroClient_SemDescricaoCrua(string codigo)
+    {
+        const string descricaoCrua = "DESCRICAO-CRUA-DO-GOOGLE-123";
+        var config = Config(new()
+        {
+            ["Google:ClientId"] = "1069116336751-clientweb.apps.googleusercontent.com",
+            ["instituto:Google:ClientSecret"] = SegredoInstituto,
+            ["instituto:Google:RefreshToken"] = TokenInstituto,
+        });
+        var fabrica = new Fabrica
+        {
+            Falha = _ => new TokenResponseException(new TokenErrorResponse { Error = codigo, ErrorDescription = descricaoCrua })
+        };
+        var logger = new LoggerCapturador();
+        var services = new ServiceCollection();
+
+        var validos = services.AddYouTubeCredenciaisPorCanal(config, [Canal("UC-i", "instituto")], logger, fabrica.Criar);
+
+        Assert.Empty(validos);
+        Assert.True(services.BuildServiceProvider().GetRequiredService<FalhasCredencialPorCanal>().TentarObterMotivo("UC-i", out var motivo));
+        Assert.Contains(codigo, motivo);
+        Assert.Contains("revogado/expirado", motivo);
+        Assert.Contains("outro client OAuth", motivo);
+        Assert.Contains("ClientId diferente", motivo);
+
+        Assert.DoesNotContain(descricaoCrua, motivo);
+        Assert.DoesNotContain(logger.Mensagens, m => m.Contains(descricaoCrua) || m.Contains(SegredoInstituto) || m.Contains(TokenInstituto));
+        Assert.Contains(logger.Mensagens, m => m.Contains("Falha") && m.Contains("outro client OAuth"));
     }
 
     [Fact]
@@ -203,6 +263,7 @@ public class CredenciaisPorCanalTests
         Assert.Contains("secrets_key=instituto", ok[0]);
         Assert.Contains("secrets_key=ministerio", ok[1]);
         Assert.Contains("projeto=111", ok[0]);
+        Assert.Contains("clientId=111-compartilhado.apps.googleusercontent.com", ok[0]);
 
         string Hash(string m) => m[(m.IndexOf("refreshTokenSha256Prefix=", StringComparison.Ordinal) + "refreshTokenSha256Prefix=".Length)..];
         Assert.Equal(8, Hash(ok[0]).Length);
