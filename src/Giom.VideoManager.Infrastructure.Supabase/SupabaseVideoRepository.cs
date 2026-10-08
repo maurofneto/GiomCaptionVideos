@@ -21,6 +21,15 @@ public class SupabaseOptions
     /// </summary>
     public string RestPrefix { get; init; } = "/rest/v1";
 
+    /// <summary>
+    /// JWT HS256 (role giom_pipeline) pro PostgREST do Railway, onde RestPrefix é "". Só vale
+    /// com RestPrefix vazio — com "/rest/v1" o SecretKey continua mandando. Valor real só no SSM
+    /// (/giom/dev/{pipeline,canais,agenteinstituto}/Supabase/PostgrestToken), nunca no appsettings.
+    /// </summary>
+    public string PostgrestToken { get; init; } = string.Empty;
+
+    public SupabaseAuthHeaders ResolveAuth() => SupabaseAuthHeaders.Resolve(RestPrefix, SecretKey, PostgrestToken);
+
     public string Rest(string pathAndQuery)
     {
         var prefix = string.IsNullOrWhiteSpace(RestPrefix) ? "" : RestPrefix.TrimEnd('/');

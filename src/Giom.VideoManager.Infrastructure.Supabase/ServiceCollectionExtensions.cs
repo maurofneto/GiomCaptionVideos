@@ -28,12 +28,7 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
 
-            if (!string.IsNullOrWhiteSpace(opt.RestPrefix) && !string.IsNullOrWhiteSpace(opt.SecretKey))
-            {
-                client.DefaultRequestHeaders.Authorization =
-                    new AuthenticationHeaderValue("Bearer", opt.SecretKey);
-                client.DefaultRequestHeaders.TryAddWithoutValidation("apikey", opt.SecretKey);
-            }
+            opt.ResolveAuth().ApplyTo(client.DefaultRequestHeaders);
         })
         .AddStandardResilienceHandler(o => o.RegistrarEventoDeRetryNoSpan("Supabase"));
 
@@ -54,6 +49,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSupabaseEmbedding(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SupabaseEmbeddingOptions>(config.GetSection("Supabase"));
+        // O HttpClient "supabase" lê SupabaseOptions (Url, RestPrefix, SecretKey, PostgrestToken).
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
         services.AddSupabaseHttpClient();
         services.AddSingleton<IEmbeddingService, SupabaseEmbeddingService>();
         return services;

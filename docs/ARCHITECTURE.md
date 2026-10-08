@@ -182,6 +182,20 @@ Resolvido em runtime via `Secrets:Provider` (AWS Parameter Store é o usado hoje
 Azure/HashiCorp existem como adapters alternativos). Path por ambiente:
 `/giom/{dev,prod}/{instituto,ministerio}/...`.
 
+**Credencial do PostgREST (`Supabase:PostgrestToken`).** Todos os clientes PostgREST decidem os
+headers em um único ponto, `SupabaseAuthHeaders.Resolve` (`Infrastructure.Supabase`): com
+`RestPrefix` `/rest/v1` (Supabase cloud, prod) vale o `SecretKey` (Bearer + `apikey`), como
+sempre; com `RestPrefix` vazio (PostgREST no Railway, dev) vale o `PostgrestToken` — um JWT
+HS256 `{"role":"giom_pipeline"}` mandado só como `Authorization: Bearer`, sem `apikey` — e,
+sem token, nada é enviado (leitura anônima). O token é secret: `""` nos
+`appsettings.Development.json`, valor real só no SSM (`/giom/dev/{pipeline,canais,agenteinstituto}/Supabase/PostgrestToken`)
+e nunca logado. A role `giom_pipeline` tem grants mínimos por tabela/coluna e é criada por SQL
+manual em [`infra/railway/`](../infra/railway/README.md) (fora de `supabase/migrations/`, que a
+pipeline aplica em dev e prod); o README de lá traz a tabela de grants, as chaves SSM por worker e
+a ordem para fechar a leitura anônima (`PGRST_DB_ANON_ROLE`) só depois que todos os workers
+estiverem usando o token. O `SupabaseSecretsProvider` roda antes do SSM carregar e não tem grant
+em `app_secret` com essa role (detalhes no mesmo README).
+
 ## Ambientes AWS
 
 Conta `798229612288`, região `us-east-1`, cluster ECS `giom-cluster`. `Ingestao.Worker` roda
