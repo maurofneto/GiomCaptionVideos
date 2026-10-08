@@ -69,8 +69,18 @@ public class YtDlpCaptionService : ICaptionService
                        $"--sub-format vtt --skip-download -o \"{outputTemplate}\" {url}";
 
             _logger.LogInformation("Baixando legendas via yt-dlp: {VideoId}", video.Id);
-            var exitCode = await RunProcessAsync(_options.YtDlpPath, args, ct);
+            var (exitCode, stderr) = await RunProcessAsync(_options.YtDlpPath, args, ct);
             Activity.Current?.SetTag("exit_code", exitCode);
+
+            if (ClassificadorFalhaCaption.ClassificarSaidaYtDlp(exitCode, stderr) is { } bloqueio)
+            {
+                FalhaCaptionLog.Registrar(_logger, bloqueio, Provedor, video.Id, video.ChannelId);
+                throw new CaptionFalhaException(bloqueio.Classe, Provedor,
+                    $"yt-dlp bloqueado pelo YouTube (código {exitCode}) pro vídeo {video.Id}", reason: bloqueio.Reason);
+            }
+
+            if (exitCode == 0 && ClassificadorFalhaCaption.ClassificarStderrYtDlp(stderr) is not null)
+                _logger.LogInformation("yt-dlp emitiu aviso de bloqueio mas terminou com sucesso (código 0) para vídeo {VideoId}", video.Id);
 
             if (exitCode != 0)
             {
@@ -165,7 +175,12 @@ public class YtDlpCaptionService : ICaptionService
         return string.Join(" ", parts);
     }
 
-    private static async Task<int> RunProcessAsync(string executable, string arguments, CancellationToken ct)
+    private const string Provedor = "YtDlpCaption";
+    private const int StderrMaxChars = 64 * 1024;
+
+    // stderr é capturado só pra classificar (BloqueioBot) e re-emitido linha a linha em Console.Error:
+    // o metric filter do CloudWatch ("Sign in to confirm") continua enxergando o texto original.
+    private static async Task<(int ExitCode, string Stderr)> RunProcessAsync(string executable, string arguments, CancellationToken ct)
     {
         using var process = new Process
         {
@@ -174,14 +189,25 @@ public class YtDlpCaptionService : ICaptionService
                 FileName  = executable,
                 Arguments = arguments,
                 RedirectStandardOutput = false,
-                RedirectStandardError  = false,
+                RedirectStandardError  = true,
                 UseShellExecute = false
             }
         };
 
+        var stderr = new System.Text.StringBuilder();
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            Console.Error.WriteLine(e.Data);
+            lock (stderr)
+                if (stderr.Length < StderrMaxChars) stderr.AppendLine(e.Data);
+        };
+
         process.Start();
+        process.BeginErrorReadLine();
         await process.WaitForExitAsync(ct);
-        return process.ExitCode;
+        // WaitForExitAsync com stderr redirecionado já espera o EOF dos handlers de saída assíncrona.
+        lock (stderr) return (process.ExitCode, stderr.ToString());
     }
 
     private string? ResolverCookiesPath(string? channelId)

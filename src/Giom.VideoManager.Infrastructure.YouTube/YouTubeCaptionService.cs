@@ -38,24 +38,50 @@ public class YouTubeCaptionService : ICaptionService
         _logger  = logger;
     }
 
+    /// <summary>Delay-base do retry de 5xx do Resilient. Só os testes mexem (evita esperar o backoff real).</summary>
+    internal TimeSpan? RetryDelay { get; set; }
+
     public async Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
     {
+        try
+        {
+            return await ObterAsync(video);
+        }
+        catch (Exception ex)
+        {
+            var falha = ClassificadorFalhaCaption.Classificar(ex, ct);
+            if (falha is null)
+                throw;
+
+            // Ponto único de log: uma falha classificada = um log, no nível da classe.
+            FalhaCaptionLog.Registrar(_logger, falha, Provedor, video.Id, video.ChannelId);
+
+            // Exceções que já têm tipo próprio na cadeia (quota, credencial do canal, classificada) seguem como estão.
+            if (ex is CaptionFalhaException or RateLimitExcedidoException or CredencialCanalIndisponivelException)
+                throw;
+
+            throw falha.Classe switch
+            {
+                ClasseFalhaCaption.QuotaExcedida => new RateLimitExcedidoException(Provedor, innerException: ex),
+                _ => new CaptionFalhaException(falha.Classe, Provedor, $"{falha.Classe} (HTTP {falha.HttpStatus?.ToString() ?? "?"}, {falha.Reason ?? "sem reason"}) no vídeo {video.Id}",
+                    falha.HttpStatus, falha.Reason, ex)
+            };
+        }
+    }
+
+    private const string Provedor = "YouTubeCaption";
+
+    private async Task<Transcricao?> ObterAsync(Video video)
+    {
         var youtube = ResolverYouTube(video.ChannelId);
-        var api = new ResilientYouTubeApiService(youtube, Microsoft.Extensions.Logging.Abstractions.NullLogger<ResilientYouTubeApiService>.Instance);
+        var api = new ResilientYouTubeApiService(youtube, Microsoft.Extensions.Logging.Abstractions.NullLogger<ResilientYouTubeApiService>.Instance, RetryDelay);
 
         var listRequest  = youtube.Captions.List("snippet", video.Id);
         var listResponse = await api.ListCaptionsAsync(listRequest);
 
         var caption = listResponse.Items?.FirstOrDefault(c => c.Snippet?.Status != "failed");
         if (caption == null)
-        {
-            // Era LogDebug — invisível em prod (MinimumLevel=Information), o que escondia por
-            // completo a causa de vídeos que ficam incompletos pra sempre (Bug #100). O handler
-            // que chama isso já loga um Warning com o título quando Transcricao continua null —
-            // aqui fica em Information pra não duplicar o nível de alerta, só dar o motivo exato.
-            _logger.LogInformation("Nenhuma legenda disponível para vídeo {VideoId}", video.Id);
-            throw new NenhumResultadoEncontradoException("YouTubeCaption", $"nenhuma legenda disponível pro vídeo {video.Id}");
-        }
+            throw new CaptionFalhaException(ClasseFalhaCaption.SemLegendaAinda, Provedor, $"nenhuma legenda disponível pro vídeo {video.Id}");
 
         var downloadRequest  = youtube.Captions.Download(caption.Id);
         downloadRequest.Tfmt = _options.Formato;
@@ -65,10 +91,7 @@ public class YouTubeCaptionService : ICaptionService
 
         var conteudo = System.Text.Encoding.UTF8.GetString(memory.ToArray());
         if (string.IsNullOrWhiteSpace(conteudo))
-        {
-            _logger.LogWarning("Legenda vazia para {VideoId}", video.Id);
-            throw new NenhumResultadoEncontradoException("YouTubeCaption", $"legenda baixada veio vazia pro vídeo {video.Id}");
-        }
+            throw new CaptionFalhaException(ClasseFalhaCaption.LegendaVaziaReal, Provedor, $"legenda baixada veio vazia pro vídeo {video.Id}", httpStatus: 200);
 
         _logger.LogInformation("Legenda obtida via YouTubeCaption: {VideoId} ({Formato}, {Chars} chars)",
             video.Id, _options.Formato, conteudo.Length);
