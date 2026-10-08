@@ -85,7 +85,7 @@ function loadAuth(c: Collector): AuthEnv {
   return { sessionSecret, allowedEmails };
 }
 
-/** Só o que o middleware (Edge) precisa — evita exigir credenciais AWS no caminho de auth. */
+/** Só o que o proxy precisa — evita exigir credenciais AWS no caminho de auth. */
 export function loadAuthEnv(src: Source = process.env): AuthEnv {
   const c = new Collector(src);
   const auth = loadAuth(c);

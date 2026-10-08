@@ -43,7 +43,8 @@ describe("loadEnv", () => {
   });
 
   it("sem CANAIS_API_TOKEN o app não sobe (erro lista só o nome)", () => {
-    const { CANAIS_API_TOKEN: _omit, ...rest } = TEST_ENV;
+    const rest = { ...TEST_ENV };
+    delete rest.CANAIS_API_TOKEN;
     expect(() => loadEnv(rest)).toThrow("CANAIS_API_TOKEN ausente");
     expect(() => loadEnv({ ...rest, CANAIS_API_TOKEN: "   " })).toThrow("CANAIS_API_TOKEN");
   });
@@ -71,7 +72,8 @@ describe("loadEnv", () => {
   });
 
   it("OAUTH_TESTING_EXPIRY_DAYS tem padrão 7", () => {
-    const { OAUTH_TESTING_EXPIRY_DAYS: _omit, ...rest } = TEST_ENV;
+    const rest = { ...TEST_ENV };
+    delete rest.OAUTH_TESTING_EXPIRY_DAYS;
     expect(loadEnv(rest).oauthTestingExpiryDays).toBe(7);
   });
 });

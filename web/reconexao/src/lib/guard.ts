@@ -9,7 +9,7 @@ export interface Access {
 }
 
 /**
- * Checagem de acesso de CADA handler (defesa em profundidade além do middleware). Qualquer falha
+ * Checagem de acesso de CADA handler (defesa em profundidade além do proxy). Qualquer falha
  * — sem sessão, e-mail fora da allowlist, Origin errada em POST — vira 403 sem detalhe.
  */
 export async function requireAccess(req: Request, opts: { checkOrigin?: boolean } = {}): Promise<Access | Response> {
