@@ -400,15 +400,10 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>VideoSource:Provider — YouTube (padrão, único por enquanto).</summary>
-    public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
-        => services.AddYouTubeVideoSource(config);
-
     /// <summary>
     /// Bootstrap multi-canal pra ingestão unificada (US #105, Ingestao.Worker) — lê os canais
     /// ativos do Supabase (tabela canal_ingestao) SÍNCRONO durante ConfigureServices (mesmo
-    /// padrão já aceito nesse código pra GetGoogleCredential(...).GetAwaiter().GetResult() em
-    /// AddYouTubeCredential), registra um YouTubeService keyed por canal e um
+    /// padrão de resolver a credencial sincronamente no boot), registra um YouTubeService keyed por canal e um
     /// Func&lt;string, IVideoHandler&gt; resolvido preguiçosamente na primeira chamada — só
     /// depois que o container termina de montar, já que CanalIngestaoVideoHandler precisa de
     /// dependências registradas por OUTROS Add* nesta mesma composição (AddFilaVideoEtapa,
