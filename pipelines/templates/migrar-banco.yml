@@ -1,0 +1,52 @@
+# Template de migrations do banco — US #149. Usado pelo estágio Migrations do pipeline raiz.
+#
+# Motor escolhido por AMBIENTE via variable group (giom-dev / giom-prod), sem editar este arquivo:
+#   DB_ENGINE ausente ou "supabase"  -> projeto Supabase (comportamento original: link + db push +
+#                                       deploy da Edge Function). SUPABASE_PROJECT_REF e
+#                                       SUPABASE_ACCESS_TOKEN (secreto) vêm do group/pipeline.
+#   DB_ENGINE = "postgres"           -> Postgres puro (Railway): `supabase db push --db-url` com a
+#                                       role `migrator` (só DDL, sem superusuário).
+#                                       DATABASE_URL_MIGRATOR (SECRETO, no group):
+#                                       postgresql://migrator:<senha>@<host>:<porta>/<db>?sslmode=require
+# As migrations são as mesmas (supabase/migrations/*.sql) e o histórico fica na mesma tabela
+# (supabase_migrations.schema_migrations) nos dois motores. Mantém "schema antes do código".
+#
+# `set -e`/`pipefail`: a task Script (CmdLine) NÃO para no primeiro comando que falha — o exit code
+# reportado seria só o do último comando (bug real já visto: db push falhou, o script seguiu e o
+# pipeline reportou sucesso com o schema desatualizado).
+steps:
+  - script: npm install -g supabase
+    displayName: 'Instalar Supabase CLI'
+
+  # ---- motor Supabase (padrão) ----
+  - script: |
+      set -e
+      supabase link --project-ref $(SUPABASE_PROJECT_REF)
+      supabase db push
+      supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
+    displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
+    condition: ne(variables['DB_ENGINE'], 'postgres')
+    env:
+      SUPABASE_ACCESS_TOKEN: $(SUPABASE_ACCESS_TOKEN)
+
+  # ---- motor Postgres (Railway) ----
+  - script: |
+      set -euo pipefail
+      command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client; }
+
+      # Trava de segurança: um banco que não nasceu das migrations (dump) não tem histórico, e o
+      # `db push` tentaria reaplicar TODAS do zero. Sem histórico -> falha pedindo o baseline.
+      tem_historico="$(psql "$DATABASE_URL_MIGRATOR" -X -A -t -c "select to_regclass('supabase_migrations.schema_migrations') is not null")"
+      if [ "$tem_historico" != "t" ]; then
+        echo "##vso[task.logissue type=error]Histórico de migrations ausente neste banco. Rode o baseline antes (scripts/db/baseline-migrations.sh; docs/runbook-banco-roles-e-migrations.md)."
+        exit 1
+      fi
+
+      echo "== Migrations pendentes =="
+      supabase db push --db-url "$DATABASE_URL_MIGRATOR" --dry-run
+      echo "== Aplicando =="
+      supabase db push --db-url "$DATABASE_URL_MIGRATOR"
+    displayName: 'Postgres — aplicar migrations (db push --db-url)'
+    condition: eq(variables['DB_ENGINE'], 'postgres')
+    env:
+      DATABASE_URL_MIGRATOR: $(DATABASE_URL_MIGRATOR)

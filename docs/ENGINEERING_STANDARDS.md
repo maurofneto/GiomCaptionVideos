@@ -66,6 +66,12 @@
 
 ## Migrations (Supabase)
 
+- **Motor por ambiente (US #149):** o estágio `Migrations` aplica no Supabase (`DB_ENGINE` ausente/`supabase`) ou no
+  Postgres do Railway (`DB_ENGINE=postgres`, `supabase db push --db-url` com a role `migrator`). Escreva migrations que
+  funcionem nos dois (guardas por existência de role/tabela/função; ver `docs/runbook-banco-roles-e-migrations.md`).
+- Tabela nova = grants explícitos por role de componente (`pipeline_worker`/`agente_bot`/`reconexao_leitura`) e policy de
+  RLS se o RLS estiver ligado — nada de `GRANT ... TO PUBLIC`/`anon` com escrita.
+
 - **Regra definitiva (ver Task #108 e incidente real de 2026-07-17):** o histórico remoto que
   `supabase db push` consulta (tabela `supabase_migrations.schema_migrations`) casa migrations
   com arquivos locais **só pelo timestamp no nome do arquivo** — nunca pelo conteúdo. Se você

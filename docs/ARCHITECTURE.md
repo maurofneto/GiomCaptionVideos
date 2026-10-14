@@ -102,6 +102,13 @@ categorização→embedding numa chamada só, já morto/não registrado em DI ha
 cobria os dois canais em prod (schedule único `giom-ingestao-daily` substituindo
 `giom-instituto-daily`/`giom-ministerio-daily`).
 
+**Acesso ao banco por componente (US #149)** — o PostgREST não tem papel anônimo e conecta como `authenticator`
+(nunca superusuário); cada componente usa um JWT próprio (`role` = `pipeline_worker`, `agente_bot` ou
+`reconexao_leitura`) com grants mínimos e RLS por role, guardado no SSM do próprio componente. Migrations
+rodam como `migrator` pelo estágio `Migrations` (template `pipelines/templates/migrar-banco.yml`; motor Supabase
+ou Postgres escolhido por `DB_ENGINE` no variable group do ambiente). Detalhes e rotação em
+`docs/runbook-banco-roles-e-migrations.md`.
+
 **Transcrição — credenciais por canal (US #146)** — o `Transcricao.Worker` espelha a Ingestão
 no bootstrap OAuth: `AddTranscricaoMultiCanal` lê `canal_ingestao`, registra `YouTubeService`
 keyed por `ChannelId` e escreve cookies yt-dlp Netscape por canal a partir de
