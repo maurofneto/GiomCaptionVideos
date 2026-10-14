@@ -63,7 +63,10 @@ public static class ServiceCollectionExtensions
         services.AddKimiHttpClient();
         services.AddContextoTelemetria();
         services.AddSessionContext();
-        services.Configure<KimiAgentOptions>(config.GetSection("KimiAgent"));
+        services.AddOptions<KimiAgentOptions>()
+            .Bind(config.GetSection("KimiAgent"))
+            .Validate(o => o.MaxTokens > 0, "KimiAgent:MaxTokens deve ser maior que zero (padrão 4096 — remova a chave pra usar o padrão).")
+            .ValidateOnStart();
         services.AddSingleton<KimiAgentService>();
         return services;
     }

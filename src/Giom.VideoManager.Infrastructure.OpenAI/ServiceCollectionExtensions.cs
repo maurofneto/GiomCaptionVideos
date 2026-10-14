@@ -51,7 +51,10 @@ public static class ServiceCollectionExtensions
         services.AddOpenAiHttpClient();
         services.AddContextoTelemetria();
         services.AddSessionContext();
-        services.Configure<OpenAiAgentOptions>(config.GetSection("OpenAiAgent"));
+        services.AddOptions<OpenAiAgentOptions>()
+            .Bind(config.GetSection("OpenAiAgent"))
+            .Validate(o => o.MaxTokens > 0, "OpenAiAgent:MaxTokens deve ser maior que zero (padrão 4096 — remova a chave pra usar o padrão).")
+            .ValidateOnStart();
         services.AddSingleton<OpenAiAgentService>();
         return services;
     }

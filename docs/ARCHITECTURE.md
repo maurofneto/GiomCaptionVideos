@@ -185,6 +185,20 @@ no Sentry, quebrando a árvore `pipeline.run > canal > playlist > página > víd
 - Dashboards existentes no Sentry: "Giom - Observabilidade" (latência/custo/tokens do bot e da
   pipeline), "Giom - Erros" (erros por ambiente), "Giom - Saúde" (vídeos processados/falhos,
   mensagens do bot, erros, gasto e runs da pipeline — visão de saúde geral em 24h).
+- Telemetria do bot (`detalhes` de cada `*AgentService`): `stopReason`/`finishReason`,
+  `incerteza`, `maxTokens`, `concisao` (se `InstrucaoConcisao` está ativa) e, só no Claude,
+  `cacheCreationInputTokens`/`cacheReadInputTokens` (análise de prompt caching).
+
+## Tamanho da resposta do bot
+
+Config-first, por agente (`ClaudeAgent`, `GrokAgent`, `KimiAgent`, `OpenAiAgent` no
+`appsettings.json` do AgenteInstituto.Worker):
+
+- `MaxTokens` (padrão `4096`): teto de tokens da resposta. Valor `<= 0` derruba o worker no
+  startup com mensagem clara (`ValidateOnStart`).
+- `InstrucaoConcisao` (padrão vazio): quando preenchida, é anexada ao fim do `agent.md` como
+  seção `# Tamanho da resposta`. Vazio = system prompt byte-idêntico ao `agent.md` (prompt
+  caching preservado); preenchido = o `agent.md` continua sendo o prefixo intacto.
 
 ## Secrets
 
