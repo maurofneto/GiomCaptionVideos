@@ -1,5 +1,6 @@
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Telemetria;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Auth.OAuth2.Flows;
@@ -70,6 +71,7 @@ public static class ServiceCollectionExtensions
         if (!services.Any(d => d.ServiceType == typeof(IChannelYtDlpCookies)))
             services.AddSingleton<IChannelYtDlpCookies, NullChannelYtDlpCookies>();
 
+        services.AddYtDlpOpcoes(config);
         services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
         services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>("YtDlpCaption");
         return services;

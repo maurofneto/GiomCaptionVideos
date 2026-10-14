@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Exceptions;
+using Giom.VideoManager.Infrastructure.YtDlp;
 using Google.Apis.Auth.OAuth2.Responses;
 using Polly.CircuitBreaker;
 
@@ -35,6 +36,10 @@ public static class ClassificadorFalhaCaption
             {
                 case CaptionFalhaException f:
                     return new FalhaCaptionClassificada(f.Classe, f.HttpStatus, f.Reason);
+
+                // Lançada pelo Whisper (download de áudio via yt-dlp), que não conhece ClasseFalhaCaption.
+                case FalhaNaoTransitoriaException n when YtDlpBloqueioBot.EhReasonDeBloqueio(n.Reason):
+                    return new FalhaCaptionClassificada(ClasseFalhaCaption.BloqueioBot, null, n.Reason);
 
                 case RateLimitExcedidoException:
                     // Já convertida pelo Resilient (quotaExceeded ou circuito aberto); status/reason vêm da causa.
@@ -73,16 +78,17 @@ public static class ClassificadorFalhaCaption
         exitCode == 0 ? null : ClassificarStderrYtDlp(stderr);
 
     /// <summary>stderr do yt-dlp → <see cref="ClasseFalhaCaption.BloqueioBot"/>, ou null (independe do exit code).</summary>
-    public static FalhaCaptionClassificada? ClassificarStderrYtDlp(string? stderr)
-    {
-        if (string.IsNullOrEmpty(stderr)) return null;
-
-        // Não compara o apóstrofo de "you're" (reto ou tipográfico).
-        return stderr.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase)
-               && stderr.Contains("not a bot", StringComparison.OrdinalIgnoreCase)
-            ? new FalhaCaptionClassificada(ClasseFalhaCaption.BloqueioBot, null, "sign_in_to_confirm_not_a_bot")
+    public static FalhaCaptionClassificada? ClassificarStderrYtDlp(string? stderr) =>
+        YtDlpBloqueioBot.Detectar(stderr) is { } reason
+            ? new FalhaCaptionClassificada(ClasseFalhaCaption.BloqueioBot, null, reason)
             : null;
-    }
+
+    /// <summary>
+    /// Classes em que retentar a mesma mensagem não adianta — o adapter lança
+    /// <see cref="FalhaNaoTransitoriaException"/> e o consumer de fila manda direto pra DLQ.
+    /// Hoje só <see cref="ClasseFalhaCaption.BloqueioBot"/>: as demais seguem o retry normal.
+    /// </summary>
+    public static bool EhNaoTransitoria(ClasseFalhaCaption classe) => classe is ClasseFalhaCaption.BloqueioBot;
 
     private static FalhaCaptionClassificada? ClassificarGoogleApi(Google.GoogleApiException g)
     {

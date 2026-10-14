@@ -116,6 +116,22 @@ dotnet test GiomCaptionVideos.sln
   para o estado disso). O bot (`AgenteInstituto`) roda como ECS Service de longa duração,
   um por ambiente (`giom-agenteinstituto-dev-service` / `giom-agenteinstituto-service`).
 
+### yt-dlp (Transcricao.Worker)
+
+A imagem do `Transcricao.Worker` fixa as versões de yt-dlp, deno (runtime JS do EJS) e do plugin
+de PO token `bgutil-ytdlp-pot-provider` via `ARG` no Dockerfile; o boot loga as versões. Opções
+(todas desligadas por padrão, valores no SSM `/giom/{env}/pipeline/`):
+
+| Chave | SSM | Efeito |
+|---|---|---|
+| `YtDlp:PoToken:Habilitado` | `/giom/{env}/pipeline/YtDlp/PoToken/Habilitado` | Liga o PO token (exige `ProviderUrl`) |
+| `YtDlp:PoToken:ProviderUrl` | `/giom/{env}/pipeline/YtDlp/PoToken/ProviderUrl` | `--extractor-args youtubepot-bgutilhttp:base_url=...` |
+| `YtDlp:Proxy` | `/giom/{env}/pipeline/YtDlp/Proxy` (SecureString) | `--proxy` — nunca logado, só on/off |
+
+"Sign in to confirm you're not a bot" é classificado como `BloqueioBot` (não transitório): a
+mensagem vai direto pra DLQ, sem as 6 tentativas. Detalhes e procedimento:
+[`docs/runbook-ytdlp-cookies.md`](docs/runbook-ytdlp-cookies.md).
+
 ## Documentação
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — camadas DDD/Hexagonal, padrão de provider

@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.YtDlp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
@@ -45,6 +46,7 @@ public class WhisperTranscricaoService : ITranscricaoService
     private const decimal PrecoUsdPorMinuto = 0.006m;
 
     private readonly WhisperOptions _options;
+    private readonly YtDlpOptions _ytDlpOptions;
     private readonly HttpClient _http;
     private readonly ILogger<WhisperTranscricaoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
@@ -52,12 +54,14 @@ public class WhisperTranscricaoService : ITranscricaoService
 
     public WhisperTranscricaoService(
         IOptions<WhisperOptions> options,
+        IOptions<YtDlpOptions> ytDlpOptions,
         IHttpClientFactory httpClientFactory,
         ILogger<WhisperTranscricaoService> logger,
         IContextoTelemetria contextoTelemetria,
         IChannelYtDlpCookies channelCookies)
     {
         _options = options.Value;
+        _ytDlpOptions = ytDlpOptions.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
         _channelCookies = channelCookies;
@@ -93,13 +97,19 @@ public class WhisperTranscricaoService : ITranscricaoService
 
     private async Task<string> DownloadAudioAsync(string videoId, string? channelId, string workDir, CancellationToken ct)
     {
-        var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
-        var cookiesPath = ResolverCookiesPath(channelId);
-        var cookiesArg = string.IsNullOrWhiteSpace(cookiesPath) ? "" : $"--cookies \"{cookiesPath}\" ";
-        var args = $"{cookiesArg}-x --audio-format mp3 -o \"{outputTemplate}\" https://www.youtube.com/watch?v={videoId}";
+        var args = MontarArgumentosDownload(videoId, channelId, workDir);
 
         _logger.LogInformation("Baixando áudio do vídeo {VideoId} com yt-dlp", videoId);
-        var exitCode = await RunProcessAsync(_options.YtDlpPath, args, ct);
+        var (exitCode, stderr) = await YtDlpProcesso.ExecutarAsync(_options.YtDlpPath, args, _ytDlpOptions, ct);
+
+        // Sem isso o bloqueio anti-bot virava NenhumResultadoEncontrado genérico e a fila
+        // reprocessava a cadeia inteira até o MaxReceiveCount — sempre com o mesmo resultado.
+        if (exitCode != 0 && YtDlpBloqueioBot.Detectar(stderr) is { } reason)
+        {
+            _logger.LogError("yt-dlp bloqueado pelo YouTube (BloqueioBot, {Reason}) ao baixar áudio do vídeo {VideoId} ChannelId={ChannelId} — falha não transitória, sem retry",
+                reason, videoId, channelId);
+            throw new FalhaNaoTransitoriaException("Whisper", $"yt-dlp bloqueado pelo YouTube (código {exitCode}) ao baixar áudio do vídeo {videoId}", reason);
+        }
 
         if (exitCode != 0)
             throw new NenhumResultadoEncontradoException("Whisper", $"yt-dlp falhou (código {exitCode}) ao baixar áudio do vídeo {videoId}");
@@ -148,23 +158,22 @@ public class WhisperTranscricaoService : ITranscricaoService
         return texto;
     }
 
-    private static async Task<int> RunProcessAsync(string executable, string arguments, CancellationToken ct)
+    /// <summary>Argumentos específicos do download de áudio — proxy/PO token entram em <see cref="YtDlpProcesso"/>.</summary>
+    internal List<string> MontarArgumentosDownload(string videoId, string? channelId, string workDir)
     {
-        using var process = new System.Diagnostics.Process
-        {
-            StartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = executable,
-                Arguments = arguments,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-                UseShellExecute = false
-            }
-        };
+        var args = new List<string>();
 
-        process.Start();
-        await process.WaitForExitAsync(ct);
-        return process.ExitCode;
+        var cookiesPath = ResolverCookiesPath(channelId);
+        if (!string.IsNullOrWhiteSpace(cookiesPath))
+            args.AddRange(["--cookies", cookiesPath]);
+
+        args.AddRange([
+            "-x", "--audio-format", "mp3",
+            "-o", Path.Combine(workDir, "%(id)s.%(ext)s"),
+            $"https://www.youtube.com/watch?v={videoId}"
+        ]);
+
+        return args;
     }
 
     private string? ResolverCookiesPath(string? channelId)

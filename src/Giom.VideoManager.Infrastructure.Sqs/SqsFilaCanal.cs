@@ -20,6 +20,7 @@ public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options, ILog
     private readonly SqsOptions _options = options.Value;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private string? _queueUrl;
+    private string? _dlqUrl;
 
     /// <summary>Retenção da DLQ: 14 dias (máximo do SQS) — prazo pra investigar/reprocessar (Feature #35) antes de perder a mensagem.</summary>
     private const string RetencaoDlqSegundos = "1209600";
@@ -70,6 +71,13 @@ public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options, ILog
         }
     }
 
+    /// <summary>URL da DLQ irmã — garantida junto com a fila principal em <see cref="ResolverQueueUrlAsync"/>.</summary>
+    public async Task<string> ResolverDlqUrlAsync(CancellationToken ct)
+    {
+        await ResolverQueueUrlAsync(ct);
+        return _dlqUrl!;
+    }
+
     private async Task<string> ComRetryAsync(Func<Task<string>> acao, CancellationToken ct)
     {
         for (var tentativa = 1; ; tentativa++)
@@ -93,6 +101,7 @@ public class SqsFilaCanal(IAmazonSQS cliente, IOptions<SqsOptions> options, ILog
         {
             [QueueAttributeName.MessageRetentionPeriod] = RetencaoDlqSegundos
         }, ct);
+        _dlqUrl = dlqUrl;
 
         var atributos = await cliente.GetQueueAttributesAsync(new GetQueueAttributesRequest
         {

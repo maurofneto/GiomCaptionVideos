@@ -18,6 +18,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddWhisperTranscription(this IServiceCollection services, IConfiguration config)
     {
         services.AddContextoTelemetria();
+        services.AddYtDlpOpcoes(config);
 
         if (!services.Any(d => d.ServiceType == typeof(IChannelYtDlpCookies)))
             services.AddSingleton<IChannelYtDlpCookies, NullChannelYtDlpCookies>();

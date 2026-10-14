@@ -4,6 +4,7 @@ using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Transcricao.Worker;
@@ -39,6 +40,8 @@ using var host = Host.CreateDefaultBuilder(args)
         // US #146 — OAuth Google + cookies yt-dlp keyed por ChannelId (mesmo padrão da Ingestão #105).
         // Substitui o cookie único escrito em disco no boot (Bug #144 / pipeline/YtDlp/CookiesContent).
         services.AddTranscricaoMultiCanal(config);
+        // Versões de yt-dlp/deno + PoToken/Proxy on/off no boot — correlaciona "not a bot" com a imagem.
+        services.AddYtDlpDiagnosticoNoBoot(config);
         services.AddTelemetriaService(config);
         services.AddTracingService(config);
         services.AddObservabilidadeExterna(config);
