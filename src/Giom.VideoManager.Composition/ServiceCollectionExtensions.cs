@@ -27,6 +27,7 @@ using Giom.VideoManager.Infrastructure.Supabase;
 using Giom.VideoManager.Infrastructure.SummarizeTech;
 using Giom.VideoManager.Infrastructure.Telegram;
 using Giom.VideoManager.Infrastructure.Voyage;
+using Giom.VideoManager.Infrastructure.GrokVoice;
 using Giom.VideoManager.Infrastructure.Whisper;
 using Giom.VideoManager.Infrastructure.WhatsApp;
 using Giom.VideoManager.Infrastructure.YouTube;
@@ -58,7 +59,8 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Transcrição — cadeia de fallback por canal (US #129). Cada adapter se registra via
-    /// AddYouTubeCaption / AddYouTubeTranscript / AddYtDlpCaption / AddWhisperTranscription;
+    /// AddYouTubeCaption / AddYouTubeTranscript / AddYtDlpCaption / AddGrokVoiceTranscription /
+    /// AddWhisperTranscription;
     /// FallbackCaptionService (único ICaptionService público) resolve a ordem via
     /// IEtapaProvedorConfigService pelo ChannelId. Credencial OAuth multi-canal:
     /// <see cref="AddTranscricaoMultiCanal"/> (US #146).
@@ -70,6 +72,7 @@ public static class ServiceCollectionExtensions
         services.AddYouTubeCaption(config);
         services.AddYouTubeTranscript(config);
         services.AddYtDlpCaption(config);
+        services.AddGrokVoiceTranscription(config);
         services.AddWhisperTranscription(config);
 
         services.AddSingleton<ICaptionService, FallbackCaptionService>();
