@@ -59,3 +59,26 @@ os das migrations (2 canais, configs de provedor, preços).
 Migrations novas entram em dev (branch) pelo pipeline e chegam a prod só pelo PR `dev` → `master`.
 Antes: ver `docs/ENGINEERING_STANDARDS.md` (seção Migrations) e aplicar em janela as que travam
 tabela (ex.: `halfvec`, PR 104).
+
+## Grants do service_role em branch nova
+
+Branches/projetos novos do Supabase vêm com default privileges endurecidos: tabelas criadas pelas
+migrations ficam sem SELECT/INSERT/UPDATE/DELETE para `service_role` e o PostgREST responde
+`403` / `42501 permission denied`. A migration `20261015220000_grants_service_role_public` concede
+o acesso (no-op em produção) e **não** concede nada a `anon`/`authenticated`. Teste de sanidade
+depois de qualquer recriação da branch: com a service_role, `GET /rest/v1/canal_ingestao` deve dar
+200; sem chave, 401.
+
+## Pendências conhecidas (15/10/2026)
+
+- **Pipeline (`azure-pipelines.yml`, stage `Migrations`)**: usa `SUPABASE_PROJECT_REF` do variable
+  group `giom-dev`. Para o merge em `dev` aplicar migrations na branch, o group precisa apontar
+  para `lusfwbiiuxyzduniptes` (e a senha do banco da branch). Até lá, aplique à mão com o
+  `supabase db push --db-url` acima.
+- **Imagens de dev já publicadas** ainda têm a URL do Railway no `appsettings.Development.json`;
+  só passam a usar a branch depois do merge do PR 107 e do deploy. Para testar antes, use
+  override de ambiente na task: `Supabase__Url`, `Supabase__RestPrefix=/rest/v1`.
+- **Credencial Google de dev**: os refresh tokens dos 2 canais estão em `invalid_grant`; a
+  ingestão em dev lê os canais do banco mas pula os dois até reconectar pela página de reconexão
+  (US #146).
+- **PRs 104 e 105** (halfvec e filtros de canal no RAG) ainda precisam ser aplicados na branch.
