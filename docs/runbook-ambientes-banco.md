@@ -71,10 +71,7 @@ depois de qualquer recriação da branch: com a service_role, `GET /rest/v1/cana
 
 ## Pendências conhecidas (15/10/2026)
 
-- **Pipeline (`azure-pipelines.yml`, stage `Migrations`)**: usa `SUPABASE_PROJECT_REF` do variable
-  group `giom-dev`. Para o merge em `dev` aplicar migrations na branch, o group precisa apontar
-  para `lusfwbiiuxyzduniptes` (e a senha do banco da branch). Até lá, aplique à mão com o
-  `supabase db push --db-url` acima.
+- **Pipeline (`azure-pipelines.yml`, stage `Migrations`)**: o variable group `giom-dev` já aponta `SUPABASE_PROJECT_REF` para `lusfwbiiuxyzduniptes` (antes: `fajrstyqgogmqzceujjt`, projeto antigo de dev). O `supabase link` + `db push` do pipeline contra a branch ainda **não foi exercitado**: confira o primeiro run após o merge do PR 107.
 - **Imagens de dev já publicadas** ainda têm a URL do Railway no `appsettings.Development.json`;
   só passam a usar a branch depois do merge do PR 107 e do deploy. Para testar antes, use
   override de ambiente na task: `Supabase__Url`, `Supabase__RestPrefix=/rest/v1`.
