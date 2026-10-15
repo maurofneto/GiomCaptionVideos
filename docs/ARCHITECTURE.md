@@ -222,3 +222,5 @@ qualquer fila nova que siga o prefixo `giom-videos-*` (qualquer etapa, qualquer 
 prod) funciona no primeiro deploy sem precisar editar IAM. Toda infra hoje é provisionada
 manualmente via AWS CLI (nada em Terraform/CloudFormation ainda) — backlog de IaC completo
 registrado no Board (Feature #91, sob o Épico "Plataforma Giom como produto").
+
+**Banco por ambiente** — prod usa o projeto Supabase `instituto-giom-video-manager`; dev usa a branch `dev` do mesmo projeto (Supabase Branching, sem dados), desde 15/10/2026. O Postgres/PostgREST do Railway foi abandonado por dev (US #149) e nunca entrou em prod. Detalhes, credenciais no SSM e armadilhas de migration em [`docs/runbook-ambientes-banco.md`](runbook-ambientes-banco.md).
