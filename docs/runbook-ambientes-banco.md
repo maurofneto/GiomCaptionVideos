@@ -64,7 +64,7 @@ tabela (ex.: `halfvec`, PR 104).
 
 Branches/projetos novos do Supabase vêm com default privileges endurecidos: tabelas criadas pelas
 migrations ficam sem SELECT/INSERT/UPDATE/DELETE para `service_role` e o PostgREST responde
-`403` / `42501 permission denied`. A migration `20261015220000_grants_service_role_public` concede
+`403` / `42501 permission denied`. A migration `20261014120000_grants_service_role_public` concede
 o acesso (no-op em produção) e **não** concede nada a `anon`/`authenticated`. Teste de sanidade
 depois de qualquer recriação da branch: com a service_role, `GET /rest/v1/canal_ingestao` deve dar
 200; sem chave, 401.
