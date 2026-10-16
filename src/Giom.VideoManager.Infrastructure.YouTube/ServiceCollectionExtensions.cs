@@ -10,6 +10,7 @@ using Google.Apis.Services;
 using Google.Apis.YouTube.v3;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Infrastructure.YouTube;
@@ -163,11 +164,15 @@ public static class ServiceCollectionExtensions
     /// lista de canais e recebe de volta só os que autenticaram OK.
     /// Falha de UM canal (ausente/vazia/invalid_grant/invalid_client) não derruba os demais: loga,
     /// guarda o motivo em <see cref="FalhasCredencialPorCanal"/> e pula o canal. Nunca abre fluxo
-    /// interativo.
+    /// interativo. <paramref name="aoFalhar"/> recebe cada canal descartado + a exceção: o log acima
+    /// roda dentro de ConfigureServices, ANTES do SentrySdk.Init (SentryBootstrapHostedService),
+    /// então não vira incidente no Sentry; quem chama usa o callback pra reportar depois (ver
+    /// <see cref="AddReporteFalhasCredencialCanais"/>, Bug #147).
     /// </summary>
     public static IReadOnlyList<CanalIngestaoConfig> AddYouTubeCredenciaisPorCanal(
-        this IServiceCollection services, IConfiguration config, IReadOnlyList<CanalIngestaoConfig> canais, ILogger logger)
-        => services.AddYouTubeCredenciaisPorCanal(config, canais, logger, RenovarCredencialAsync);
+        this IServiceCollection services, IConfiguration config, IReadOnlyList<CanalIngestaoConfig> canais, ILogger logger,
+        Action<CanalIngestaoConfig, Exception>? aoFalhar = null)
+        => services.AddYouTubeCredenciaisPorCanal(config, canais, logger, RenovarCredencialAsync, aoFalhar);
 
     /// <summary>Costura de teste: <paramref name="fabricaCredencial"/> substitui o refresh de rede.</summary>
     internal static IReadOnlyList<CanalIngestaoConfig> AddYouTubeCredenciaisPorCanal(
@@ -175,7 +180,8 @@ public static class ServiceCollectionExtensions
         IConfiguration config,
         IReadOnlyList<CanalIngestaoConfig> canais,
         ILogger logger,
-        Func<GoogleCredentialOptions, CancellationToken, Task<IConfigurableHttpClientInitializer>> fabricaCredencial)
+        Func<GoogleCredentialOptions, CancellationToken, Task<IConfigurableHttpClientInitializer>> fabricaCredencial,
+        Action<CanalIngestaoConfig, Exception>? aoFalhar = null)
     {
         if (!string.IsNullOrWhiteSpace(config["Google:ClientSecret"]) || !string.IsNullOrWhiteSpace(config["Google:RefreshToken"]))
         {
@@ -246,11 +252,29 @@ public static class ServiceCollectionExtensions
                     logger.LogError("Falha ao resolver credencial do canal {CanalNome} ({ChannelId}), secrets_key={SecretsKey} — pulando. Motivo: {Motivo}; Tipo: {Tipo}",
                         canal.Nome, canal.ChannelId, canal.SecretsKey, motivo, ex.GetType().Name);
                 }
+
+                aoFalhar?.Invoke(canal, ex);
             }
         }
 
         services.AddSingleton(new FalhasCredencialPorCanal(falhas));
         return canaisValidos;
+    }
+
+    /// <summary>
+    /// Reporta (Error por canal com a exceção + Critical se NENHUM canal autenticou) só depois
+    /// que todos os hosted services iniciaram — inclui o SentryBootstrapHostedService, então o
+    /// sink do Serilog já encaminha pro Sentry. Não altera o exit code do processo (Bug #147).
+    /// No-op se não houve falha.
+    /// </summary>
+    public static IServiceCollection AddReporteFalhasCredencialCanais(
+        this IServiceCollection services, IReadOnlyList<FalhaCredencialCanal> falhas, int totalCanaisAtivos, int canaisValidos)
+    {
+        if (falhas.Count == 0) return services;
+
+        services.AddSingleton<IHostedService>(sp => new ReporteFalhasCredencialCanais(
+            falhas, totalCanaisAtivos, canaisValidos, sp.GetRequiredService<ILogger<ReporteFalhasCredencialCanais>>()));
+        return services;
     }
 
     private static void ExigirCampos(string channelId, string secretsKey, GoogleCredentialOptions options)

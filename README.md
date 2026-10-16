@@ -59,7 +59,7 @@ tests/
 | `Infrastructure.Anthropic` | Cliente Claude (resumo, categorização, bot) |
 | `Infrastructure.OpenAI` | Embeddings diretos (`OpenAiEmbedding`) |
 | `Infrastructure.SummarizeTech` | Alternativa de resumo (provider plugável) |
-| `Infrastructure.Supabase` | Persistência (Postgres + pgvector), busca híbrida |
+| `Infrastructure.Supabase` | Persistência (Postgres + pgvector), busca híbrida. Banco por ambiente: prod = projeto Supabase, dev = branch `dev` do mesmo projeto — ver [`docs/runbook-ambientes-banco.md`](docs/runbook-ambientes-banco.md) |
 | `Infrastructure.Mongo` | Memória de conversa do bot (alternativa) |
 | `Infrastructure.Sql` | Acesso SQL genérico |
 | `Infrastructure.Telegram` | Canal de chat do bot |
