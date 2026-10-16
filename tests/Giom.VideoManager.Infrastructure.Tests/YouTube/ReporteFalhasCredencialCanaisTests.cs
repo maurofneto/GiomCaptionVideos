@@ -39,7 +39,7 @@ public class ReporteFalhasCredencialCanaisTests
 
         Assert.Empty(validos);
         Assert.Equal(["UC1", "UC2"], falhas.Select(f => f.Canal.ChannelId));
-        Assert.All(falhas, f => Assert.IsType<InvalidOperationException>(f.Erro));
+        Assert.All(falhas, f => Assert.IsType<CredencialCanalIndisponivelException>(f.Erro));
     }
 
     [Fact]
