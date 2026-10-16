@@ -48,10 +48,10 @@ Todas validadas no boot (`src/instrumentation.ts`); falta/valor inválido → er
 | `SSM_PREFIX` | `/giom/dev` | `/giom/prod` |
 | `SSM_KMS_KEY_ID` | KMS do ambiente dev | KMS do ambiente prod |
 | `SSM_COOKIES_TIER` (`Standard` 4 KB \| `Advanced` 8 KB) | `Standard`; Advanced exige `kms:GenerateDataKey` na policy, é irreversível e tem custo mensal (ver "Policy IAM mínima") | idem |
-| `CANAIS_API_URL` (origem https; http só em localhost) | PostgREST de dev (Railway): `https://postgrest-development-59c5.up.railway.app` | origem do projeto Supabase: `https://<ref>.supabase.co` |
-| `CANAIS_API_REST_PREFIX` (opcional, padrão vazio) | vazio (`RestPrefix: ""` dos workers em dev) | `/rest/v1` |
+| `CANAIS_API_URL` (origem https; http só em localhost) | branch `dev` do Supabase: `https://lusfwbiiuxyzduniptes.supabase.co` | origem do projeto Supabase: `https://<ref>.supabase.co` |
+| `CANAIS_API_REST_PREFIX` (opcional, padrão vazio) | `/rest/v1` | `/rest/v1` |
 | `CANAIS_API_TOKEN` (**obrigatório**) | JWT da role `reconexao_leitura` na fonte de dev | JWT da role `reconexao_leitura` no Supabase de prod |
-| `CANAIS_API_KEY` (opcional) | não definir | publishable/anon key do projeto (o gateway do Supabase exige o header `apikey`) |
+| `CANAIS_API_KEY` (opcional) | publishable key da branch dev | publishable/anon key do projeto (o gateway do Supabase exige o header `apikey`) |
 
 `AUTH_REDIRECT_URI` e `YOUTUBE_REDIRECT_URI` precisam ter a mesma origem. O prefixo
 `RECONEXAO_` existe porque a Vercel reserva nomes `AWS_*` no runtime.
