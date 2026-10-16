@@ -10,9 +10,6 @@ namespace Giom.VideoManager.Infrastructure.Whisper;
 
 public class WhisperOptions
 {
-    /// <summary>Caminho para o executável yt-dlp — ainda necessário só pra baixar o áudio do YouTube.</summary>
-    public string YtDlpPath { get; init; } = "yt-dlp";
-
     public string ApiKey { get; init; } = string.Empty;
 
     /// <summary>Modelo de transcrição da OpenAI: whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe.</summary>
@@ -20,10 +17,6 @@ public class WhisperOptions
 
     /// <summary>Diretório temporário para download do áudio.</summary>
     public string TempDirectory { get; init; } = Path.GetTempPath();
-
-    /// <summary>Fallback legado (US #144) — um único arquivo compartilhado. Preferir
-    /// <see cref="IChannelYtDlpCookies"/> por ChannelId (US #146). Vazio = sem --cookies.</summary>
-    public string CookiesFilePath { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -48,19 +41,19 @@ public class WhisperTranscricaoService : ITranscricaoService
     private readonly HttpClient _http;
     private readonly ILogger<WhisperTranscricaoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
-    private readonly IChannelYtDlpCookies _channelCookies;
+    private readonly IAudioDownloader _audioDownloader;
 
     public WhisperTranscricaoService(
         IOptions<WhisperOptions> options,
         IHttpClientFactory httpClientFactory,
         ILogger<WhisperTranscricaoService> logger,
         IContextoTelemetria contextoTelemetria,
-        IChannelYtDlpCookies channelCookies)
+        IAudioDownloader audioDownloader)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
-        _channelCookies = channelCookies;
+        _audioDownloader = audioDownloader;
         _http = httpClientFactory.CreateClient("whisper");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
     }
@@ -72,7 +65,7 @@ public class WhisperTranscricaoService : ITranscricaoService
 
         try
         {
-            var audioPath = await DownloadAudioAsync(videoId, channelId, workDir, ct);
+            var audioPath = await _audioDownloader.BaixarAudioAsync(videoId, channelId, workDir, ct);
             var texto = await TranscreverViaApiAsync(audioPath, videoId, ct);
 
             return new Transcricao
@@ -89,26 +82,6 @@ public class WhisperTranscricaoService : ITranscricaoService
         {
             TryCleanup(workDir);
         }
-    }
-
-    private async Task<string> DownloadAudioAsync(string videoId, string? channelId, string workDir, CancellationToken ct)
-    {
-        var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
-        var cookiesPath = ResolverCookiesPath(channelId);
-        var cookiesArg = string.IsNullOrWhiteSpace(cookiesPath) ? "" : $"--cookies \"{cookiesPath}\" ";
-        var args = $"{cookiesArg}-x --audio-format mp3 -o \"{outputTemplate}\" https://www.youtube.com/watch?v={videoId}";
-
-        _logger.LogInformation("Baixando áudio do vídeo {VideoId} com yt-dlp", videoId);
-        var exitCode = await RunProcessAsync(_options.YtDlpPath, args, ct);
-
-        if (exitCode != 0)
-            throw new NenhumResultadoEncontradoException("Whisper", $"yt-dlp falhou (código {exitCode}) ao baixar áudio do vídeo {videoId}");
-
-        var audioPath = Directory.GetFiles(workDir, "*.mp3").FirstOrDefault();
-        if (audioPath == null)
-            throw new NenhumResultadoEncontradoException("Whisper", $"yt-dlp não gerou arquivo de áudio pro vídeo {videoId}");
-
-        return audioPath;
     }
 
     private async Task<string> TranscreverViaApiAsync(string audioPath, string videoId, CancellationToken ct)
@@ -146,37 +119,6 @@ public class WhisperTranscricaoService : ITranscricaoService
             throw new NenhumResultadoEncontradoException("Whisper", $"API devolveu transcrição vazia pro vídeo {videoId}");
 
         return texto;
-    }
-
-    private static async Task<int> RunProcessAsync(string executable, string arguments, CancellationToken ct)
-    {
-        using var process = new System.Diagnostics.Process
-        {
-            StartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = executable,
-                Arguments = arguments,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-                UseShellExecute = false
-            }
-        };
-
-        process.Start();
-        await process.WaitForExitAsync(ct);
-        return process.ExitCode;
-    }
-
-    private string? ResolverCookiesPath(string? channelId)
-    {
-        if (!string.IsNullOrWhiteSpace(channelId))
-        {
-            var porCanal = _channelCookies.GetCookiesFilePath(channelId);
-            if (!string.IsNullOrWhiteSpace(porCanal))
-                return porCanal;
-        }
-
-        return string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? null : _options.CookiesFilePath;
     }
 
     private void TryCleanup(string workDir)
