@@ -102,6 +102,34 @@ categorização→embedding numa chamada só, já morto/não registrado em DI ha
 cobria os dois canais em prod (schedule único `giom-ingestao-daily` substituindo
 `giom-instituto-daily`/`giom-ministerio-daily`).
 
+**Transcrição — credenciais por canal (US #146)** — o `Transcricao.Worker` espelha a Ingestão
+no bootstrap OAuth: `AddTranscricaoMultiCanal` lê `canal_ingestao`, registra `YouTubeService`
+keyed por `ChannelId` e escreve cookies yt-dlp Netscape por canal a partir de
+`{secrets_key}:YtDlp:CookiesContent` (SSM `/giom/{env}/canais/{instituto|ministerio}/`).
+`YouTubeCaptionService` / `YtDlpCaptionService` / Whisper / GrokVoice resolvem a credencial/cookie pelo
+`Video.ChannelId`. **Transcrição por áudio (US #148):** o download do áudio com yt-dlp é uma porta do Domain
+(`IAudioDownloader`, impl. `YtDlpAudioDownloader` em `Infrastructure`) compartilhada por Whisper e GrokVoice —
+nenhum dos dois referencia o outro nem chama o yt-dlp direto. `GrokVoice` (xAI `POST /v1/stt`) é um elo
+keyed `ICaptionService` como os demais: só participa da cadeia de um canal se houver linha em
+`etapa_provedor_config` (ver `docs/runbook-grokvoice.md`). O worker carrega dois prefixos SSM (`Secrets:Aws:Paths`: `pipeline/` +
+`canais/`). `pipeline/Google/*` **não** é fonte de credencial: só `{secrets_key}:Google:*`
+(`ClientId` por canal opcional, senão `Google:ClientId` compartilhado). Credencial inválida/ausente
+de um canal pula só esse canal (`FalhasCredencialPorCanal` guarda o motivo) e
+`YouTubeCaptionService` lança `CredencialCanalIndisponivelException` pra cadeia de fallback
+seguir; nunca há login interativo. Fallback legado: `pipeline/YtDlp/CookiesContent` (Bug #144)
+até os cookies por canal existirem. Runbook de rotação: [`docs/runbook-ytdlp-cookies.md`](runbook-ytdlp-cookies.md).
+
+**Client OAuth da credencial por canal** — o client tem de ser **Web application**, o mesmo da
+página de reconexão (`web/reconexao`, PR-03), que é quem emite o refresh token. O fluxo
+Desktop/loopback (`GoogleWebAuthorizationBroker` + `LocalServerCodeReceiver`) era o fluxo antigo
+e não é mais suportado. O refresh token fica **amarrado ao client que o emitiu**: trocar o
+ClientId exige reconectar os dois canais pela página e gravar o ClientSecret do client Web em
+`/giom/{env}/canais/{secrets_key}/Google/ClientSecret`. O boot loga `clientId=` por canal
+(identificador público; `projeto=` sozinho não distingue Desktop de Web, que compartilham o
+número do projeto) para conferir com o ClientId da página. Refresh recusado
+(`invalid_grant`/`unauthorized_client`) é registrado com a dica de token revogado/expirado ou
+emitido por outro client.
+
 **Topologia de execução**: cada worker de etapa é 1 processo, 1 consumer só (não mais
 `Task.WhenAll` de várias etapas no mesmo processo). Migração 2026-07
 (`infra/ecs-services-etapas/`): deixou de ser `run-task` sob demanda (disparado por uma Lambda
@@ -161,6 +189,20 @@ no Sentry, quebrando a árvore `pipeline.run > canal > playlist > página > víd
 - Dashboards existentes no Sentry: "Giom - Observabilidade" (latência/custo/tokens do bot e da
   pipeline), "Giom - Erros" (erros por ambiente), "Giom - Saúde" (vídeos processados/falhos,
   mensagens do bot, erros, gasto e runs da pipeline — visão de saúde geral em 24h).
+- Telemetria do bot (`detalhes` de cada `*AgentService`): `stopReason`/`finishReason`,
+  `incerteza`, `maxTokens`, `concisao` (se `InstrucaoConcisao` está ativa) e, só no Claude,
+  `cacheCreationInputTokens`/`cacheReadInputTokens` (análise de prompt caching).
+
+## Tamanho da resposta do bot
+
+Config-first, por agente (`ClaudeAgent`, `GrokAgent`, `KimiAgent`, `OpenAiAgent` no
+`appsettings.json` do AgenteInstituto.Worker):
+
+- `MaxTokens` (padrão `4096`): teto de tokens da resposta. Valor `<= 0` derruba o worker no
+  startup com mensagem clara (`ValidateOnStart`).
+- `InstrucaoConcisao` (padrão vazio): quando preenchida, é anexada ao fim do `agent.md` como
+  seção `# Tamanho da resposta`. Vazio = system prompt byte-idêntico ao `agent.md` (prompt
+  caching preservado); preenchido = o `agent.md` continua sendo o prefixo intacto.
 
 ## Secrets
 
@@ -198,3 +240,5 @@ qualquer fila nova que siga o prefixo `giom-videos-*` (qualquer etapa, qualquer 
 prod) funciona no primeiro deploy sem precisar editar IAM. Toda infra hoje é provisionada
 manualmente via AWS CLI (nada em Terraform/CloudFormation ainda) — backlog de IaC completo
 registrado no Board (Feature #91, sob o Épico "Plataforma Giom como produto").
+
+**Banco por ambiente** — prod usa o projeto Supabase `instituto-giom-video-manager`; dev usa a branch `dev` do mesmo projeto (Supabase Branching, sem dados), desde 15/10/2026. O Postgres/PostgREST do Railway foi abandonado por dev (US #149) e nunca entrou em prod. Detalhes, credenciais no SSM e armadilhas de migration em [`docs/runbook-ambientes-banco.md`](runbook-ambientes-banco.md).

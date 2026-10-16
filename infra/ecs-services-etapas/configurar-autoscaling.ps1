@@ -1,6 +1,6 @@
 # Configura Application Auto Scaling (0->N por profundidade de fila) pros 5 Services do
 # ambiente dado. Padrao AWS pra SQS: target-tracking sozinho nao escala de forma confiavel a
-# partir de 0 task -- por isso cada Service ganha DUAS policies:
+# partir de 0 task -- por isso cada Service ganha TRES policies:
 #   1. Step scaling "cold start" 0->1, atrelada a um CloudWatch Alarm simples
 #      (ApproximateNumberOfMessagesVisible > 0) -- so precisa disparar uma vez.
 #   2. Target tracking pra manter o regime dali em diante, via Metric Math combinando
@@ -8,6 +8,13 @@
 #      nao a contagem bruta da fila) -- e o que deixa o Scale-In nativo da AWS funcionar direito:
 #      sem dividir pelo numero de tasks rodando, o target-tracking nao tem como saber que "a
 #      mesma fila com metade das mensagens e o dobro de tasks" ja esta sobre-provisionada.
+#   3. Step scaling "scale-in zero" 1->0, atrelada a um alarme de fila vazia.
+#      Por que a 3a existe: target-tracking NAO leva a capacidade a zero -- ele mantem a
+#      proporcao e simplesmente para em 1 quando a fila esvazia. Sem esta policy, o pipeline
+#      inteiro fica com 1 task acordada por etapa, 24h por dia, mesmo sem nada pra processar.
+#      Custo real medido em 19/08/2026: 11 tasks ociosas, com o IP publico de cada uma
+#      (US$0,005/h) somando mais que o proprio processamento -- conta a caminho de US$80/mes
+#      pra um pipeline que trata poucos videos por dia.
 # Nota: RunningTaskCount so existe como metrica de CloudWatch via Container Insights (namespace
 # ECS/ContainerInsights, dimensoes ClusterName+ServiceName) -- nao faz parte do AWS/ECS padrao.
 # Por isso o script garante Container Insights habilitado no cluster antes de configurar a
@@ -159,7 +166,80 @@ foreach ($etapa in @("transcricao", "resumo", "categorizacao", "embedding", "orq
         --threshold 0 --comparison-operator GreaterThanThreshold `
         --alarm-actions $stepPolicyArn `
         --region $region | Out-Null
+
+    # --- Step scaling scale-in 1->0 ---
+    # Espelho exato do cold-start acima, e o motivo do UpperBound aqui e o mesmo (invertido) do
+    # LowerBound la: o alarme e LessThanThreshold, entao o breach amount chega NEGATIVO
+    # (valor - limiar < 0), e so um degrau com MetricIntervalUpperBound=0 cobre isso.
+    #
+    # O limiar e 1 com LessThanThreshold, e nao 0 com LessThanOrEqual, de proposito: com fila
+    # vazia o valor e 0, entao o breach vira 0-1 = -1, que cai com folga dentro de (-inf, 0].
+    # Com limiar 0 o breach seria exatamente 0 -- em cima da fronteira do degrau, que e onde
+    # esse tipo de policy silenciosamente nao aplica nenhum ajuste.
+    $scaleInPolicyArn = aws application-autoscaling put-scaling-policy `
+        --service-namespace ecs `
+        --scalable-dimension ecs:service:DesiredCount `
+        --resource-id $resourceId `
+        --policy-name "giom-$etapa$sufixo-scale-in-zero" `
+        --policy-type StepScaling `
+        --step-scaling-policy-configuration "AdjustmentType=ExactCapacity,StepAdjustments=[{MetricIntervalUpperBound=0,ScalingAdjustment=0}],Cooldown=60" `
+        --region $region `
+        --query "PolicyARN" --output text
+
+    # O alarme soma visiveis + EM VOO (NotVisible). Olhar so as visiveis derrubaria a task no
+    # meio de um video: a mensagem sai da contagem de visiveis assim que e recebida, mas o
+    # trabalho ainda esta acontecendo. Somando as duas, o Service so desce quando de fato nao
+    # ha nada pendente nem em processamento.
+    # 5 periodos de 60s evitam que uma janela curta entre dois videos zere o Service a toa.
+    $scaleInMetricsPath = Join-Path $tmpDir "$etapa-scalein.json"
+    @(
+        @{
+            Id         = "visiveis"
+            MetricStat = @{
+                Metric = @{
+                    Namespace  = "AWS/SQS"
+                    MetricName = "ApproximateNumberOfMessagesVisible"
+                    Dimensions = @(@{ Name = "QueueName"; Value = $fila })
+                }
+                Period = 60
+                Stat   = "Maximum"
+            }
+            ReturnData = $false
+        },
+        @{
+            Id         = "emvoo"
+            MetricStat = @{
+                Metric = @{
+                    Namespace  = "AWS/SQS"
+                    MetricName = "ApproximateNumberOfMessagesNotVisible"
+                    Dimensions = @(@{ Name = "QueueName"; Value = $fila })
+                }
+                Period = 60
+                Stat   = "Maximum"
+            }
+            ReturnData = $false
+        },
+        @{
+            Id         = "pendentes"
+            Expression = "visiveis + emvoo"
+            Label      = "MensagensPendentes"
+            ReturnData = $true
+        }
+    ) | ConvertTo-Json -Depth 8 | Set-Variable -Name scaleInMetricsJson
+    [System.IO.File]::WriteAllText($scaleInMetricsPath, $scaleInMetricsJson, (New-Object System.Text.UTF8Encoding $false))
+
+    # notBreaching em missing data: o SQS para de publicar metrica de fila sem movimento nenhum,
+    # e sem isso o alarme ficaria preso em INSUFFICIENT_DATA e nunca liberaria a descida.
+    aws cloudwatch put-metric-alarm `
+        --alarm-name "giom-$etapa$sufixo-fila-vazia" `
+        --alarm-description "Fila vazia (nada visivel nem em voo) por 5 min -- libera o scale-in para 0." `
+        --metrics "file://$scaleInMetricsPath" `
+        --comparison-operator LessThanThreshold --threshold 1 --evaluation-periods 5 `
+        --treat-missing-data notBreaching `
+        --alarm-actions $scaleInPolicyArn `
+        --region $region | Out-Null
 }
 
 Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
-Write-Host "Autoscaling de $Ambiente configurado (5 Services, target-tracking + cold-start 0->1)."
+Write-Host "Autoscaling de $Ambiente configurado (5 Services, target-tracking + cold-start 0->1 + scale-in 1->0)."
+Write-Host "Com a fila vazia os Services descem a 0 em ~5min; a primeira mensagem faz subir em ~1min."

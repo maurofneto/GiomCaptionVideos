@@ -12,7 +12,11 @@ public class ClaudeAgentOptions
 {
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "claude-haiku-4-5-20251001";
+    /// <summary>Teto de tokens da resposta (ClaudeAgent:MaxTokens). Precisa ser &gt; 0 — validado no startup.</summary>
     public int MaxTokens { get; init; } = 4096;
+
+    /// <summary>Instrução opcional de tamanho de resposta, anexada ao fim do system prompt como seção "# Tamanho da resposta". Vazio = prompt inalterado.</summary>
+    public string InstrucaoConcisao { get; init; } = string.Empty;
 
     /// <summary>Roteia as chamadas pelo gateway do Helicone (custo/latência/tokens por chamada) — requer Helicone:ApiKey configurada.</summary>
     public bool UseHelicone { get; init; } = false;
@@ -52,7 +56,7 @@ public class ClaudeAgentService : IAgentService
         _sessionContext = sessionContext;
         _pricingService = pricingService;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
-        _systemPrompt = prompts.Load("agent.md");
+        _systemPrompt = PromptAgente.Montar(prompts.Load("agent.md"), _options.InstrucaoConcisao);
     }
 
     public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
@@ -112,7 +116,15 @@ public class ClaudeAgentService : IAgentService
             tokensEntrada: response.Usage?.InputTokens,
             tokensSaida: response.Usage?.OutputTokens,
             custoEstimadoUsd: await _pricingService.CalcularAsync("Claude", _options.Model, response.Usage?.InputTokens, response.Usage?.OutputTokens, ct),
-            detalhes: new { stopReason = response.StopReason, incerteza = _incertezaDetector.ContemIncerteza(texto) },
+            detalhes: new
+            {
+                stopReason = response.StopReason,
+                incerteza = _incertezaDetector.ContemIncerteza(texto),
+                maxTokens = _options.MaxTokens,
+                concisao = !string.IsNullOrWhiteSpace(_options.InstrucaoConcisao),
+                cacheCreationInputTokens = response.Usage?.CacheCreationInputTokens,
+                cacheReadInputTokens = response.Usage?.CacheReadInputTokens
+            },
             requestIdExterno: requestId);
 
         if (string.IsNullOrWhiteSpace(texto))

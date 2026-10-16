@@ -1,8 +1,15 @@
+# A página web/reconexao tem pipeline próprio (web/reconexao/azure-pipelines.yml), então mudança
+# só em web/** não builda o .NET nem aplica migration por aqui. Mudança em supabase/** continua
+# disparando esta pipeline, que é quem aplica as migrations (stage Migrations). Não há bloco
+# "pr:" de propósito: no Azure Repos a validação de PR é por branch policy.
 trigger:
   branches:
     include:
       - master
       - dev
+  paths:
+    exclude:
+      - web/**
 
 pool:
   vmImage: ubuntu-latest
@@ -66,6 +73,12 @@ stages:
 
           - script: dotnet test GiomCaptionVideos.sln --configuration Release --no-build
             displayName: 'dotnet test'
+
+          # A Lambda do webhook do WhatsApp (Task #140) é o único controle de acesso de um
+          # endpoint público — se a validação de assinatura quebrar, qualquer um injeta mensagem
+          # na fila do bot. Roda aqui junto do gate pra isso não passar despercebido.
+          - script: python -m unittest discover -s infra/lambda-whatsapp-webhook -v
+            displayName: 'python -m unittest (lambda do webhook)'
 
   - stage: Migrations
     displayName: 'Migrations'

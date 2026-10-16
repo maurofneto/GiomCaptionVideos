@@ -1,5 +1,6 @@
 using Giom.VideoManager.Application;
 using Giom.VideoManager.Application.Handlers;
+using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Application.Memoria;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
@@ -26,7 +27,9 @@ using Giom.VideoManager.Infrastructure.Supabase;
 using Giom.VideoManager.Infrastructure.SummarizeTech;
 using Giom.VideoManager.Infrastructure.Telegram;
 using Giom.VideoManager.Infrastructure.Voyage;
+using Giom.VideoManager.Infrastructure.GrokVoice;
 using Giom.VideoManager.Infrastructure.Whisper;
+using Giom.VideoManager.Infrastructure.WhatsApp;
 using Giom.VideoManager.Infrastructure.YouTube;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,37 +58,60 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Transcrição — cadeia de fallback por canal (US #129, mesmo mecanismo de AddSummaryService/
-    /// US #106). Os 4 providers (YouTubeCaption, YouTubeTranscript, YtDlpCaption, Whisper) são
-    /// sempre registrados como Keyed Service — não decidem mais sozinhos sua ordem/ativação por
-    /// canal, FallbackCaptionService (único ICaptionService público) resolve isso via
-    /// IEtapaProvedorConfigService a cada vídeo, pelo ChannelId. Transcricao:FallbackChain no
-    /// appsettings não é mais lido aqui (a ordem agora vem do banco).
+    /// Transcrição — cadeia de fallback por canal (US #129). Cada adapter se registra via
+    /// AddYouTubeCaption / AddYouTubeTranscript / AddYtDlpCaption / AddGrokVoiceTranscription /
+    /// AddWhisperTranscription;
+    /// FallbackCaptionService (único ICaptionService público) resolve a ordem via
+    /// IEtapaProvedorConfigService pelo ChannelId. Credencial OAuth multi-canal:
+    /// <see cref="AddTranscricaoMultiCanal"/> (US #146).
     /// </summary>
     public static IServiceCollection AddTranscriptionService(this IServiceCollection services, IConfiguration config)
     {
         services.AddEtapaProvedorConfigService(config);
 
-        // YouTubeCaptionService depende do YouTubeService (credencial OAuth) — não pressupõe que
-        // quem chamou AddTranscriptionService também chamou AddVideoSourceService (workers de
-        // etapa, ex: Transcricao.Worker, não descobrem vídeo, só processam a etapa).
-        services.AddYouTubeCredential(config);
-        services.Configure<YouTubeCaptionOptions>(config.GetSection("YouTubeCaption"));
-        services.AddKeyedSingleton<ICaptionService, YouTubeCaptionService>("YouTubeCaption");
-
-        services.Configure<YouTubeTranscriptOptions>(config.GetSection("YouTubeTranscript"));
-        services.AddKeyedSingleton<ICaptionService, YouTubeTranscriptService>("YouTubeTranscript");
-
-        services.Configure<YtDlpCaptionOptions>(config.GetSection("YtDlpCaption"));
-        services.AddKeyedSingleton<ICaptionService, YtDlpCaptionService>("YtDlpCaption");
-
-        // AddWhisperTranscription (Bug #135) registra IContextoTelemetria + o HttpClient
-        // "whisper" que WhisperTranscricaoService exige desde a migração pra API.
+        services.AddYouTubeCaption(config);
+        services.AddYouTubeTranscript(config);
+        services.AddYtDlpCaption(config);
+        services.AddGrokVoiceTranscription(config);
         services.AddWhisperTranscription(config);
-        services.AddKeyedSingleton<ICaptionService, WhisperCaptionService>("Whisper");
 
         services.AddSingleton<ICaptionService, FallbackCaptionService>();
         services.Decorate<ICaptionService, TelemetriaCaptionService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Bootstrap multi-canal da Transcrição (US #146) — espelha <see cref="AddIngestaoMultiCanal"/>
+    /// só no que a etapa precisa: OAuth Google keyed por ChannelId + cookies yt-dlp por canal.
+    /// Não registra handlers de descoberta de vídeo. Lê canais ativos de canal_ingestao.
+    /// </summary>
+    public static IServiceCollection AddTranscricaoMultiCanal(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddSupabaseCanalIngestao(config);
+
+        using (var bootstrapProvider = services.BuildServiceProvider())
+        {
+            var canalRepository = bootstrapProvider.GetRequiredService<ICanalIngestaoRepository>();
+            var canais = canalRepository.GetCanaisAtivosAsync().GetAwaiter().GetResult();
+
+            var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("Giom.VideoManager.Composition.AddTranscricaoMultiCanal");
+
+            var falhas = new List<FalhaCredencialCanal>();
+            var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger, (c, e) => falhas.Add(new(c, e)));
+            services.AddReporteFalhasCredencialCanais(falhas, canais.Count, canaisValidos.Count);
+
+            // Cookies yt-dlp são independentes do OAuth — carregar pra TODOS os canais ativos,
+            // mesmo se o RefreshToken estiver inválido (invalid_grant). Sem isso, YtDlpCaption
+            // fica sem --cookies e a cadeia perde o provedor que a US #146 quer isolar por canal.
+            var cookiesCanais = canais
+                .Select(c => (c.ChannelId, c.SecretsKey))
+                .ToList();
+            services.AddYtDlpCookiesPorCanal(config, cookiesCanais, logger);
+
+            services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);
+        }
 
         return services;
     }
@@ -297,19 +323,92 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Channel:Provider — Telegram (único por enquanto; WhatsApp/Web futuramente).</summary>
-    public static IServiceCollection AddChatChannel(this IServiceCollection services, IConfiguration config)
-        => services.AddTelegramChatChannel(config);
+    /// <summary>
+    /// Canais de chat ligados nesta execução — lista em <c>Chat:Canais</c> (default: Telegram).
+    /// Mesmo mecanismo de AddAgentService/AddEmbeddingService: a composição lê a config e decide
+    /// o que registrar, e quem chama (o worker) não precisa saber que Telegram ou WhatsApp
+    /// existem.
+    ///
+    /// É LISTA, e não um "Chat:Provider" único como em Persistence, porque canais coexistem: o
+    /// bot atende Telegram e WhatsApp ao mesmo tempo, cada um com o seu ChatBotProcessor.
+    ///
+    /// Estar na lista é a única chave que liga um canal — não existe mais uma flag "Habilitado"
+    /// em paralelo dizendo a mesma coisa por outro caminho.
+    /// </summary>
+    public static IServiceCollection AddChatChannels(this IServiceCollection services, IConfiguration config)
+    {
+        var canais = config.GetSection("Chat:Canais").Get<string[]>() ?? [TelegramChatChannel.ChaveCanal];
 
-    /// <summary>VideoSource:Provider — YouTube (padrão, único por enquanto).</summary>
-    public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
-        => services.AddYouTubeVideoSource(config);
+        foreach (var nome in canais)
+        {
+            switch (nome.ToLowerInvariant())
+            {
+                case TelegramChatChannel.ChaveCanal:
+                    services.AddTelegramChatChannel(config);
+                    services.AddChatBotProcessorDoCanal(TelegramChatChannel.ChaveCanal);
+                    break;
+
+                case WhatsAppChatChannel.ChaveCanal:
+                    // Além do canal, o WhatsApp precisa do caminho de entrada (fila + consumidor
+                    // do webhook, Task #140) — saber disso é justamente papel da composição.
+                    services.AddWhatsAppWebhook(config);
+                    services.AddChatBotProcessorDoCanal(WhatsAppChatChannel.ChaveCanal);
+                    break;
+
+                default:
+                    // Aqui NÃO se aplica o "default: provedor principal" que AddAgentService usa.
+                    // Naquele caso qualquer elo da cadeia responde e o bot funciona; aqui, um
+                    // typo em Chat:Canais deixaria o bot sem um canal inteiro — mudo pra quem
+                    // escrevesse por ele — sem erro nenhum aparecer. Melhor não subir.
+                    throw new InvalidOperationException(
+                        $"Canal de chat desconhecido em Chat:Canais: '{nome}'. Conhecidos: " +
+                        $"'{TelegramChatChannel.ChaveCanal}', '{WhatsAppChatChannel.ChaveCanal}'.");
+            }
+        }
+
+        return services;
+    }
+
+    private const string ChaveFilaWhatsAppWebhook = "whatsapp-webhook";
+
+    /// <summary>
+    /// Canal WhatsApp completo: o adapter (Task #139) mais o caminho de ENTRADA das mensagens
+    /// (Task #140).
+    ///
+    /// Ao contrário do Telegram, que busca mensagem sozinho (long polling), o WhatsApp é
+    /// empurrado pela Meta num webhook HTTP. Como o ECS do bot não expõe porta pública — e abrir
+    /// uma exigiria um load balancer a ~US$16/mês fixo, mais domínio e certificado —, quem recebe
+    /// o POST é uma Lambda (infra/lambda-whatsapp-webhook): ela confere a assinatura e publica o
+    /// corpo cru numa fila SQS. É essa fila que o consumidor registrado aqui drena.
+    ///
+    /// Efeito colateral bem-vindo: a fila é durável. Se o bot cair ou reiniciar no meio de um
+    /// deploy, as perguntas ficam guardadas e são respondidas quando ele volta — coisa que uma
+    /// entrega HTTP direta na porta do container não daria.
+    /// </summary>
+    /// Privado: quem liga o WhatsApp é a lista Chat:Canais, via AddChatChannels — não o worker.
+    private static IServiceCollection AddWhatsAppWebhook(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddWhatsAppChatChannel(config);
+        services.AddFilaVideoEtapa<WhatsAppWebhookMensagem>(ChaveFilaWhatsAppWebhook, config, "FilaWhatsAppWebhook");
+
+        services.AddSingleton(sp => new WhatsAppWebhookConsumidor(
+            sp.GetRequiredKeyedService<IFilaConsumer<WhatsAppWebhookMensagem>>(ChaveFilaWhatsAppWebhook),
+            sp.GetRequiredService<WhatsAppWebhookProcessor>(),
+            sp.GetRequiredService<ILogger<WhatsAppWebhookConsumidor>>()));
+
+        // O consumidor da fila é um laço próprio, ao lado do ChatBotProcessor do canal — o
+        // entrypoint roda os dois sem saber que um deles é "coisa de WhatsApp".
+        services.AddSingleton(sp => new CanalDeChatAtivo(
+            "whatsapp:webhook",
+            ct => sp.GetRequiredService<WhatsAppWebhookConsumidor>().ExecutarAsync(ct)));
+
+        return services;
+    }
 
     /// <summary>
     /// Bootstrap multi-canal pra ingestão unificada (US #105, Ingestao.Worker) — lê os canais
     /// ativos do Supabase (tabela canal_ingestao) SÍNCRONO durante ConfigureServices (mesmo
-    /// padrão já aceito nesse código pra GetGoogleCredential(...).GetAwaiter().GetResult() em
-    /// AddYouTubeCredential), registra um YouTubeService keyed por canal e um
+    /// padrão de resolver a credencial sincronamente no boot), registra um YouTubeService keyed por canal e um
     /// Func&lt;string, IVideoHandler&gt; resolvido preguiçosamente na primeira chamada — só
     /// depois que o container termina de montar, já que CanalIngestaoVideoHandler precisa de
     /// dependências registradas por OUTROS Add* nesta mesma composição (AddFilaVideoEtapa,
@@ -338,7 +437,9 @@ public static class ServiceCollectionExtensions
             // using: o logger não precisa sobreviver ao descarte do provider temporário, só
             // durante esta chamada síncrona.
             var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Giom.VideoManager.Composition.AddIngestaoMultiCanal");
-            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+            var falhas = new List<FalhaCredencialCanal>();
+            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger, (c, e) => falhas.Add(new(c, e)));
+            services.AddReporteFalhasCredencialCanais(falhas, canais.Count, canaisValidos.Count);
         }
 
         services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);

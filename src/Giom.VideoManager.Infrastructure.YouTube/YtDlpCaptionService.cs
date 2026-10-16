@@ -1,6 +1,7 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.YtDlp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
@@ -17,6 +18,10 @@ public class YtDlpCaptionOptions
 
     /// <summary>Diretório temporário para os arquivos .vtt baixados</summary>
     public string TempDirectory { get; init; } = Path.GetTempPath();
+
+    /// <summary>Fallback legado (US #144) — um único arquivo compartilhado. Preferir
+    /// <see cref="IChannelYtDlpCookies"/> por ChannelId (US #146). Vazio = sem --cookies.</summary>
+    public string CookiesFilePath { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -27,14 +32,23 @@ public class YtDlpCaptionOptions
 public class YtDlpCaptionService : ICaptionService
 {
     private readonly YtDlpCaptionOptions _options;
+    private readonly YtDlpOptions _ytDlpOptions;
     private readonly ILogger<YtDlpCaptionService> _logger;
     private readonly ITracingService _tracingService;
+    private readonly IChannelYtDlpCookies _channelCookies;
 
-    public YtDlpCaptionService(IOptions<YtDlpCaptionOptions> options, ILogger<YtDlpCaptionService> logger, ITracingService tracingService)
+    public YtDlpCaptionService(
+        IOptions<YtDlpCaptionOptions> options,
+        IOptions<YtDlpOptions> ytDlpOptions,
+        ILogger<YtDlpCaptionService> logger,
+        ITracingService tracingService,
+        IChannelYtDlpCookies channelCookies)
     {
         _options = options.Value;
+        _ytDlpOptions = ytDlpOptions.Value;
         _logger = logger;
         _tracingService = tracingService;
+        _channelCookies = channelCookies;
     }
 
     public async Task<Transcricao?> GetCaptionAsync(Video video, CancellationToken ct = default)
@@ -49,17 +63,24 @@ public class YtDlpCaptionService : ICaptionService
 
         try
         {
-            var langs = string.Join(",", _options.Languages);
-            var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
-            var url = $"https://www.youtube.com/watch?v={video.Id}";
-
-            // Tenta legendas manuais primeiro, depois automáticas
-            var args = $"--write-subs --write-auto-subs --sub-lang \"{langs}\" " +
-                       $"--sub-format vtt --skip-download -o \"{outputTemplate}\" {url}";
+            var args = MontarArgumentos(video, workDir);
 
             _logger.LogInformation("Baixando legendas via yt-dlp: {VideoId}", video.Id);
-            var exitCode = await RunProcessAsync(_options.YtDlpPath, args, ct);
+            var (exitCode, stderr) = await YtDlpProcesso.ExecutarAsync(_options.YtDlpPath, args, _ytDlpOptions, ct);
             Activity.Current?.SetTag("exit_code", exitCode);
+
+            if (ClassificadorFalhaCaption.ClassificarSaidaYtDlp(exitCode, stderr) is { } bloqueio)
+            {
+                FalhaCaptionLog.Registrar(_logger, bloqueio, Provedor, video.Id, video.ChannelId);
+                var motivo = $"yt-dlp bloqueado pelo YouTube (código {exitCode}) pro vídeo {video.Id}";
+                var naoTransitoria = ClassificadorFalhaCaption.EhNaoTransitoria(bloqueio.Classe)
+                    ? new FalhaNaoTransitoriaException(Provedor, motivo, bloqueio.Reason)
+                    : null;
+                throw new CaptionFalhaException(bloqueio.Classe, Provedor, motivo, reason: bloqueio.Reason, innerException: naoTransitoria);
+            }
+
+            if (exitCode == 0 && ClassificadorFalhaCaption.ClassificarStderrYtDlp(stderr) is not null)
+                _logger.LogInformation("yt-dlp emitiu aviso de bloqueio mas terminou com sucesso (código 0) para vídeo {VideoId}", video.Id);
 
             if (exitCode != 0)
             {
@@ -154,23 +175,39 @@ public class YtDlpCaptionService : ICaptionService
         return string.Join(" ", parts);
     }
 
-    private static async Task<int> RunProcessAsync(string executable, string arguments, CancellationToken ct)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName  = executable,
-                Arguments = arguments,
-                RedirectStandardOutput = false,
-                RedirectStandardError  = false,
-                UseShellExecute = false
-            }
-        };
+    private const string Provedor = "YtDlpCaption";
 
-        process.Start();
-        await process.WaitForExitAsync(ct);
-        return process.ExitCode;
+    /// <summary>Argumentos específicos desta chamada — proxy/PO token entram em <see cref="YtDlpProcesso"/>.</summary>
+    internal List<string> MontarArgumentos(Video video, string workDir)
+    {
+        var args = new List<string>();
+
+        var cookiesPath = ResolverCookiesPath(video.ChannelId);
+        if (!string.IsNullOrWhiteSpace(cookiesPath))
+            args.AddRange(["--cookies", cookiesPath]);
+
+        // Tenta legendas manuais primeiro, depois automáticas
+        args.AddRange([
+            "--write-subs", "--write-auto-subs",
+            "--sub-lang", string.Join(",", _options.Languages),
+            "--sub-format", "vtt", "--skip-download",
+            "-o", Path.Combine(workDir, "%(id)s.%(ext)s"),
+            $"https://www.youtube.com/watch?v={video.Id}"
+        ]);
+
+        return args;
+    }
+
+    private string? ResolverCookiesPath(string? channelId)
+    {
+        if (!string.IsNullOrWhiteSpace(channelId))
+        {
+            var porCanal = _channelCookies.GetCookiesFilePath(channelId);
+            if (!string.IsNullOrWhiteSpace(porCanal))
+                return porCanal;
+        }
+
+        return string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? null : _options.CookiesFilePath;
     }
 
     private void TryCleanup(string workDir)

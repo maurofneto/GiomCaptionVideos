@@ -13,6 +13,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Whisper\Giom.VideoManager.Infrastructure.Whisper.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.SummarizeTech\Giom.VideoManager.Infrastructure.SummarizeTech.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Telegram\Giom.VideoManager.Infrastructure.Telegram.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.WhatsApp\Giom.VideoManager.Infrastructure.WhatsApp.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Sql\Giom.VideoManager.Infrastructure.Sql.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Mongo\Giom.VideoManager.Infrastructure.Mongo.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Supabase\Giom.VideoManager.Infrastructure.Supabase.csproj" />
@@ -26,6 +27,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Aws\Giom.VideoManager.Infrastructure.Secrets.Aws.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Azure\Giom.VideoManager.Infrastructure.Secrets.Azure.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.HashiCorp\Giom.VideoManager.Infrastructure.Secrets.HashiCorp.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.GrokVoice\Giom.VideoManager.Infrastructure.GrokVoice.csproj" />
   </ItemGroup>
 
   <ItemGroup>

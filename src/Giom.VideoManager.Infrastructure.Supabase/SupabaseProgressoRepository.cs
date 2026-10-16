@@ -24,18 +24,16 @@ public class SupabaseProgressoRepository : IProgressoRepository
         NullValueHandling = NullValueHandling.Include
     };
 
-    public SupabaseProgressoRepository(IOptions<SupabaseOptions> options)
+    public SupabaseProgressoRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory)
     {
         _options = options.Value;
-        _http = new HttpClient { BaseAddress = new Uri(_options.Url) };
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", _options.SecretKey);
+        _http = httpClientFactory.CreateClient("supabase");
     }
 
     public async Task<string?> GetLastPageTokenAsync(string channelKey, string playlistId, CancellationToken ct = default)
     {
         var response = await _http.GetAsync(
-            $"/rest/v1/processamento_progresso?channel_key=eq.{channelKey}&playlist_id=eq.{playlistId}&select=last_page_token", ct);
+            _options.Rest($"/processamento_progresso?channel_key=eq.{channelKey}&playlist_id=eq.{playlistId}&select=last_page_token"), ct);
 
         if (!response.IsSuccessStatusCode) return null;
 
@@ -47,7 +45,7 @@ public class SupabaseProgressoRepository : IProgressoRepository
     public async Task<DateTime?> GetLastProcessedDateAsync(string channelKey, string playlistId, CancellationToken ct = default)
     {
         var response = await _http.GetAsync(
-            $"/rest/v1/processamento_progresso?channel_key=eq.{channelKey}&playlist_id=eq.{playlistId}&select=last_processed_date", ct);
+            _options.Rest($"/processamento_progresso?channel_key=eq.{channelKey}&playlist_id=eq.{playlistId}&select=last_processed_date"), ct);
 
         if (!response.IsSuccessStatusCode) return null;
 
@@ -69,7 +67,7 @@ public class SupabaseProgressoRepository : IProgressoRepository
         };
 
         var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
-        var request = new HttpRequestMessage(HttpMethod.Post, "/rest/v1/processamento_progresso") { Content = content };
+        var request = new HttpRequestMessage(HttpMethod.Post, _options.Rest("/processamento_progresso")) { Content = content };
         request.Headers.Add("Prefer", "resolution=merge-duplicates");
         await _http.SendAsync(request, ct);
     }

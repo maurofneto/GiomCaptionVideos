@@ -35,15 +35,12 @@ public class SupabaseEmbeddingService : IEmbeddingService
     private readonly ILogger<SupabaseEmbeddingService> _logger;
     private readonly HttpClient _http;
 
-    public SupabaseEmbeddingService(IOptions<SupabaseEmbeddingOptions> options, ILogger<SupabaseEmbeddingService> logger)
+    public SupabaseEmbeddingService(IOptions<SupabaseEmbeddingOptions> options, ILogger<SupabaseEmbeddingService> logger, IHttpClientFactory httpClientFactory)
     {
         _options = options.Value;
         _logger = logger;
 
-        _http = new HttpClient();
-        _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _options.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", _options.SecretKey);
+        _http = httpClientFactory.CreateClient("supabase");
         // Aulas longas levam tempo — timeout generoso
         _http.Timeout = TimeSpan.FromMinutes(10);
     }

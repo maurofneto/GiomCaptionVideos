@@ -13,7 +13,11 @@ public class GrokAgentOptions
 {
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "grok-3-mini";
+    /// <summary>Teto de tokens da resposta (GrokAgent:MaxTokens). Precisa ser &gt; 0 — validado no startup.</summary>
     public int MaxTokens { get; init; } = 4096;
+
+    /// <summary>Instrução opcional de tamanho de resposta, anexada ao fim do system prompt como seção "# Tamanho da resposta". Vazio = prompt inalterado.</summary>
+    public string InstrucaoConcisao { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -41,7 +45,7 @@ public class GrokAgentService : IAgentService
         _pricingService = pricingService;
         _http = httpClientFactory.CreateClient("grok");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        _systemPrompt = prompts.Load("agent.md");
+        _systemPrompt = PromptAgente.Montar(prompts.Load("agent.md"), _options.InstrucaoConcisao);
     }
 
     public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
@@ -98,7 +102,13 @@ public class GrokAgentService : IAgentService
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
             custoEstimadoUsd: await _pricingService.CalcularAsync("Grok", _options.Model, result?.usage?.prompt_tokens, result?.usage?.completion_tokens, ct),
-            detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason, incerteza = texto != null && _incertezaDetector.ContemIncerteza(texto) },
+            detalhes: new
+            {
+                finishReason = result?.choices?.FirstOrDefault()?.finish_reason,
+                incerteza = texto != null && _incertezaDetector.ContemIncerteza(texto),
+                maxTokens = _options.MaxTokens,
+                concisao = !string.IsNullOrWhiteSpace(_options.InstrucaoConcisao)
+            },
             requestIdExterno: requestId);
 
         if (string.IsNullOrWhiteSpace(texto))
