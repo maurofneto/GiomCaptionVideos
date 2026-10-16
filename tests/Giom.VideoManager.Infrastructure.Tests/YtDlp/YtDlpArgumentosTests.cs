@@ -1,6 +1,5 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
-using Giom.VideoManager.Infrastructure.Whisper;
 using Giom.VideoManager.Infrastructure.YouTube;
 using Giom.VideoManager.Infrastructure.YtDlp;
 using Giom.VideoManager.Testes.Comuns;
@@ -135,24 +134,6 @@ public class YtDlpArgumentosTests
         // Comuns entram só no YtDlpProcesso — não duplicar aqui.
         Assert.DoesNotContain("--proxy", args);
         Assert.DoesNotContain("--extractor-args", args);
-    }
-
-    [Fact]
-    public void Whisper_MontarArgumentosDownload_SemCookies_ExtraiAudioMp3()
-    {
-        var http = new Mock<IHttpClientFactory>();
-        http.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
-        var servico = new WhisperTranscricaoService(
-            Options.Create(new WhisperOptions()),
-            Options.Create(new YtDlpOptions()),
-            http.Object, new FakeLogger<WhisperTranscricaoService>(),
-            Mock.Of<IContextoTelemetria>(), new NullChannelYtDlpCookies());
-
-        var args = servico.MontarArgumentosDownload("MQLn0Oxf6aA", "UC-sem-cookie", "/tmp/work");
-
-        Assert.DoesNotContain("--cookies", args);
-        Assert.Equal(["-x", "--audio-format", "mp3"], args.Take(3));
-        Assert.Equal("https://www.youtube.com/watch?v=MQLn0Oxf6aA", args[^1]);
     }
 
     // ---------- registro / log de boot ----------

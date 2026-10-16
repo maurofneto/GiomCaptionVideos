@@ -106,8 +106,12 @@ cobria os dois canais em prod (schedule único `giom-ingestao-daily` substituind
 no bootstrap OAuth: `AddTranscricaoMultiCanal` lê `canal_ingestao`, registra `YouTubeService`
 keyed por `ChannelId` e escreve cookies yt-dlp Netscape por canal a partir de
 `{secrets_key}:YtDlp:CookiesContent` (SSM `/giom/{env}/canais/{instituto|ministerio}/`).
-`YouTubeCaptionService` / `YtDlpCaptionService` / Whisper resolvem a credencial/cookie pelo
-`Video.ChannelId`. O worker carrega dois prefixos SSM (`Secrets:Aws:Paths`: `pipeline/` +
+`YouTubeCaptionService` / `YtDlpCaptionService` / Whisper / GrokVoice resolvem a credencial/cookie pelo
+`Video.ChannelId`. **Transcrição por áudio (US #148):** o download do áudio com yt-dlp é uma porta do Domain
+(`IAudioDownloader`, impl. `YtDlpAudioDownloader` em `Infrastructure`) compartilhada por Whisper e GrokVoice —
+nenhum dos dois referencia o outro nem chama o yt-dlp direto. `GrokVoice` (xAI `POST /v1/stt`) é um elo
+keyed `ICaptionService` como os demais: só participa da cadeia de um canal se houver linha em
+`etapa_provedor_config` (ver `docs/runbook-grokvoice.md`). O worker carrega dois prefixos SSM (`Secrets:Aws:Paths`: `pipeline/` +
 `canais/`). `pipeline/Google/*` **não** é fonte de credencial: só `{secrets_key}:Google:*`
 (`ClientId` por canal opcional, senão `Google:ClientId` compartilhado). Credencial inválida/ausente
 de um canal pula só esse canal (`FalhasCredencialPorCanal` guarda o motivo) e

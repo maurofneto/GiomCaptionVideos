@@ -1,5 +1,6 @@
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
+using Giom.VideoManager.Infrastructure.Audio;
 using Giom.VideoManager.Infrastructure.Resiliencia;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,16 +13,13 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Whisper via API OpenAI (download de áudio com yt-dlp + speech-to-text). Registra
     /// <see cref="ITranscricaoService"/> e o keyed <see cref="ICaptionService"/> "Whisper"
-    /// pra cadeia de fallback. Se ainda não houver <see cref="IChannelYtDlpCookies"/>, usa
-    /// <see cref="NullChannelYtDlpCookies"/> (cookies reais vêm de AddYtDlpCookiesPorCanal).
+    /// pra cadeia de fallback. O download do áudio vem de <see cref="IAudioDownloader"/> (yt-dlp,
+    /// compartilhado com GrokVoice — US #148; cookies por canal via AddYtDlpCookiesPorCanal).
     /// </summary>
     public static IServiceCollection AddWhisperTranscription(this IServiceCollection services, IConfiguration config)
     {
         services.AddContextoTelemetria();
-        services.AddYtDlpOpcoes(config);
-
-        if (!services.Any(d => d.ServiceType == typeof(IChannelYtDlpCookies)))
-            services.AddSingleton<IChannelYtDlpCookies, NullChannelYtDlpCookies>();
+        services.AddYtDlpAudioDownloader(config);
 
         // Timeouts bem mais folgados que os outros provedores de IA — upload de áudio (até
         // ~25MB/vídeo longo) + processamento do lado da OpenAI pode passar dos 90s padrão.

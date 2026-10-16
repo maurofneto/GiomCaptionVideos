@@ -55,7 +55,8 @@ tests/
 | Projeto | Resolve |
 |---|---|
 | `Infrastructure.YouTube` | Descoberta de vídeo/playlist, legenda (`YouTubeCaption`/`YtDlpCaption`/`YouTubeTranscript`), OAuth Google |
-| `Infrastructure.Whisper` | Transcrição via Whisper local (fallback quando não há legenda) |
+| `Infrastructure.Whisper` | Transcrição de áudio via API da OpenAI (Whisper) — último elo da cadeia |
+| `Infrastructure.GrokVoice` | Transcrição de áudio via Grok Voice (xAI) — elo antes do Whisper (US #148) |
 | `Infrastructure.Anthropic` | Cliente Claude (resumo, categorização, bot) |
 | `Infrastructure.OpenAI` | Embeddings diretos (`OpenAiEmbedding`) |
 | `Infrastructure.SummarizeTech` | Alternativa de resumo (provider plugável) |

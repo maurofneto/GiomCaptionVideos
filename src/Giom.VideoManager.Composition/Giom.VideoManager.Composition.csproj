@@ -27,6 +27,7 @@
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Aws\Giom.VideoManager.Infrastructure.Secrets.Aws.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.Azure\Giom.VideoManager.Infrastructure.Secrets.Azure.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Infrastructure.Secrets.HashiCorp\Giom.VideoManager.Infrastructure.Secrets.HashiCorp.csproj" />
+    <ProjectReference Include="..\Giom.VideoManager.Infrastructure.GrokVoice\Giom.VideoManager.Infrastructure.GrokVoice.csproj" />
   </ItemGroup>
 
   <ItemGroup>
