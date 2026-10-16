@@ -22,4 +22,9 @@
     <RootNamespace>Giom.VideoManager.Infrastructure.Whisper</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- MontarArgumentosDownload é internal — visível só pro teste dos argumentos do yt-dlp. -->
+    <InternalsVisibleTo Include="Giom.VideoManager.Infrastructure.Tests" />
+  </ItemGroup>
+
 </Project>

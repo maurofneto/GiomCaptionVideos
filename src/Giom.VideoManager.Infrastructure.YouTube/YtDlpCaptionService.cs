@@ -1,6 +1,7 @@
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.YtDlp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
@@ -31,17 +32,20 @@ public class YtDlpCaptionOptions
 public class YtDlpCaptionService : ICaptionService
 {
     private readonly YtDlpCaptionOptions _options;
+    private readonly YtDlpOptions _ytDlpOptions;
     private readonly ILogger<YtDlpCaptionService> _logger;
     private readonly ITracingService _tracingService;
     private readonly IChannelYtDlpCookies _channelCookies;
 
     public YtDlpCaptionService(
         IOptions<YtDlpCaptionOptions> options,
+        IOptions<YtDlpOptions> ytDlpOptions,
         ILogger<YtDlpCaptionService> logger,
         ITracingService tracingService,
         IChannelYtDlpCookies channelCookies)
     {
         _options = options.Value;
+        _ytDlpOptions = ytDlpOptions.Value;
         _logger = logger;
         _tracingService = tracingService;
         _channelCookies = channelCookies;
@@ -59,24 +63,20 @@ public class YtDlpCaptionService : ICaptionService
 
         try
         {
-            var langs = string.Join(",", _options.Languages);
-            var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
-            var url = $"https://www.youtube.com/watch?v={video.Id}";
-            var cookiesPath = ResolverCookiesPath(video.ChannelId);
-            var cookiesArg = string.IsNullOrWhiteSpace(cookiesPath) ? "" : $"--cookies \"{cookiesPath}\" ";
-            // Tenta legendas manuais primeiro, depois automáticas
-            var args = $"{cookiesArg}--write-subs --write-auto-subs --sub-lang \"{langs}\" " +
-                       $"--sub-format vtt --skip-download -o \"{outputTemplate}\" {url}";
+            var args = MontarArgumentos(video, workDir);
 
             _logger.LogInformation("Baixando legendas via yt-dlp: {VideoId}", video.Id);
-            var (exitCode, stderr) = await RunProcessAsync(_options.YtDlpPath, args, ct);
+            var (exitCode, stderr) = await YtDlpProcesso.ExecutarAsync(_options.YtDlpPath, args, _ytDlpOptions, ct);
             Activity.Current?.SetTag("exit_code", exitCode);
 
             if (ClassificadorFalhaCaption.ClassificarSaidaYtDlp(exitCode, stderr) is { } bloqueio)
             {
                 FalhaCaptionLog.Registrar(_logger, bloqueio, Provedor, video.Id, video.ChannelId);
-                throw new CaptionFalhaException(bloqueio.Classe, Provedor,
-                    $"yt-dlp bloqueado pelo YouTube (código {exitCode}) pro vídeo {video.Id}", reason: bloqueio.Reason);
+                var motivo = $"yt-dlp bloqueado pelo YouTube (código {exitCode}) pro vídeo {video.Id}";
+                var naoTransitoria = ClassificadorFalhaCaption.EhNaoTransitoria(bloqueio.Classe)
+                    ? new FalhaNaoTransitoriaException(Provedor, motivo, bloqueio.Reason)
+                    : null;
+                throw new CaptionFalhaException(bloqueio.Classe, Provedor, motivo, reason: bloqueio.Reason, innerException: naoTransitoria);
             }
 
             if (exitCode == 0 && ClassificadorFalhaCaption.ClassificarStderrYtDlp(stderr) is not null)
@@ -176,38 +176,26 @@ public class YtDlpCaptionService : ICaptionService
     }
 
     private const string Provedor = "YtDlpCaption";
-    private const int StderrMaxChars = 64 * 1024;
 
-    // stderr é capturado só pra classificar (BloqueioBot) e re-emitido linha a linha em Console.Error:
-    // o metric filter do CloudWatch ("Sign in to confirm") continua enxergando o texto original.
-    private static async Task<(int ExitCode, string Stderr)> RunProcessAsync(string executable, string arguments, CancellationToken ct)
+    /// <summary>Argumentos específicos desta chamada — proxy/PO token entram em <see cref="YtDlpProcesso"/>.</summary>
+    internal List<string> MontarArgumentos(Video video, string workDir)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName  = executable,
-                Arguments = arguments,
-                RedirectStandardOutput = false,
-                RedirectStandardError  = true,
-                UseShellExecute = false
-            }
-        };
+        var args = new List<string>();
 
-        var stderr = new System.Text.StringBuilder();
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is null) return;
-            Console.Error.WriteLine(e.Data);
-            lock (stderr)
-                if (stderr.Length < StderrMaxChars) stderr.AppendLine(e.Data);
-        };
+        var cookiesPath = ResolverCookiesPath(video.ChannelId);
+        if (!string.IsNullOrWhiteSpace(cookiesPath))
+            args.AddRange(["--cookies", cookiesPath]);
 
-        process.Start();
-        process.BeginErrorReadLine();
-        await process.WaitForExitAsync(ct);
-        // WaitForExitAsync com stderr redirecionado já espera o EOF dos handlers de saída assíncrona.
-        lock (stderr) return (process.ExitCode, stderr.ToString());
+        // Tenta legendas manuais primeiro, depois automáticas
+        args.AddRange([
+            "--write-subs", "--write-auto-subs",
+            "--sub-lang", string.Join(",", _options.Languages),
+            "--sub-format", "vtt", "--skip-download",
+            "-o", Path.Combine(workDir, "%(id)s.%(ext)s"),
+            $"https://www.youtube.com/watch?v={video.Id}"
+        ]);
+
+        return args;
     }
 
     private string? ResolverCookiesPath(string? channelId)

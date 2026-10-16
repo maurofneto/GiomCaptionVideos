@@ -16,6 +16,7 @@ public static class AudioServiceCollectionExtensions
     public static IServiceCollection AddYtDlpAudioDownloader(this IServiceCollection services, IConfiguration config)
     {
         services.TryAddSingleton<IChannelYtDlpCookies, NullChannelYtDlpCookies>();
+        services.AddYtDlpOpcoes(config);
         services.AddOptions<YtDlpAudioOptions>().Bind(config.GetSection("YtDlpAudio"));
         services.TryAddSingleton<IAudioDownloader, YtDlpAudioDownloader>();
         return services;

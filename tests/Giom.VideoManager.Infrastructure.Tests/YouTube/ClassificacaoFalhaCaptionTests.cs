@@ -275,6 +275,7 @@ public class ClassificacaoFalhaCaptionTests
         var falha = ClassificadorFalhaCaption.ClassificarStderrYtDlp(stderr);
 
         Assert.Equal(ClasseFalhaCaption.BloqueioBot, falha!.Classe);
+        Assert.True(ClassificadorFalhaCaption.EhNaoTransitoria(falha.Classe));
     }
 
     [Fact]
@@ -292,6 +293,49 @@ public class ClassificacaoFalhaCaptionTests
     [InlineData("ERROR: Video unavailable")]
     public void StderrYtDlp_SemBloqueio_NaoClassifica(string? stderr) =>
         Assert.Null(ClassificadorFalhaCaption.ClassificarStderrYtDlp(stderr));
+
+    [Fact]
+    public void StderrYtDlp_SignInNotABot_ReasonEstavel()
+    {
+        var falha = ClassificadorFalhaCaption.ClassificarStderrYtDlp(
+            "ERROR: [youtube] MQLn0Oxf6aA: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication.");
+
+        Assert.Equal("sign_in_to_confirm_not_a_bot", falha!.Reason);
+    }
+
+    [Fact]
+    public void StderrYtDlp_UnusualTraffic_EhBloqueioBot()
+    {
+        var falha = ClassificadorFalhaCaption.ClassificarStderrYtDlp(
+            "ERROR: Our systems have detected unusual traffic from your computer network");
+
+        Assert.Equal(ClasseFalhaCaption.BloqueioBot, falha!.Classe);
+        Assert.Equal("unusual_traffic", falha.Reason);
+    }
+
+    [Fact]
+    public void BloqueioBot_EhNaoTransitoria_DemaisClassesSeguemRetryNormal()
+    {
+        Assert.True(ClassificadorFalhaCaption.EhNaoTransitoria(ClasseFalhaCaption.BloqueioBot));
+
+        foreach (var classe in Enum.GetValues<ClasseFalhaCaption>().Where(c => c != ClasseFalhaCaption.BloqueioBot))
+            Assert.False(ClassificadorFalhaCaption.EhNaoTransitoria(classe));
+    }
+
+    [Fact]
+    public void Classificar_FalhaNaoTransitoriaDoWhisperComReasonDeBot_EhBloqueioBot()
+    {
+        var ex = new InvalidOperationException("decorator", new FalhaNaoTransitoriaException("Whisper", "bloqueado", "sign_in_to_confirm_not_a_bot"));
+
+        var falha = ClassificadorFalhaCaption.Classificar(ex);
+
+        Assert.Equal(ClasseFalhaCaption.BloqueioBot, falha!.Classe);
+        Assert.Equal("sign_in_to_confirm_not_a_bot", falha.Reason);
+    }
+
+    [Fact]
+    public void Classificar_FalhaNaoTransitoriaSemReasonDeBot_NaoViraBloqueioBot() =>
+        Assert.Null(ClassificadorFalhaCaption.Classificar(new FalhaNaoTransitoriaException("X", "outra causa", "outro_reason")));
 
     [Fact]
     public void NivelDeLog_PorClasse()

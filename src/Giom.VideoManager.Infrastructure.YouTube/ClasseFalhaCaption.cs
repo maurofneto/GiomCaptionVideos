@@ -18,7 +18,11 @@ public enum ClasseFalhaCaption
     /// <summary>OAuth recusado (<c>invalid_grant</c>/<c>invalid_client</c>), 401, ou credencial do canal indisponível.</summary>
     CredencialInvalida,
 
-    /// <summary>yt-dlp bloqueado pelo YouTube ("Sign in to confirm you're not a bot").</summary>
+    /// <summary>
+    /// yt-dlp bloqueado pelo YouTube ("Sign in to confirm you're not a bot", "unusual traffic").
+    /// NÃO transitória: retry da mesma mensagem não resolve (precisa trocar cookies/PO token/IP) —
+    /// ver <see cref="ClassificadorFalhaCaption.EhNaoTransitoria"/>.
+    /// </summary>
     BloqueioBot,
 
     /// <summary>200 com corpo realmente vazio.</summary>

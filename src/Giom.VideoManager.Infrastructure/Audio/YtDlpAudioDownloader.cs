@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.YtDlp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -20,14 +20,18 @@ public class YtDlpAudioOptions
 /// Baixa o áudio com yt-dlp (<c>-x --audio-format mp3</c>, exige ffmpeg na imagem). Lógica movida
 /// sem mudança de comportamento de WhisperTranscricaoService.DownloadAudioAsync (US #148) — agora
 /// compartilhada por Whisper e GrokVoice. Diferença: captura o stderr do yt-dlp pra registrar o
-/// motivo da falha (ex.: bloqueio anti-bot, Bug #144) em vez de só o exit code.
+/// motivo da falha (ex.: bloqueio anti-bot, Bug #144) em vez de só o exit code. Roda pelo
+/// <see cref="YtDlpProcesso"/>, então proxy/PO token (<see cref="YtDlpOptions"/>) valem aqui também,
+/// e bloqueio anti-bot vira <see cref="FalhaNaoTransitoriaException"/> (a fila manda direto pra DLQ).
 /// </summary>
 public class YtDlpAudioDownloader(
     IOptions<YtDlpAudioOptions> options,
+    IOptions<YtDlpOptions> ytDlpOptions,
     IChannelYtDlpCookies channelCookies,
     ILogger<YtDlpAudioDownloader> logger) : IAudioDownloader
 {
     private readonly YtDlpAudioOptions _options = options.Value;
+    private readonly YtDlpOptions _ytDlpOptions = ytDlpOptions.Value;
 
     public async Task<string> BaixarAudioAsync(string videoId, string? channelId, string workDir, CancellationToken ct = default)
     {
@@ -35,15 +39,24 @@ public class YtDlpAudioDownloader(
         var args = MontarArgumentos(videoId, outputTemplate, ResolverCookiesPath(channelId));
 
         logger.LogInformation("Baixando áudio do vídeo {VideoId} com yt-dlp", videoId);
-        var (exitCode, stderr) = await RunProcessAsync(_options.YtDlpPath, args, ct);
+        var (exitCode, stderr) = await YtDlpProcesso.ExecutarAsync(_options.YtDlpPath, args, _ytDlpOptions, ct);
+
+        // Bloqueio anti-bot não melhora repetindo: sem isso virava NenhumResultadoEncontrado genérico
+        // e a fila reprocessava a cadeia inteira até o MaxReceiveCount, sempre com o mesmo resultado.
+        if (exitCode != 0 && YtDlpBloqueioBot.Detectar(stderr) is { } reason)
+        {
+            logger.LogError("yt-dlp bloqueado pelo YouTube (BloqueioBot, {Reason}) ao baixar áudio do vídeo {VideoId} ChannelId={ChannelId} — falha não transitória, sem retry",
+                reason, videoId, channelId);
+            throw new FalhaNaoTransitoriaException("YtDlpAudio",
+                $"yt-dlp bloqueado pelo YouTube (código {exitCode}) ao baixar áudio do vídeo {videoId}", reason);
+        }
 
         if (exitCode != 0)
         {
             logger.LogWarning("yt-dlp falhou (código {ExitCode}) ao baixar áudio de {VideoId}: {Motivo}",
                 exitCode, videoId, ResumirStderr(stderr));
             throw new NenhumResultadoEncontradoException("YtDlpAudio",
-                $"yt-dlp falhou (código {exitCode}) ao baixar áudio do vídeo {videoId}" +
-                (IndicaBloqueioAntiBot(stderr) ? " — bloqueio anti-bot do YouTube (cookies ausentes ou inválidos)" : ""));
+                $"yt-dlp falhou (código {exitCode}) ao baixar áudio do vídeo {videoId}");
         }
 
         var audioPath = Directory.GetFiles(workDir, "*.mp3").FirstOrDefault();
@@ -51,14 +64,22 @@ public class YtDlpAudioDownloader(
             ?? throw new NenhumResultadoEncontradoException("YtDlpAudio", $"yt-dlp não gerou arquivo de áudio pro vídeo {videoId}");
     }
 
-    internal static string MontarArgumentos(string videoId, string outputTemplate, string? cookiesPath)
+    /// <summary>Argumentos específicos do download de áudio — proxy/PO token entram em <see cref="YtDlpProcesso"/>.</summary>
+    internal static List<string> MontarArgumentos(string videoId, string outputTemplate, string? cookiesPath)
     {
-        var cookiesArg = string.IsNullOrWhiteSpace(cookiesPath) ? "" : $"--cookies \"{cookiesPath}\" ";
-        return $"{cookiesArg}-x --audio-format mp3 -o \"{outputTemplate}\" https://www.youtube.com/watch?v={videoId}";
-    }
+        var args = new List<string>();
 
-    internal static bool IndicaBloqueioAntiBot(string stderr) =>
-        stderr.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(cookiesPath))
+            args.AddRange(["--cookies", cookiesPath]);
+
+        args.AddRange([
+            "-x", "--audio-format", "mp3",
+            "-o", outputTemplate,
+            $"https://www.youtube.com/watch?v={videoId}"
+        ]);
+
+        return args;
+    }
 
     private static string ResumirStderr(string stderr)
     {
@@ -78,25 +99,5 @@ public class YtDlpAudioDownloader(
         }
 
         return string.IsNullOrWhiteSpace(_options.CookiesFilePath) ? null : _options.CookiesFilePath;
-    }
-
-    private static async Task<(int ExitCode, string Stderr)> RunProcessAsync(string executable, string arguments, CancellationToken ct)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = executable,
-                Arguments = arguments,
-                RedirectStandardOutput = false,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            }
-        };
-
-        process.Start();
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        return (process.ExitCode, await stderrTask);
     }
 }
