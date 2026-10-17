@@ -79,3 +79,7 @@ depois de qualquer recriação da branch: com a service_role, `GET /rest/v1/cana
   ingestão em dev lê os canais do banco mas pula os dois até reconectar pela página de reconexão
   (US #146).
 - **PRs 104 e 105** (halfvec e filtros de canal no RAG) ainda precisam ser aplicados na branch.
+
+## Histórico fora de ordem (`--include-all`)
+
+O `supabase db push` recusa aplicar uma migration cuja versão é anterior à última registrada no remoto ("Found local migration files to be inserted before the last migration"). Isso acontece depois de um `migration repair --status applied` de uma versão nova ou de uma migration aplicada à mão. O estágio `Migrations` do `azure-pipelines.yml` usa `--include-all` para não travar; **o estágio falho não impede os Deploys seguintes**, então um histórico fora de ordem deixava código novo com schema antigo (promoção de 16/10/2026, US #152). Ao registrar uma migration como aplicada, confira antes com `supabase db push --include-all --dry-run` o que ainda está pendente.
