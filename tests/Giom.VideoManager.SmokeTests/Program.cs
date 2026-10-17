@@ -171,6 +171,7 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddEtapaConsumer<IEtapaEmbeddingHandler>("embedding", "video.embedding", (h, v, ct) => h.ProcessarAsync(v, ct));
 
         services.AddFilaVideoEtapa<EtapaConcluidaMensagem>("etapa-concluida", config, "FilaEtapaConcluida");
+        services.AddTopologia(config);   // Config First: etapa_topologia (banco)
         services.AddPipelineOrquestrador(config);
     })
     .Build();

@@ -22,6 +22,10 @@ Giom) e alimenta um bot RAG no Telegram. Visão geral completa: [`README.md`](RE
   atualizado.
 - Nunca commitar secret real — placeholder em branco + comentário do path SSM
   (`/giom/{dev,prod}/{instituto,ministerio}/...`).
+- **Config First:** comportamento que se queira mudar sem deploy (topologia, prompts, cadeias de
+  provedor, instruções do bot, preços...) vive em configuração, **preferencialmente no banco**;
+  `appsettings` só para infraestrutura e SSM para segredos. Nunca duplicar no `appsettings` o que
+  é do banco. Detalhes e checklist: [`docs/CONFIG_FIRST.md`](docs/CONFIG_FIRST.md).
 - Decorator sobre a interface do Domain do meio pra integrar dois adapters — nunca referência
   direta entre `Infrastructure.*` projetos.
 - Ações de infraestrutura real (provisionar fila, alterar IAM, rodar task manual) sempre

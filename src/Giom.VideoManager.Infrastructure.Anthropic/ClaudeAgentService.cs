@@ -15,8 +15,6 @@ public class ClaudeAgentOptions
     /// <summary>Teto de tokens da resposta (ClaudeAgent:MaxTokens). Precisa ser &gt; 0 — validado no startup.</summary>
     public int MaxTokens { get; init; } = 4096;
 
-    /// <summary>Instrução opcional de tamanho de resposta, anexada ao fim do system prompt como seção "# Tamanho da resposta". Vazio = prompt inalterado.</summary>
-    public string InstrucaoConcisao { get; init; } = string.Empty;
 
     /// <summary>Roteia as chamadas pelo gateway do Helicone (custo/latência/tokens por chamada) — requer Helicone:ApiKey configurada.</summary>
     public bool UseHelicone { get; init; } = false;
@@ -35,7 +33,8 @@ public class ClaudeAgentService : IAgentService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly IIncertezaDetectorService _incertezaDetector;
     private readonly ISessionContext _sessionContext;
-    private readonly string _systemPrompt;
+    private readonly string _promptBase;
+    private readonly IAgenteConfigService _agenteConfig;
     private readonly IPricingService _pricingService;
 
     public ClaudeAgentService(
@@ -47,7 +46,8 @@ public class ClaudeAgentService : IAgentService
         IContextoTelemetria contextoTelemetria,
         IIncertezaDetectorService incertezaDetector,
         ISessionContext sessionContext,
-        IPricingService pricingService)
+        IPricingService pricingService,
+        IAgenteConfigService agenteConfig)
     {
         _options = options.Value;
         _logger = logger;
@@ -56,7 +56,8 @@ public class ClaudeAgentService : IAgentService
         _sessionContext = sessionContext;
         _pricingService = pricingService;
         _client = AnthropicClientFactory.Create(_options.ApiKey, httpClientFactory.CreateClient("anthropic"), _options.UseHelicone, heliconeOptions.Value);
-        _systemPrompt = PromptAgente.Montar(prompts.Load("agent.md"), _options.InstrucaoConcisao);
+        _promptBase = prompts.Load("agent.md");
+        _agenteConfig = agenteConfig;
     }
 
     public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
@@ -64,6 +65,10 @@ public class ClaudeAgentService : IAgentService
         // RequestId sempre gerado — quem decide se algo realmente consome isso (ex.: reportar
         // feedback via Helicone) é a plataforma externa de observabilidade, não esta classe.
         var requestId = Guid.NewGuid().ToString();
+
+        // Config First: a instrução de concisão vem de agente_config (banco, cache de 1 min), não do appsettings.
+        var instrucaoConcisao = await _agenteConfig.ObterInstrucaoConcisaoAsync("Claude", ct);
+        var systemPrompt = PromptAgente.Montar(_promptBase, instrucaoConcisao);
 
         // ChatId como Session-Id — agrupa toda a conversa (todas as perguntas de um mesmo chat)
         // numa eventual plataforma de observabilidade externa; User-Id igual, pra métricas "Users".
@@ -98,7 +103,7 @@ public class ClaudeAgentService : IAgentService
             Model         = _options.Model,
             MaxTokens     = _options.MaxTokens,
             PromptCaching = PromptCacheType.AutomaticToolsAndSystem,
-            System        = [new SystemMessage(_systemPrompt)],
+            System        = [new SystemMessage(systemPrompt)],
             Messages      = mensagens
         }, ct);
 
@@ -121,7 +126,7 @@ public class ClaudeAgentService : IAgentService
                 stopReason = response.StopReason,
                 incerteza = _incertezaDetector.ContemIncerteza(texto),
                 maxTokens = _options.MaxTokens,
-                concisao = !string.IsNullOrWhiteSpace(_options.InstrucaoConcisao),
+                concisao = !string.IsNullOrWhiteSpace(instrucaoConcisao),
                 cacheCreationInputTokens = response.Usage?.CacheCreationInputTokens,
                 cacheReadInputTokens = response.Usage?.CacheReadInputTokens
             },

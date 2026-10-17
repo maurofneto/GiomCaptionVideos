@@ -42,6 +42,7 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddFilaVideoEtapa<VideoEtapaMensagem>("categorizacao", config, "FilaCategorizacao");
         services.AddFilaVideoEtapa<VideoEtapaMensagem>("embedding", config, "FilaEmbedding");
 
+        services.AddTopologia(config);     // Config First: etapa_topologia (banco), não appsettings
         services.AddPipelineOrquestrador(config);
     })
     .Build();

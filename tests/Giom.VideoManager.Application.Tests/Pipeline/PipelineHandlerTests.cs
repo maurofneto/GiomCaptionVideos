@@ -1,4 +1,3 @@
-using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Domain.Entities;
 using Giom.VideoManager.Domain.Interfaces;
@@ -6,6 +5,7 @@ using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Testes.Comuns;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Xunit;
 
@@ -37,6 +37,18 @@ public class PipelineHandlerTests
         }
     }
 
+    /// <summary>Simula etapa_topologia em memória — conta as leituras pra provar o cache.</summary>
+    private sealed class FakeTopologiaRepository : Dictionary<string, TopologiaCanal>, ITopologiaRepository
+    {
+        public int Leituras { get; private set; }
+
+        public Task<TopologiaCanal?> ObterAsync(string channelId, CancellationToken ct = default)
+        {
+            Leituras++;
+            return Task.FromResult(TryGetValue(channelId, out var topologia) ? topologia : null);
+        }
+    }
+
     private sealed class Ambiente
     {
         public Mock<IVideoRepository> VideoRepository { get; } = new();
@@ -45,29 +57,24 @@ public class PipelineHandlerTests
         public FakeFilaPublisher<VideoEtapaMensagem> EmbeddingPublisher { get; } = new();
         public FakeFilaPublisher<VideoEtapaMensagem> CategorizacaoPublisher { get; } = new();
 
-        public TopologiaOptions Topologia { get; } = new()
+        public FakeTopologiaRepository Topologias { get; } = new()
         {
-            Canais = new Dictionary<string, string>
+            [ChannelIdInstituto] = new TopologiaCanal(new Dictionary<string, string[]>
             {
-                [ChannelIdInstituto] = "Instituto",
-                [ChannelIdMinisterio] = "Ministerio",
-            },
-            Topologia = new Dictionary<string, Dictionary<string, string[]>>
+                ["transcricao"] = ["resumo", "embedding"],
+                ["resumo"] = ["categorizacao"],
+                ["categorizacao"] = [],
+                ["embedding"] = [],
+            }),
+            [ChannelIdMinisterio] = new TopologiaCanal(new Dictionary<string, string[]>
             {
-                ["Instituto"] = new()
-                {
-                    ["transcricao"] = ["resumo", "embedding"],
-                    ["resumo"] = ["categorizacao"],
-                    ["categorizacao"] = [],
-                    ["embedding"] = [],
-                },
-                ["Ministerio"] = new()
-                {
-                    ["transcricao"] = ["resumo"],
-                    ["resumo"] = [],
-                },
-            },
+                ["transcricao"] = ["resumo", "embedding"],
+                ["resumo"] = [],
+                ["embedding"] = [],
+            }),
         };
+
+        public FakeTimeProvider Tempo { get; } = new();
 
         public PipelineHandler CriarHandler()
         {
@@ -80,9 +87,10 @@ public class PipelineHandlerTests
             return new PipelineHandler(
                 VideoRepository.Object,
                 EtapaTerminalRepository,
-                Microsoft.Extensions.Options.Options.Create(Topologia),
+                Topologias,
                 provider,
-                NullLogger<PipelineHandler>.Instance);
+                NullLogger<PipelineHandler>.Instance,
+                Tempo);
         }
     }
 
@@ -101,7 +109,7 @@ public class PipelineHandlerTests
     }
 
     [Fact]
-    public async Task TranscricaoConcluidaMinisterio_PublicaSoResumo()
+    public async Task TranscricaoConcluidaMinisterio_FazFanOutPraResumoEEmbedding()
     {
         var ambiente = new Ambiente();
         var video = CriarVideo(ChannelIdMinisterio);
@@ -109,7 +117,8 @@ public class PipelineHandlerTests
         await ambiente.CriarHandler().ProcessarAsync(new EtapaConcluidaMensagem(video, "transcricao", null, null), CancellationToken.None);
 
         Assert.Single(ambiente.ResumoPublisher.Publicadas);
-        Assert.Empty(ambiente.EmbeddingPublisher.Publicadas);
+        Assert.Single(ambiente.EmbeddingPublisher.Publicadas);
+        Assert.Empty(ambiente.CategorizacaoPublisher.Publicadas);
     }
 
     [Fact]
@@ -124,13 +133,16 @@ public class PipelineHandlerTests
     }
 
     [Fact]
-    public async Task ResumoConcluidoMinisterio_ETerminal_MarcaProcessedAt()
+    public async Task MinisterioResumoEEmbedding_SoMarcaProcessedAtQuandoAmbosConcluem()
     {
         var ambiente = new Ambiente();
         var video = CriarVideo(ChannelIdMinisterio);
+        var handler = ambiente.CriarHandler();
 
-        await ambiente.CriarHandler().ProcessarAsync(new EtapaConcluidaMensagem(video, "resumo", null, null), CancellationToken.None);
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(video, "resumo", null, null), CancellationToken.None);
+        Assert.Null(video.ProcessedAt);
 
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(video, "embedding", null, null), CancellationToken.None);
         Assert.NotNull(video.ProcessedAt);
         ambiente.VideoRepository.Verify(r => r.UpsertAsync(video, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -191,7 +203,7 @@ public class PipelineHandlerTests
     }
 
     [Fact]
-    public async Task CanalDesconhecido_Lanca()
+    public async Task CanalSemTopologiaNoBanco_Lanca()
     {
         var ambiente = new Ambiente();
         var video = CriarVideo("canal-nao-mapeado");
@@ -203,10 +215,8 @@ public class PipelineHandlerTests
     [Fact]
     public async Task EtapaSemEntradaNaTopologia_TrataComoTerminal()
     {
-        // Ministério não tem "categorizacao" na topologia (não usa essa etapa) — mesmo caso que
-        // uma etapa com "[]" explícito no JSON: o binder do IConfiguration não distingue "chave
-        // ausente" de "array vazio" (nenhum dos dois sobra na flatten), então o orquestrador
-        // trata os dois como terminal em vez de lançar.
+        // Ministério não tem "categorizacao" em etapa_topologia (não usa essa etapa): etapa fora
+        // da topologia do canal é tratada como terminal em vez de lançar.
         var ambiente = new Ambiente();
         var video = CriarVideo(ChannelIdMinisterio);
 
@@ -216,13 +226,26 @@ public class PipelineHandlerTests
     }
 
     [Fact]
+    public async Task TopologiaFicaEmCache_ReleSoDepoisDoTtl()
+    {
+        var ambiente = new Ambiente();
+        var handler = ambiente.CriarHandler();
+
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(CriarVideo(ChannelIdInstituto), "transcricao", null, null), CancellationToken.None);
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(CriarVideo(ChannelIdInstituto), "transcricao", null, null), CancellationToken.None);
+        Assert.Equal(1, ambiente.Topologias.Leituras);
+
+        ambiente.Tempo.Advance(PipelineHandler.TtlTopologia + TimeSpan.FromSeconds(1));
+        await handler.ProcessarAsync(new EtapaConcluidaMensagem(CriarVideo(ChannelIdInstituto), "transcricao", null, null), CancellationToken.None);
+        Assert.Equal(2, ambiente.Topologias.Leituras);
+    }
+
+    [Fact]
     public async Task CanalSemEntradaNaTopologia_Lanca()
     {
-        // Diferente do caso acima: aqui o canal inteiro está ausente de Topologia:Topologia
-        // (não é uma questão de array vazio vs. chave ausente numa sub-seção) — isso é sempre
-        // configuração incompleta de verdade, deve propagar.
+        // Diferente do caso acima: aqui o canal inteiro não tem nenhuma linha em etapa_topologia —
+        // isso é sempre configuração incompleta de verdade, deve propagar.
         var ambiente = new Ambiente();
-        ambiente.Topologia.Canais["outro-canal"] = "SemTopologia";
         var video = CriarVideo("outro-canal");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>

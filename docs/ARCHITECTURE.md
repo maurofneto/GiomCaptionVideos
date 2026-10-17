@@ -68,8 +68,9 @@ publica `EtapaConcluidaMensagem(Video, Etapa, Sessao, TraceParent)` numa fila ú
 (`giom-videos-etapa-concluida-{env}`) e não sabe nada sobre canal nem sobre o que vem depois.
 Quem decide é o **`PipelineHandler`** (orquestrador central, único — não mais duplicado por
 canal), hospedado no novo `Orquestracao.Worker`: escuta a fila de eventos e resolve a
-topologia por canal (`TopologiaOptions.Topologia[canal][etapa]` → lista de próximas etapas;
-lista vazia = terminal, marca `ProcessedAt`).
+topologia por canal lida do **banco** (tabela `etapa_topologia`, Config First — ver
+[`CONFIG_FIRST.md`](CONFIG_FIRST.md); cache de 1 min): etapa → lista de próximas etapas;
+lista vazia = terminal, marca `ProcessedAt`.
 
 ```
 video.transcricao ──> [processa] ──> etapa-concluida("transcricao")
@@ -190,17 +191,17 @@ no Sentry, quebrando a árvore `pipeline.run > canal > playlist > página > víd
   pipeline), "Giom - Erros" (erros por ambiente), "Giom - Saúde" (vídeos processados/falhos,
   mensagens do bot, erros, gasto e runs da pipeline — visão de saúde geral em 24h).
 - Telemetria do bot (`detalhes` de cada `*AgentService`): `stopReason`/`finishReason`,
-  `incerteza`, `maxTokens`, `concisao` (se `InstrucaoConcisao` está ativa) e, só no Claude,
+  `incerteza`, `maxTokens`, `concisao` (se há instrução em `agente_config`) e, só no Claude,
   `cacheCreationInputTokens`/`cacheReadInputTokens` (análise de prompt caching).
 
 ## Tamanho da resposta do bot
 
-Config-first, por agente (`ClaudeAgent`, `GrokAgent`, `KimiAgent`, `OpenAiAgent` no
-`appsettings.json` do AgenteInstituto.Worker):
+Config-first (ver [`CONFIG_FIRST.md`](CONFIG_FIRST.md)):
 
-- `MaxTokens` (padrão `4096`): teto de tokens da resposta. Valor `<= 0` derruba o worker no
+- `MaxTokens` (padrão `4096`, `ClaudeAgent`/`GrokAgent`/`KimiAgent`/`OpenAiAgent` no `appsettings.json`): teto de tokens da resposta. Valor `<= 0` derruba o worker no
   startup com mensagem clara (`ValidateOnStart`).
-- `InstrucaoConcisao` (padrão vazio): quando preenchida, é anexada ao fim do `agent.md` como
+- Instrução de concisão: **no banco** (`agente_config`, linha `*` ou do provedor; cache de 1 min,
+  sem deploy). Quando preenchida, é anexada ao fim do `agent.md` como
   seção `# Tamanho da resposta`. Vazio = system prompt byte-idêntico ao `agent.md` (prompt
   caching preservado); preenchido = o `agent.md` continua sendo o prefixo intacto.
 
