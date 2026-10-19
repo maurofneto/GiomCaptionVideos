@@ -8,4 +8,8 @@ namespace Giom.VideoManager.Domain.Interfaces;
 public interface IPricingService
 {
     Task<decimal?> CalcularAsync(string provedor, string? modelo, int? tokensEntrada, int? tokensSaida = null, CancellationToken ct = default);
+
+    /// <summary>Custo de serviço cobrado por hora de áudio (ex.: speech-to-text da xAI): preço em provedor_preco.por_hora. Null se não cadastrado.</summary>
+    Task<decimal?> CalcularPorHoraAsync(string provedor, string? modelo, double? segundos, CancellationToken ct = default) =>
+        Task.FromResult<decimal?>(null);
 }

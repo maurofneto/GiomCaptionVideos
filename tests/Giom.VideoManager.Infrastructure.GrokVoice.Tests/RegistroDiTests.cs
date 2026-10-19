@@ -8,11 +8,17 @@ namespace Giom.VideoManager.Infrastructure.GrokVoice.Tests;
 
 public class RegistroDiTests
 {
+    private sealed class PrecoNulo : IPricingService
+    {
+        public Task<decimal?> CalcularAsync(string provedor, string? modelo, int? tokensEntrada, int? tokensSaida = null, CancellationToken ct = default) => Task.FromResult<decimal?>(null);
+    }
+
     private static ServiceProvider Montar(Dictionary<string, string?>? config = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(config ?? []).Build();
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<IPricingService, PrecoNulo>(); // em produção vem de AddPricingService (Composition)
         services.AddGrokVoiceTranscription(configuration);
         return services.BuildServiceProvider();
     }
@@ -51,7 +57,6 @@ public class RegistroDiTests
         Assert.Equal("xai-teste", options.ApiKey);
         Assert.Equal("grok-voice-transcribe-2.0", options.Model);
         Assert.Equal("https://api.x.ai/", options.BaseUrl);
-        Assert.Equal(0.10m, options.PrecoUsdPorHora);
     }
 
     [Fact]

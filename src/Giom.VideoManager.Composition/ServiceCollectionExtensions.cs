@@ -77,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.AddYouTubeCaption(config);
         services.AddYouTubeTranscript(config);
         services.AddYtDlpCaption(config);
+        services.AddPricingService(config);   // custo por hora do GrokVoice vem de provedor_preco
         services.AddGrokVoiceTranscription(config);
         services.AddWhisperTranscription(config);
 

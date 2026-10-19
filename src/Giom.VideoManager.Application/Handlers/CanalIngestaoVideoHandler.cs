@@ -21,7 +21,13 @@ public class CanalIngestaoVideoHandler(
     ITracingService tracingService)
     : IVideoHandler
 {
-    public bool IsRelevant(Video video) => canal.RelevanciaTipo switch
+    // Config First: PrivacyStatusFiltro (canal_ingestao.privacy_status_filtro) restringe a privacidade do
+    // vídeo (ex.: Ministério só indexa "public"); null = sem restrição extra.
+    public bool IsRelevant(Video video) =>
+        (canal.PrivacyStatusFiltro is null || video.PrivacyStatus == canal.PrivacyStatusFiltro)
+        && AvaliarRelevancia(video);
+
+    private bool AvaliarRelevancia(Video video) => canal.RelevanciaTipo switch
     {
         RelevanciaTipo.LiveUnlisted => video.Type == VideoType.Live && video.PrivacyStatus == "unlisted",
         RelevanciaTipo.TituloContem => AvaliarTitulo(video.Title.ToUpperInvariant(), canal.RelevanciaValores),

@@ -28,8 +28,8 @@ public class SupabasePricingRepository : IPricingRepository
         var rows = JsonConvert.DeserializeObject<List<PrecoRow>>(json) ?? [];
         var row = rows.FirstOrDefault();
 
-        return row is null ? null : new Preco(row.provedor, row.modelo, row.entrada_por_milhao, row.saida_por_milhao);
+        return row is null ? null : new Preco(row.provedor, row.modelo, row.entrada_por_milhao, row.saida_por_milhao, row.por_hora);
     }
 
-    private record PrecoRow(string provedor, string modelo, decimal entrada_por_milhao, decimal saida_por_milhao);
+    private record PrecoRow(string provedor, string modelo, decimal entrada_por_milhao, decimal saida_por_milhao, decimal? por_hora = null);
 }

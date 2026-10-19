@@ -8,4 +8,5 @@ public record Preco(
     string Provedor,
     string Modelo,
     decimal EntradaPorMilhao,
-    decimal SaidaPorMilhao);
+    decimal SaidaPorMilhao,
+    decimal? PorHora = null);
