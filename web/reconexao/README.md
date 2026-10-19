@@ -272,3 +272,13 @@ target antes de aplicar o alias. Vercel CLI com versão fixa
 e podem cair no prompt de login). O token vai só por `VERCEL_TOKEN` (env), nunca por flag. O pipeline **precisa ser registrado no ADO pelo Mauro**.
 
 O `.gitignore` do app é `web/reconexao/.gitignore` (o da raiz não foi alterado).
+
+## Produção (setup de 19/10/2026)
+- URL: `https://giom-reconexao.vercel.app` (projeto Vercel `giom-reconexao`, ambiente **Production**). O client Google é do tipo
+  **Aplicativo da Web** (projeto `giom-video-manager`), com os redirects `/api/auth/callback` e `/api/youtube/callback`; o mesmo
+  client serve ao login e ao YouTube. Canal reconectado por ele passa a usar `{secrets_key}:Google:ClientId`/`ClientSecret` do SSM.
+- IAM: usuário `giom-prod-reconexao-vercel` (policy mínima acima + `kms:GenerateDataKey`, porque produção usa `SSM_COOKIES_TIER=Advanced`,
+  irreversível por parâmetro). `SSM_KMS_KEY_ID` de produção é a chave gerenciada `alias/aws/ssm`; `SSM_PREFIX=/giom/prod`.
+- Fonte de canais: `CANAIS_API_URL=https://rhjsjfbegtusucunkgav.supabase.co` com `CANAIS_API_REST_PREFIX=/rest/v1`.
+- **Armadilha:** variável da Vercel marcada em Preview **e** Production compartilha o mesmo valor. Separe as entradas
+  (Preview = dev, Production = prod) e **refaça o deploy** depois de mudar variável: o app só lê o ambiente no boot.
