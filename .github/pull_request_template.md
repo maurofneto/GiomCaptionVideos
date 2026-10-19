@@ -1,7 +1,7 @@
 # Pull Request
 
 ### :information_source: Título da PR
-`[DEV/MASTER][Número do work item no Board] - Mensagem explicativa REAL sobre o que é a PR`
+`[DEV/MASTER][#número da issue] - Mensagem explicativa REAL sobre o que é a PR`
 
 ### :speech_balloon: Contexto
 <!-- Por que essa mudança existe? Qual problema/pedido motivou? 2-4 linhas, sem repetir o título. -->
@@ -12,8 +12,8 @@
 * [ ] Feature :new: <sub>*(Mudança que adiciona uma funcionalidade)*</sub>
 * [ ] Mudança estrutural :building_construction: <sub>*(Correção ou recurso que altera um funcionamento existente, podendo quebrar compatibilidade)*</sub>
 
-### :books: História
-* [ ] Reli a história/task
+### :books: Issue
+* [ ] Reli a issue
 * [ ] Atendi a todos os critérios de aceite
 
 ### :white_check_mark: Melhores práticas
@@ -27,3 +27,6 @@
 ### :memo: O que foi alterado?
 * Item
 * Item
+
+### :link: Issues relacionadas
+Closes #
