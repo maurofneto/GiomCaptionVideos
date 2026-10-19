@@ -35,4 +35,9 @@
 - **Privacidade do vídeo** (`canal_ingestao.privacy_status_filtro`): `public` no Ministério (só vídeo público
   é indexado); `NULL` = sem restrição extra. Trocar é um `UPDATE`.
 
+- **Preço por hora de áudio** (`provedor_preco.por_hora`): US$ 0,10/h do GrokVoice (xAI), ao lado do preço por milhão de tokens.
+- **Relevância e teto por canal** (`canal_ingestao`: `relevancia_valores`, `privacy_status_filtro`, `max_videos_per_run`).
+
+Operações de ingestão e recuperação: `docs/runbook-operacao-ingestao.md`.
+
 Ver também: `docs/runbook-ambientes-banco.md` (dev x prod) e `docs/ARCHITECTURE.md`.
