@@ -32,4 +32,7 @@
 - **Concisão do bot** (`agente_config`): linha `'*'` vale para todos; linha do provedor
   (`Claude`, `Grok`, `Kimi`, `OpenAI`) vence. Vazio = `agent.md` inalterado.
 
+- **Privacidade do vídeo** (`canal_ingestao.privacy_status_filtro`): `public` no Ministério (só vídeo público
+  é indexado); `NULL` = sem restrição extra. Trocar é um `UPDATE`.
+
 Ver também: `docs/runbook-ambientes-banco.md` (dev x prod) e `docs/ARCHITECTURE.md`.

@@ -28,4 +28,5 @@ public record CanalIngestaoConfig(
     int MaxVideosPerRun,
     int DelayBetweenVideosMs,
     int DelayBetweenPagesMs,
-    string SecretsKey);
+    string SecretsKey,
+    string? PrivacyStatusFiltro = null);

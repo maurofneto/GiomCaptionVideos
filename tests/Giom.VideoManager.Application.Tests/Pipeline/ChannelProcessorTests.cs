@@ -101,6 +101,26 @@ public class ChannelProcessorTests
     }
 
     [Fact]
+    public async Task RunAsync_VideoMaisAntigoQueADataDeProgressoMasNaoConcluido_EEnfileiradoDeNovo()
+    {
+        // US #152: lastProcessedDate avançava no ENFILEIRAMENTO; vídeo que falhava depois ficava abaixo da
+        // data e nunca mais era reavaliado (22 cultos perdidos). Agora só JaProcessadoAsync decide.
+        var ambiente = new Ambiente();
+        var agora = DateTime.UtcNow;
+        ambiente.Progresso.Setup(p => p.GetLastProcessedDateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(agora); // data de progresso MAIS NOVA que os dois vídeos
+        ambiente.Handler.Setup(h => h.JaProcessadoAsync(It.Is<Video>(v => v.Id == "ok"), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaylistPage([CriarVideo("ok", agora.AddDays(-5)), CriarVideo("falhou", agora.AddDays(-6))], NextPageToken: null));
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "falhou"), It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "ok"), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RunAsync_MaxVideosPerRunEstouraNoMeioDaPagina_ParaExatamenteNoTetoENaoAvancaAPagina()
     {
         // Bug real (achado ao vivo, 2026-07-18/19): MaxVideosPerRun é um teto DURO (rate limit
