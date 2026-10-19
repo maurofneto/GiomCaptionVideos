@@ -41,4 +41,24 @@ public sealed class PricingService(IPricingRepository repository, ILogger<Pricin
         var custoSaida = (tokensSaida ?? 0) * preco.SaidaPorMilhao / 1_000_000m;
         return custoEntrada + custoSaida;
     }
+
+    /// <summary>Mesma regra "melhor não estimar do que estimar errado": null se segundos/preço ausente ou a consulta falhar.</summary>
+    public async Task<decimal?> CalcularPorHoraAsync(string provedor, string? modelo, double? segundos, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(provedor) || string.IsNullOrWhiteSpace(modelo) || segundos is null)
+            return null;
+
+        Domain.ValueObjects.Preco? preco;
+        try
+        {
+            preco = await repository.ObterAsync(provedor, modelo, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Falha ao consultar preço por hora de {Provedor}/{Modelo} — custoEstimadoUsd sai null nesta chamada", provedor, modelo);
+            return null;
+        }
+
+        return preco?.PorHora is { } porHora ? (decimal)(segundos.Value / 3600.0) * porHora : null;
+    }
 }

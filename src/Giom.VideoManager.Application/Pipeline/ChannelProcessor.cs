@@ -97,19 +97,15 @@ public class ChannelProcessor(
         var pageToken        = await progressoRepository.GetLastPageTokenAsync(channelKey, playlistId, ct);
         var lastProcessedDate = await progressoRepository.GetLastProcessedDateAsync(channelKey, playlistId, ct);
 
-        bool applyDateFilter = pageToken == null;
-
-        // Congela o corte de data usado só pra decidir o que pular — a playlist do YouTube
-        // vem do mais novo pro mais antigo, então assim que o primeiro vídeo (o mais novo)
-        // era processado, lastProcessedDate avançava pra aquela data e passava a filtrar
-        // TODO o resto da mesma execução como "antigo demais", limitando cada run a 1 vídeo
-        // processado, mesmo com MaxVideosPerRun bem maior e o progresso zerado.
-        var filtroDataBase = lastProcessedDate;
-
+        // Sem corte por data (US #152): lastProcessedDate avançava quando o vídeo era ENFILEIRADO, não
+        // quando concluía o pipeline. Um vídeo que falhava depois (ex.: cookies inválidos) ficava
+        // abaixo da data e nunca mais era reavaliado — 22 cultos do Ministério se perderam assim. Quem
+        // decide "já terminou?" é só JaProcessadoAsync (ProcessedAt no banco); a data fica salva como
+        // informação de progresso, sem filtrar nada.
         if (pageToken != null)
-            logger.LogInformation("Canal {Name} — retomando da página salva (filtro de data desativado)", config.Name);
-        else if (filtroDataBase.HasValue)
-            logger.LogInformation("Canal {Name} — iniciando do topo, ignorando vídeos antes de {Date:d}", config.Name, filtroDataBase);
+            logger.LogInformation("Canal {Name} — retomando da página salva", config.Name);
+        else if (lastProcessedDate.HasValue)
+            logger.LogInformation("Canal {Name} — iniciando do topo (último vídeo enfileirado: {Date:d}; sem corte por data)", config.Name, lastProcessedDate);
 
         var processedIds = new HashSet<string>();
 
@@ -141,8 +137,6 @@ public class ChannelProcessor(
                 if (ct.IsCancellationRequested) { paginaEsgotada = false; break; }
 
                 if (processedIds.Count >= maxVideosPerRun) { paginaEsgotada = false; break; }
-
-                if (applyDateFilter && video.UploadedAt <= (filtroDataBase ?? DateTime.MinValue)) continue;
 
                 if (!videoHandler.IsRelevant(video))
                 {

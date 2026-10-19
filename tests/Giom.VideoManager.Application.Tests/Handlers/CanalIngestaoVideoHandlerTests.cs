@@ -71,6 +71,32 @@ public class CanalIngestaoVideoHandlerTests
         Assert.Equal(esperado, new Ambiente().CriarHandler(canal).IsRelevant(video));
     }
 
+    [Theory]
+    [InlineData("public", true)]
+    [InlineData("unlisted", false)]
+    [InlineData("private", false)]
+    public void IsRelevant_PrivacyStatusFiltroPublic_SoVideoPublico(string privacyStatus, bool esperado)
+    {
+        // Ministério (cultos): só vídeo público é indexado (canal_ingestao.privacy_status_filtro).
+        var canal = CriarCanal(RelevanciaTipo.TituloContem, "GIOM*") with { PrivacyStatusFiltro = "public" };
+        var video = CriarVideo();
+        video.Title = "GIOM | Culto de domingo";
+        video.PrivacyStatus = privacyStatus;
+
+        Assert.Equal(esperado, new Ambiente().CriarHandler(canal).IsRelevant(video));
+    }
+
+    [Fact]
+    public void IsRelevant_SemPrivacyStatusFiltro_NaoRestringePrivacidade()
+    {
+        var canal = CriarCanal(RelevanciaTipo.TituloContem, "GIOM*");
+        var video = CriarVideo();
+        video.Title = "GIOM | Culto";
+        video.PrivacyStatus = "unlisted";
+
+        Assert.True(new Ambiente().CriarHandler(canal).IsRelevant(video));
+    }
+
     [Fact]
     public async Task HandleAsync_PublicaNaEtapaDeTranscricaoComSessaoETraceparent()
     {

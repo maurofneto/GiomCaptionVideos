@@ -24,9 +24,6 @@ public class GrokVoiceOptions
 
     /// <summary>Diretório temporário para o áudio baixado.</summary>
     public string TempDirectory { get; init; } = Path.GetTempPath();
-
-    /// <summary>Preço de tabela da API REST (docs.x.ai, out/2026): US$0,10/hora de áudio. Só estimativa de custo.</summary>
-    public decimal PrecoUsdPorHora { get; init; } = 0.10m;
 }
 
 /// <summary>
@@ -42,6 +39,7 @@ public class GrokVoiceCaptionService : ICaptionService
     private readonly HttpClient _http;
     private readonly IAudioDownloader _audioDownloader;
     private readonly IContextoTelemetria _contextoTelemetria;
+    private readonly IPricingService _pricingService;
     private readonly ILogger<GrokVoiceCaptionService> _logger;
 
     public GrokVoiceCaptionService(
@@ -49,12 +47,14 @@ public class GrokVoiceCaptionService : ICaptionService
         IHttpClientFactory httpClientFactory,
         IAudioDownloader audioDownloader,
         IContextoTelemetria contextoTelemetria,
+        IPricingService pricingService,
         ILogger<GrokVoiceCaptionService> logger)
     {
         _options = options.Value;
         _http = httpClientFactory.CreateClient("grokvoice");
         _audioDownloader = audioDownloader;
         _contextoTelemetria = contextoTelemetria;
+        _pricingService = pricingService;
         _logger = logger;
     }
 
@@ -122,7 +122,8 @@ public class GrokVoiceCaptionService : ICaptionService
         _contextoTelemetria.Registrar(
             provedor: "xAI",
             modelo: _options.Model,
-            custoEstimadoUsd: resposta.Duration is { } segundos ? (decimal)(segundos / 3600.0) * _options.PrecoUsdPorHora : null,
+            // Config First: preço por hora vem de provedor_preco.por_hora (xAI / modelo), não do código.
+            custoEstimadoUsd: await _pricingService.CalcularPorHoraAsync("xAI", _options.Model, resposta.Duration, ct),
             detalhes: new { origem = "GrokVoice", duracaoSegundos = resposta.Duration, palavras = resposta.Words?.Count });
 
         return resposta;

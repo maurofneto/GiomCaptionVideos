@@ -20,6 +20,14 @@ public class GrokVoiceCaptionServiceTests : IDisposable
         try { Directory.Delete(_tempDir, recursive: true); } catch { /* best effort */ }
     }
 
+    /// <summary>provedor_preco em memória: xAI / grok-voice-transcribe-2.0 = US$0,10 por hora.</summary>
+    private sealed class PrecoFixo : IPricingService
+    {
+        public Task<decimal?> CalcularAsync(string provedor, string? modelo, int? tokensEntrada, int? tokensSaida = null, CancellationToken ct = default) => Task.FromResult<decimal?>(null);
+        public Task<decimal?> CalcularPorHoraAsync(string provedor, string? modelo, double? segundos, CancellationToken ct = default) =>
+            Task.FromResult<decimal?>(segundos is null ? null : (decimal)(segundos.Value / 3600.0) * 0.10m);
+    }
+
     private static Video NovoVideo() => new() { Id = "abc123DEF45", ChannelId = "UCcanalTeste", Title = "Aula" };
 
     private (GrokVoiceCaptionService Servico, StubHandler Handler, AudioFalso Audio, TelemetriaFalsa Telemetria) Criar(
@@ -30,7 +38,7 @@ public class GrokVoiceCaptionServiceTests : IDisposable
         var audio = new AudioFalso();
         var telemetria = new TelemetriaFalsa();
         var options = Options.Create(new GrokVoiceOptions { ApiKey = apiKey, TempDirectory = _tempDir });
-        var servico = new GrokVoiceCaptionService(options, new FabricaHttp(http), audio, telemetria, NullLogger<GrokVoiceCaptionService>.Instance);
+        var servico = new GrokVoiceCaptionService(options, new FabricaHttp(http), audio, telemetria, new PrecoFixo(), NullLogger<GrokVoiceCaptionService>.Instance);
         return (servico, handler, audio, telemetria);
     }
 
