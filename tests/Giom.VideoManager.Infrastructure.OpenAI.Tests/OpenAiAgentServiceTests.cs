@@ -8,7 +8,7 @@ using Xunit;
 namespace Giom.VideoManager.Infrastructure.OpenAI.Tests;
 
 /// <summary>
-/// Mesmo contrato de ClaudeAgentServiceTests (OpenAiAgent:MaxTokens / InstrucaoConcisao),
+/// Mesmo contrato de ClaudeAgentServiceTests (OpenAiAgent:MaxTokens; concisão via IAgenteConfigService),
 /// conferido no corpo exato enviado ao chat completions — sem chave nem chamada real.
 /// </summary>
 public class OpenAiAgentServiceTests
@@ -47,7 +47,7 @@ public class OpenAiAgentServiceTests
         public bool ContemIncerteza(string texto) => false;
     }
 
-    private static async Task<(JsonElement Corpo, MetadadosTelemetria Metadados)> ResponderAsync(OpenAiAgentOptions options)
+    private static async Task<(JsonElement Corpo, MetadadosTelemetria Metadados)> ResponderAsync(OpenAiAgentOptions options, string instrucaoConcisao = "")
     {
         var http = new OpenAiFake();
         var telemetria = new FakeContextoTelemetria();
@@ -58,7 +58,8 @@ public class OpenAiAgentServiceTests
             new FakeLogger<OpenAiAgentService>(),
             telemetria,
             new SemIncerteza(),
-            new FakeSessionContext());
+            new FakeSessionContext(),
+            new FakeAgenteConfigService(instrucaoConcisao));
 
         var metadados = telemetria.IniciarEscopo();
         await service.ResponderAsync("chat-1", new TurnoConversa(null, "O que é fé?", null), "contexto das aulas", []);
@@ -88,7 +89,7 @@ public class OpenAiAgentServiceTests
     [Fact]
     public async Task ResponderAsync_InstrucaoConcisaoConfigurada_AnexaSecaoNoFimDoSystemPrompt()
     {
-        var (corpo, metadados) = await ResponderAsync(new OpenAiAgentOptions { InstrucaoConcisao = "Responda em no máximo 3 parágrafos." });
+        var (corpo, metadados) = await ResponderAsync(new OpenAiAgentOptions(), "Responda em no máximo 3 parágrafos.");
 
         Assert.Equal(AgentMd + "\n\n# Tamanho da resposta\nResponda em no máximo 3 parágrafos.", SystemEnviado(corpo));
         Assert.True(JsonSerializer.SerializeToElement(metadados.Detalhes).GetProperty("concisao").GetBoolean());

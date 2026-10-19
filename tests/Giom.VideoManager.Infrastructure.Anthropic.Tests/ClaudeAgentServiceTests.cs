@@ -12,7 +12,7 @@ using Xunit;
 namespace Giom.VideoManager.Infrastructure.Anthropic.Tests;
 
 /// <summary>
-/// Cobre o limite de tamanho da resposta do bot (ClaudeAgent:MaxTokens / InstrucaoConcisao)
+/// Cobre o limite de tamanho da resposta do bot (ClaudeAgent:MaxTokens; a instrução de concisão vem de agente_config via IAgenteConfigService)
 /// olhando o corpo exato enviado à API do Anthropic — sem chave nem chamada real. O agent.md é
 /// o arquivo real do AgenteInstituto.Worker (linkado no csproj), então "prompt inalterado" aqui
 /// significa byte-idêntico ao que vai pra produção.
@@ -64,7 +64,7 @@ public class ClaudeAgentServiceTests
 
     private sealed record Cenario(ClaudeAgentService Service, AnthropicFake Http, FakeContextoTelemetria Telemetria, FakeLogger<ClaudeAgentService> Logger);
 
-    private static Cenario Criar(ClaudeAgentOptions options, string resposta = RespostaPadrao)
+    private static Cenario Criar(ClaudeAgentOptions options, string resposta = RespostaPadrao, string instrucaoConcisao = "")
     {
         var http = new AnthropicFake(resposta);
         var telemetria = new FakeContextoTelemetria();
@@ -78,7 +78,8 @@ public class ClaudeAgentServiceTests
             telemetria,
             new SemIncerteza(),
             new FakeSessionContext(),
-            new PrecoZero());
+            new PrecoZero(),
+            new FakeAgenteConfigService(instrucaoConcisao));
         return new Cenario(service, http, telemetria, logger);
     }
 
@@ -93,12 +94,11 @@ public class ClaudeAgentServiceTests
         string.Concat(corpo.GetProperty("system").EnumerateArray().Select(b => b.GetProperty("text").GetString()));
 
     [Fact]
-    public void Options_Padrao_MaxTokens4096EInstrucaoVazia()
+    public void Options_Padrao_MaxTokens4096()
     {
         var options = new ClaudeAgentOptions();
 
         Assert.Equal(4096, options.MaxTokens);
-        Assert.Equal(string.Empty, options.InstrucaoConcisao);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public class ClaudeAgentServiceTests
     [Fact]
     public async Task ResponderAsync_InstrucaoConcisaoConfigurada_AnexaSecaoNoFimDoSystemPrompt()
     {
-        var (corpo, metadados) = await ResponderAsync(Criar(new ClaudeAgentOptions { InstrucaoConcisao = "Responda em no máximo 3 parágrafos." }));
+        var (corpo, metadados) = await ResponderAsync(Criar(new ClaudeAgentOptions(), instrucaoConcisao: "Responda em no máximo 3 parágrafos."));
 
         Assert.Equal(AgentMd + "\n\n# Tamanho da resposta\nResponda em no máximo 3 parágrafos.", SystemEnviado(corpo));
         Assert.True(JsonSerializer.SerializeToElement(metadados.Detalhes).GetProperty("concisao").GetBoolean());
@@ -168,16 +168,11 @@ public class ClaudeAgentServiceTests
     }
 
     [Fact]
-    public void AddClaudeAgent_BindaMaxTokensEInstrucaoConcisaoDaConfig()
+    public void AddClaudeAgent_BindaMaxTokensDaConfig()
     {
-        var options = ResolverOptions(new()
-        {
-            ["ClaudeAgent:MaxTokens"] = "1500",
-            ["ClaudeAgent:InstrucaoConcisao"] = "Seja breve."
-        }).Value;
+        var options = ResolverOptions(new() { ["ClaudeAgent:MaxTokens"] = "1500" }).Value;
 
         Assert.Equal(1500, options.MaxTokens);
-        Assert.Equal("Seja breve.", options.InstrucaoConcisao);
     }
 
     [Theory]

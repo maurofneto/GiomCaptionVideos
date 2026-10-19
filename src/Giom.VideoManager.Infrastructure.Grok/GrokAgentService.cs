@@ -16,8 +16,6 @@ public class GrokAgentOptions
     /// <summary>Teto de tokens da resposta (GrokAgent:MaxTokens). Precisa ser &gt; 0 — validado no startup.</summary>
     public int MaxTokens { get; init; } = 4096;
 
-    /// <summary>Instrução opcional de tamanho de resposta, anexada ao fim do system prompt como seção "# Tamanho da resposta". Vazio = prompt inalterado.</summary>
-    public string InstrucaoConcisao { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -32,10 +30,11 @@ public class GrokAgentService : IAgentService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly IIncertezaDetectorService _incertezaDetector;
     private readonly ISessionContext _sessionContext;
-    private readonly string _systemPrompt;
+    private readonly string _promptBase;
+    private readonly IAgenteConfigService _agenteConfig;
     private readonly IPricingService _pricingService;
 
-    public GrokAgentService(IOptions<GrokAgentOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<GrokAgentService> logger, IContextoTelemetria contextoTelemetria, IIncertezaDetectorService incertezaDetector, ISessionContext sessionContext, IPricingService pricingService)
+    public GrokAgentService(IOptions<GrokAgentOptions> options, PromptLoader prompts, IHttpClientFactory httpClientFactory, ILogger<GrokAgentService> logger, IContextoTelemetria contextoTelemetria, IIncertezaDetectorService incertezaDetector, ISessionContext sessionContext, IPricingService pricingService, IAgenteConfigService agenteConfig)
     {
         _options = options.Value;
         _logger = logger;
@@ -45,12 +44,17 @@ public class GrokAgentService : IAgentService
         _pricingService = pricingService;
         _http = httpClientFactory.CreateClient("grok");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        _systemPrompt = PromptAgente.Montar(prompts.Load("agent.md"), _options.InstrucaoConcisao);
+        _promptBase = prompts.Load("agent.md");
+        _agenteConfig = agenteConfig;
     }
 
     public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var requestId = Guid.NewGuid().ToString();
+
+        // Config First: a instrução de concisão vem de agente_config (banco, cache de 1 min), não do appsettings.
+        var instrucaoConcisao = await _agenteConfig.ObterInstrucaoConcisaoAsync("Grok", ct);
+        var systemPrompt = PromptAgente.Montar(_promptBase, instrucaoConcisao);
 
         _sessionContext.Definir(new SessaoObservabilidade(
             SessionId: chatId,
@@ -60,7 +64,7 @@ public class GrokAgentService : IAgentService
             Propriedades: new Dictionary<string, string> { ["Tipo"] = "bot_resposta" },
             RequestId: requestId));
 
-        var mensagens = new List<object> { new { role = "system", content = _systemPrompt } };
+        var mensagens = new List<object> { new { role = "system", content = systemPrompt } };
 
         foreach (var turno in historico)
         {
@@ -107,7 +111,7 @@ public class GrokAgentService : IAgentService
                 finishReason = result?.choices?.FirstOrDefault()?.finish_reason,
                 incerteza = texto != null && _incertezaDetector.ContemIncerteza(texto),
                 maxTokens = _options.MaxTokens,
-                concisao = !string.IsNullOrWhiteSpace(_options.InstrucaoConcisao)
+                concisao = !string.IsNullOrWhiteSpace(instrucaoConcisao)
             },
             requestIdExterno: requestId);
 
