@@ -7,7 +7,15 @@ import { authorize } from "@/lib/session";
 // responde 403 a qualquer outro e-mail) e o logout, público de propósito (idempotente: só limpa
 // cookies; o CSRF é checado pela Origin no handler). Todo o resto exige sessão + allowlist —
 // inclusive /api/youtube/callback e as APIs. Os handlers repetem a checagem (defesa em profundidade).
-const PUBLIC_PATHS = new Set(["/api/auth/login", "/api/auth/callback", "/api/auth/logout"]);
+const PUBLIC_PATHS = new Set([
+  "/api/auth/login",
+  "/api/auth/callback",
+  "/api/auth/logout",
+  // Páginas legais exigidas pelo Google (verificação do app OAuth): estáticas, sem dado sensível.
+  "/sobre",
+  "/privacidade",
+  "/termos",
+]);
 
 export function buildCsp(nonce: string): string {
   return [
