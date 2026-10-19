@@ -3,6 +3,10 @@
 Objetivo: tirar o app de **Testing** → **In production**. Em Testing o refresh token expira em
 7 dias; em produção não expira (só por revogação, 6 meses sem uso ou troca de senha).
 
+> **Status (2026-10-19):** páginas publicadas em `https://giom-reconexao.vercel.app` (US #153);
+> app de produção enviado para publicação. Falta: aprovação do Google, `OAUTH_APP_MODE=production`
+> na Vercel e reautorizar os canais (passo 5 abaixo).
+
 > **Atalho:** pra só ter token persistente **não precisa de verificação**. Basta clicar
 > "Publish app". O app fica "não verificado" (tela de aviso no consentimento, limite de 100
 > usuários) — aceitável, pois só você/os 2 canais autorizam. Os itens abaixo só são
@@ -11,12 +15,15 @@ Objetivo: tirar o app de **Testing** → **In production**. Em Testing o refresh
 ## 1. Passos no console (APIs e serviços → Tela de permissão OAuth)
 
 1. Preencher "Informações do app" (seção 2).
-2. Domínio autorizado: `<seu-dominio.com.br>` (precisa estar verificado no Search Console).
+2. Domínio autorizado: `giom-reconexao.vercel.app` (verificado no Search Console por prefixo de URL).
 3. Escopos (seção 3).
 4. Clicar **Publicar app** → confirmar.
 5. **Reautorizar** cada canal (Instituto e Ministério, dev e prod) para gerar refresh tokens
    novos — os emitidos em Testing continuam expirando. Gravar no SSM
    (`/giom/{env}/canais/{canal}/Google/RefreshToken`) e confirmar hashes distintos.
+6. Definir `OAUTH_APP_MODE=production` nas env vars **Production** da Vercel (`giom-reconexao`) e
+   rodar a pipeline `GiomReconexao-Web` — senão a página de reconexão continua avisando a
+   expiração de 7 dias do modo Testing.
 
 ## 2. Informações do app
 
@@ -25,10 +32,10 @@ Objetivo: tirar o app de **Testing** → **In production**. Em Testing o refresh
 | Nome do app | Giom Video Manager |
 | E-mail de suporte | `<mauro.furigo@gmail.com ou e-mail do ministério>` |
 | Logo (120x120 px, PNG/JPG, <1 MB) | `<logo do Instituto/Ministério Giom>` |
-| Página inicial | `https://<seu-dominio>/` |
-| Política de privacidade | `https://<seu-dominio>/privacidade` (texto na seção 5) |
-| Termos de serviço (opcional) | `https://<seu-dominio>/termos` |
-| Domínio autorizado | `<seu-dominio>` |
+| Página inicial | `https://giom-reconexao.vercel.app/sobre` |
+| Política de privacidade | `https://giom-reconexao.vercel.app/privacidade` (texto na seção 5) |
+| Termos de serviço (opcional) | `https://giom-reconexao.vercel.app/termos` |
+| Domínio autorizado | `giom-reconexao.vercel.app` (verificar no Search Console por prefixo de URL — `vercel.app` é sufixo público) |
 | E-mail de contato do desenvolvedor | `<e-mail>` |
 | Tipo de usuário | Externo |
 
@@ -69,7 +76,7 @@ código, **reautorizar** os canais (escopo muda → token novo).
 5. Mostrar a transcrição/tradução gerada sendo usada pelo bot.
 6. Mostrar onde o usuário revoga o acesso (myaccount.google.com/permissions).
 
-## 5. Política de privacidade (rascunho — hospedar em `https://<seu-dominio>/privacidade`)
+## 5. Política de privacidade (rascunho — hospedar em `https://giom-reconexao.vercel.app/privacidade`)
 
 ```html
 <!doctype html>
@@ -110,9 +117,18 @@ e solicitar a exclusão dos dados pelo e-mail acima.</p>
 </body></html>
 ```
 
-## 6. O que só você pode fornecer
+## 6. Páginas legais no ar (`web/reconexao`)
 
-- Domínio próprio (e verificação no Search Console) e onde hospedar as 2 páginas.
-- E-mail de suporte/contato e logo.
-- Gravar o vídeo da seção 4.
+Código, `CONTATO_EMAIL` e a regra de build estático estão em
+[`web/reconexao/README.md`](../web/reconexao/README.md#páginas-legais-publicação-do-app-oauth-google).
+Resumo: mudar `CONTATO_EMAIL` exige rodar a pipeline (build estático); "Redeploy" da Vercel não
+atualiza. A reconexão (`web/reconexao`) pede só `youtube.force-ssl`; os demais escopos vêm do
+Transcrição (`ServiceCollectionExtensions.cs`) — a tela de consentimento deve declarar a união.
+
+## 7. Pendências (só o Mauro pode fazer)
+
+- Definir `CONTATO_EMAIL` real na Vercel e rodar a pipeline (hoje vazio: páginas mostram
+  "contato indisponível"; só importa se o Google exigir verificação completa).
+- Logo e vídeo de demonstração (seção 4), se for pedir verificação.
 - Decidir se remove `cloud-platform`/`youtube` dos escopos.
+- Pós-aprovação do Google: passos 5 e 6 da seção 1.
