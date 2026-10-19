@@ -137,7 +137,7 @@ mensagem vai direto pra DLQ, sem as 6 tentativas. Detalhes e procedimento:
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — camadas DDD/Hexagonal, padrão de provider
   plugável, decorators, fila de ingestão, observabilidade unificada, tamanho da resposta do
-  bot (`*Agent:MaxTokens` / `*Agent:InstrucaoConcisao`).
+  bot (`*Agent:MaxTokens` + `agente_config` no banco); premissa [`docs/CONFIG_FIRST.md`](docs/CONFIG_FIRST.md).
 - [`docs/ENGINEERING_STANDARDS.md`](docs/ENGINEERING_STANDARDS.md) — convenções de código,
   testes, tratamento de secrets, nomenclatura.
 - [`docs/GIT_WORKFLOW.md`](docs/GIT_WORKFLOW.md) — branches, worktrees, PRs, commits.

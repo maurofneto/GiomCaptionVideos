@@ -104,6 +104,24 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>Registro de ITopologiaRepository (Config First) — leitura da tabela etapa_topologia.</summary>
+    public static IServiceCollection AddSupabaseTopologia(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
+        services.AddSingleton<ITopologiaRepository, SupabaseTopologiaRepository>();
+        return services;
+    }
+
+    /// <summary>Registro de IAgenteConfigRepository (Config First) — leitura da tabela agente_config.</summary>
+    public static IServiceCollection AddSupabaseAgenteConfig(this IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<SupabaseOptions>(config.GetSection("Supabase"));
+        services.AddSupabaseHttpClient();
+        services.TryAddSingleton<IAgenteConfigRepository, SupabaseAgenteConfigRepository>();
+        return services;
+    }
+
     /// <summary>Registro de IPricingRepository (Task #130) — leitura da tabela provedor_preco.</summary>
     public static IServiceCollection AddSupabasePricing(this IServiceCollection services, IConfiguration config)
     {

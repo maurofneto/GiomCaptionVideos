@@ -33,6 +33,7 @@ using Giom.VideoManager.Infrastructure.WhatsApp;
 using Giom.VideoManager.Infrastructure.YouTube;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Composition;
@@ -56,6 +57,10 @@ public static class ServiceCollectionExtensions
             _ => services.AddSupabasePersistence(config)
         };
     }
+
+    /// <summary>Config First: topologia do pipeline por canal vem da tabela etapa_topologia (Supabase).</summary>
+    public static IServiceCollection AddTopologia(this IServiceCollection services, IConfiguration config) =>
+        services.AddSupabaseTopologia(config);
 
     /// <summary>
     /// Transcrição — cadeia de fallback por canal (US #129). Cada adapter se registra via
@@ -288,6 +293,9 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddAgentService(this IServiceCollection services, IConfiguration config)
     {
         services.AddPricingService(config);
+        // Config First: a instrução de concisão do bot vem da tabela agente_config (cache de 1 min).
+        services.AddSupabaseAgenteConfig(config);
+        services.TryAddSingleton<IAgenteConfigService, AgenteConfigService>();
         var cadeiaNomes = config.GetSection("Agent:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
 
         foreach (var nome in cadeiaNomes)
