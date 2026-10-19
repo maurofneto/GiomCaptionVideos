@@ -26,6 +26,7 @@ public class PricingServiceTests
             [("VoyageAI", "voyage-3-lite")] = new("VoyageAI", "voyage-3-lite", 0.02m, 0m),
             [("Cohere", "embed-v4.0")] = new("Cohere", "embed-v4.0", 0.12m, 0m),
             [("Grok", "grok-3-mini")] = new("Grok", "grok-3-mini", 0.30m, 0.50m),
+            [("xAI", "grok-voice-transcribe-2.0")] = new("xAI", "grok-voice-transcribe-2.0", 0m, 0m, PorHora: 0.10m),
         };
 
         public Task<Preco?> ObterAsync(string provedor, string modelo, CancellationToken ct = default) =>
@@ -40,6 +41,21 @@ public class PricingServiceTests
             public int GetHashCode((string Provedor, string Modelo) obj) =>
                 HashCode.Combine(obj.Provedor.ToUpperInvariant(), obj.Modelo.ToUpperInvariant());
         }
+    }
+
+    [Fact]
+    public async Task CalcularPorHoraAsync_UmaHoraDeAudio_CobraOPrecoPorHora()
+    {
+        Assert.Equal(0.10m, await Service.CalcularPorHoraAsync("xAI", "grok-voice-transcribe-2.0", 3600));
+        Assert.Equal(0.05m, await Service.CalcularPorHoraAsync("xAI", "grok-voice-transcribe-2.0", 1800));
+    }
+
+    [Fact]
+    public async Task CalcularPorHoraAsync_SemPorHoraOuSemDuracao_RetornaNull()
+    {
+        Assert.Null(await Service.CalcularPorHoraAsync("Claude", "claude-sonnet-5", 3600)); // preço só por token
+        Assert.Null(await Service.CalcularPorHoraAsync("xAI", "grok-voice-transcribe-2.0", null));
+        Assert.Null(await Service.CalcularPorHoraAsync("xAI", "modelo-nao-cadastrado", 3600));
     }
 
     private static readonly PricingService Service = new(new FakePricingRepository(), NullLogger<PricingService>.Instance);
