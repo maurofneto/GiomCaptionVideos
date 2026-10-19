@@ -10,7 +10,9 @@ Transcreve o áudio inteiro numa requisição (`POST https://api.x.ai/v1/stt`, m
    (o worker carrega o prefixo `pipeline/`; vira a config `GrokVoice:ApiKey`). Quem coloca o valor é o Mauro.
 2. **Migration** `20261014120000_etapa_provedor_config_permite_grokvoice.sql` aplicada no banco do ambiente
    (amplia o CHECK de `provedor`; não muda comportamento sozinha).
-3. **Linha na cadeia** — só quando for ligar o elo (primeiro em **dev**):
+3. **Linha na cadeia** — a migration `20261019120000_grokvoice_na_cadeia_de_transcricao.sql` (US #152) já insere
+   o `GrokVoice` logo antes do Whisper em todos os canais que têm Whisper (idempotente). O SQL abaixo é o
+   equivalente manual, para dev/testes:
 
 ```sql
 -- Whisper vira 5º elo; GrokVoice entra como 4º (antes do Whisper), pros dois canais.
