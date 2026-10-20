@@ -39,7 +39,10 @@ public static class ServiceCollectionExtensions
         services.AddGrokHttpClient();
         services.AddContextoTelemetria();
         services.AddSessionContext();
-        services.Configure<GrokAgentOptions>(config.GetSection("GrokAgent"));
+        services.AddOptions<GrokAgentOptions>()
+            .Bind(config.GetSection("GrokAgent"))
+            .Validate(o => o.MaxTokens > 0, "GrokAgent:MaxTokens deve ser maior que zero (padrão 4096 — remova a chave pra usar o padrão).")
+            .ValidateOnStart();
         services.AddSingleton<GrokAgentService>();
         return services;
     }

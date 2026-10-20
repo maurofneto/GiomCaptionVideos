@@ -1,43 +1,58 @@
-using Giom.VideoManager.Application.Options;
+using System.Collections.Concurrent;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Application.Pipeline;
 
 /// <summary>
 /// Orquestrador central do pipeline (Feature #104) — único, não mais duplicado por canal. Escuta
-/// eventos de "etapa concluída" e decide o que fazer a seguir a partir da topologia por canal
-/// (<see cref="TopologiaOptions"/>): publica na(s) próxima(s) fila(s) de etapa (fan-out, se a
+/// eventos de "etapa concluída" e decide o que fazer a seguir a partir da topologia por canal,
+/// lida do banco (<see cref="ITopologiaRepository"/>, tabela etapa_topologia — Config First, com
+/// cache curto): publica na(s) próxima(s) fila(s) de etapa (fan-out, se a
 /// lista tiver mais de 1 item) ou marca ProcessedAt se for terminal (lista vazia). Nenhum worker
 /// de etapa decide isso sozinho — "quem manda" é só aqui, um lugar só.
 /// </summary>
 public class PipelineHandler(
     IVideoRepository videoRepository,
     IVideoEtapaTerminalRepository etapaTerminalRepository,
-    IOptions<TopologiaOptions> options,
+    ITopologiaRepository topologiaRepository,
     IServiceProvider serviceProvider,
-    ILogger<PipelineHandler> logger)
+    ILogger<PipelineHandler> logger,
+    TimeProvider? timeProvider = null)
 {
-    private readonly TopologiaOptions _options = options.Value;
+    /// <summary>Quanto tempo a topologia de um canal fica em memória antes de reler do banco — mudar etapa_topologia pega em ~1 min, sem deploy.</summary>
+    public static readonly TimeSpan TtlTopologia = TimeSpan.FromMinutes(1);
+
+    private readonly TimeProvider _tempo = timeProvider ?? TimeProvider.System;
+    private readonly ConcurrentDictionary<string, (TopologiaCanal Topologia, DateTimeOffset Expira)> _cache = new();
+
+    private async Task<TopologiaCanal?> ObterTopologiaAsync(string channelId, CancellationToken ct)
+    {
+        var agora = _tempo.GetUtcNow();
+        if (_cache.TryGetValue(channelId, out var cacheado) && cacheado.Expira > agora)
+            return cacheado.Topologia;
+
+        // Falha de leitura propaga (a mensagem volta pra fila e é reentregue); canal sem linhas
+        // devolve null e NÃO é cacheado, pra uma linha recém-inserida valer na próxima mensagem.
+        var topologia = await topologiaRepository.ObterAsync(channelId, ct);
+        if (topologia is not null)
+            _cache[channelId] = (topologia, agora + TtlTopologia);
+        return topologia;
+    }
 
     public async Task ProcessarAsync(EtapaConcluidaMensagem mensagem, CancellationToken ct)
     {
         var video = mensagem.Video;
 
-        if (!_options.Canais.TryGetValue(video.ChannelId, out var canal))
-            throw new InvalidOperationException($"Canal desconhecido pro orquestrador: ChannelId={video.ChannelId} ({video.ChannelTitle}) — falta em Topologia:Canais");
+        var topologia = await ObterTopologiaAsync(video.ChannelId, ct)
+            ?? throw new InvalidOperationException($"Canal sem topologia no orquestrador: ChannelId={video.ChannelId} ({video.ChannelTitle}) — falta em etapa_topologia");
 
-        if (!_options.Topologia.TryGetValue(canal, out var porEtapa))
-            throw new InvalidOperationException($"Canal {canal} não tem topologia configurada em Topologia:Topologia");
+        var canal = video.ChannelTitle;
 
-        // Uma etapa terminal ("etapa": [] no JSON) não sobra nenhuma chave flatten na
-        // IConfiguration — o binder nem chega a criar a entrada no dicionário. "Não encontrada"
-        // e "lista vazia" são indistinguíveis vindo de appsettings.json, então tratamos as duas
-        // como terminal (sem isso, toda etapa final da topologia real lançava aqui).
-        var proximasEtapas = porEtapa.GetValueOrDefault(mensagem.Etapa, []);
+        // Etapa fora da topologia do canal e etapa com lista vazia são tratadas igual: terminal.
+        var proximasEtapas = topologia.ObterProximas(mensagem.Etapa);
 
         if (proximasEtapas.Length == 0)
         {
@@ -49,7 +64,7 @@ public class PipelineHandler(
             // uma etapa fora desse universo (ver EtapaSemEntradaNaTopologia_TrataComoTerminal) não
             // tem como ser "esperada" em nenhum conjunto, então continua marcando na hora, como
             // sempre foi.
-            var etapasTerminais = _options.ObterEtapasTerminais(canal);
+            var etapasTerminais = topologia.ObterEtapasTerminais();
             if (etapasTerminais.Contains(mensagem.Etapa))
             {
                 var concluidas = await etapaTerminalRepository.RegistrarConclusaoAsync(video.Id, mensagem.Etapa, ct);

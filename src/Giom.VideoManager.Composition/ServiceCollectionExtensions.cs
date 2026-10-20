@@ -27,11 +27,13 @@ using Giom.VideoManager.Infrastructure.Supabase;
 using Giom.VideoManager.Infrastructure.SummarizeTech;
 using Giom.VideoManager.Infrastructure.Telegram;
 using Giom.VideoManager.Infrastructure.Voyage;
+using Giom.VideoManager.Infrastructure.GrokVoice;
 using Giom.VideoManager.Infrastructure.Whisper;
 using Giom.VideoManager.Infrastructure.WhatsApp;
 using Giom.VideoManager.Infrastructure.YouTube;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Giom.VideoManager.Composition;
@@ -56,9 +58,14 @@ public static class ServiceCollectionExtensions
         };
     }
 
+    /// <summary>Config First: topologia do pipeline por canal vem da tabela etapa_topologia (Supabase).</summary>
+    public static IServiceCollection AddTopologia(this IServiceCollection services, IConfiguration config) =>
+        services.AddSupabaseTopologia(config);
+
     /// <summary>
     /// Transcrição — cadeia de fallback por canal (US #129). Cada adapter se registra via
-    /// AddYouTubeCaption / AddYouTubeTranscript / AddYtDlpCaption / AddWhisperTranscription;
+    /// AddYouTubeCaption / AddYouTubeTranscript / AddYtDlpCaption / AddGrokVoiceTranscription /
+    /// AddWhisperTranscription;
     /// FallbackCaptionService (único ICaptionService público) resolve a ordem via
     /// IEtapaProvedorConfigService pelo ChannelId. Credencial OAuth multi-canal:
     /// <see cref="AddTranscricaoMultiCanal"/> (US #146).
@@ -70,6 +77,8 @@ public static class ServiceCollectionExtensions
         services.AddYouTubeCaption(config);
         services.AddYouTubeTranscript(config);
         services.AddYtDlpCaption(config);
+        services.AddPricingService(config);   // custo por hora do GrokVoice vem de provedor_preco
+        services.AddGrokVoiceTranscription(config);
         services.AddWhisperTranscription(config);
 
         services.AddSingleton<ICaptionService, FallbackCaptionService>();
@@ -95,9 +104,14 @@ public static class ServiceCollectionExtensions
             var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>()
                 .CreateLogger("Giom.VideoManager.Composition.AddTranscricaoMultiCanal");
 
-            var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+            var falhas = new List<FalhaCredencialCanal>();
+            var canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger, (c, e) => falhas.Add(new(c, e)));
+            services.AddReporteFalhasCredencialCanais(falhas, canais.Count, canaisValidos.Count);
 
-            var cookiesCanais = canaisValidos
+            // Cookies yt-dlp são independentes do OAuth — carregar pra TODOS os canais ativos,
+            // mesmo se o RefreshToken estiver inválido (invalid_grant). Sem isso, YtDlpCaption
+            // fica sem --cookies e a cadeia perde o provedor que a US #146 quer isolar por canal.
+            var cookiesCanais = canais
                 .Select(c => (c.ChannelId, c.SecretsKey))
                 .ToList();
             services.AddYtDlpCookiesPorCanal(config, cookiesCanais, logger);
@@ -280,6 +294,9 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddAgentService(this IServiceCollection services, IConfiguration config)
     {
         services.AddPricingService(config);
+        // Config First: a instrução de concisão do bot vem da tabela agente_config (cache de 1 min).
+        services.AddSupabaseAgenteConfig(config);
+        services.TryAddSingleton<IAgenteConfigService, AgenteConfigService>();
         var cadeiaNomes = config.GetSection("Agent:FallbackChain").Get<string[]>() ?? ["Claude", "Grok", "OpenAI"];
 
         foreach (var nome in cadeiaNomes)
@@ -397,15 +414,10 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>VideoSource:Provider — YouTube (padrão, único por enquanto).</summary>
-    public static IServiceCollection AddVideoSourceService(this IServiceCollection services, IConfiguration config)
-        => services.AddYouTubeVideoSource(config);
-
     /// <summary>
     /// Bootstrap multi-canal pra ingestão unificada (US #105, Ingestao.Worker) — lê os canais
     /// ativos do Supabase (tabela canal_ingestao) SÍNCRONO durante ConfigureServices (mesmo
-    /// padrão já aceito nesse código pra GetGoogleCredential(...).GetAwaiter().GetResult() em
-    /// AddYouTubeCredential), registra um YouTubeService keyed por canal e um
+    /// padrão de resolver a credencial sincronamente no boot), registra um YouTubeService keyed por canal e um
     /// Func&lt;string, IVideoHandler&gt; resolvido preguiçosamente na primeira chamada — só
     /// depois que o container termina de montar, já que CanalIngestaoVideoHandler precisa de
     /// dependências registradas por OUTROS Add* nesta mesma composição (AddFilaVideoEtapa,
@@ -434,7 +446,9 @@ public static class ServiceCollectionExtensions
             // using: o logger não precisa sobreviver ao descarte do provider temporário, só
             // durante esta chamada síncrona.
             var logger = bootstrapProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Giom.VideoManager.Composition.AddIngestaoMultiCanal");
-            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger);
+            var falhas = new List<FalhaCredencialCanal>();
+            canaisValidos = services.AddYouTubeCredenciaisPorCanal(config, canais, logger, (c, e) => falhas.Add(new(c, e)));
+            services.AddReporteFalhasCredencialCanais(falhas, canais.Count, canaisValidos.Count);
         }
 
         services.AddSingleton<IReadOnlyList<CanalIngestaoConfig>>(canaisValidos);

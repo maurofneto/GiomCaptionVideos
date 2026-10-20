@@ -31,7 +31,7 @@ public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
             r.channel_id, r.playlist_id, r.nome, r.mine, r.ativo,
             ParseRelevanciaTipo(r.relevancia_tipo), r.relevancia_valores,
             r.max_videos_per_run, r.delay_between_videos_ms, r.delay_between_pages_ms,
-            r.secrets_key)).ToList();
+            r.secrets_key, r.privacy_status_filtro)).ToList();
     }
 
     private static RelevanciaTipo ParseRelevanciaTipo(string valor) => valor switch
@@ -45,5 +45,5 @@ public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
         string channel_id, string? playlist_id, string nome, bool mine, bool ativo,
         string relevancia_tipo, List<string> relevancia_valores,
         int max_videos_per_run, int delay_between_videos_ms, int delay_between_pages_ms,
-        string secrets_key);
+        string secrets_key, string? privacy_status_filtro = null);
 }

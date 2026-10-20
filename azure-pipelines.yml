@@ -1,8 +1,15 @@
+# A página web/reconexao tem pipeline próprio (web/reconexao/azure-pipelines.yml), então mudança
+# só em web/** não builda o .NET nem aplica migration por aqui. Mudança em supabase/** continua
+# disparando esta pipeline, que é quem aplica as migrations (stage Migrations). Não há bloco
+# "pr:" de propósito: no Azure Repos a validação de PR é por branch policy.
 trigger:
   branches:
     include:
       - master
       - dev
+  paths:
+    exclude:
+      - web/**
 
 pool:
   vmImage: ubuntu-latest
@@ -101,7 +108,13 @@ stages:
           - script: |
               set -e
               supabase link --project-ref $(SUPABASE_PROJECT_REF)
-              supabase db push
+              # --include-all: aplica também migrations com versão anterior à última do remoto. Sem a
+              # flag, um `migration repair` (ou uma migration aplicada à mão) que deixe o histórico com
+              # versão mais nova que arquivos ainda pendentes derruba o stage com "Found local migration
+              # files to be inserted before the last migration" — e os Deploys seguintes rodam mesmo
+              # assim (código novo, schema antigo). Visto na promoção de 16/10 (US #152). As migrations
+              # são idempotentes, então aplicar fora de ordem é seguro.
+              supabase db push --include-all
               supabase functions deploy buscar-similar --project-ref $(SUPABASE_PROJECT_REF)
             displayName: 'Supabase — aplicar migrations + deploy Edge Functions'
             env:

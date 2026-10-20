@@ -3,7 +3,10 @@ using Giom.VideoManager.Infrastructure.GuardRails;
 using Giom.VideoManager.Infrastructure.Incerteza;
 using Giom.VideoManager.Infrastructure.Observabilidade;
 using Giom.VideoManager.Infrastructure.Telemetria;
+using Giom.VideoManager.Infrastructure.YtDlp;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Giom.VideoManager.Infrastructure;
 
@@ -78,6 +81,27 @@ public static class ServiceCollectionExtensions
             return services;
 
         services.AddSingleton<IGuardRailPipeline, GuardRailPipeline>();
+        return services;
+    }
+
+    /// <summary>
+    /// Opções comuns do yt-dlp (seção <c>YtDlp</c>: PoToken, Proxy) — compartilhadas por
+    /// YtDlpCaption e Whisper. Idempotente, mesmo padrão de AddContextoTelemetria.
+    /// </summary>
+    public static IServiceCollection AddYtDlpOpcoes(this IServiceCollection services, IConfiguration config)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IConfigureOptions<YtDlpOptions>)))
+            return services;
+
+        services.Configure<YtDlpOptions>(config.GetSection("YtDlp"));
+        return services;
+    }
+
+    /// <summary>Loga versões de yt-dlp/deno e se PoToken/Proxy estão ligados no boot do worker (ver <see cref="YtDlpDiagnosticoBoot"/>).</summary>
+    public static IServiceCollection AddYtDlpDiagnosticoNoBoot(this IServiceCollection services, IConfiguration config)
+    {
+        services.AddYtDlpOpcoes(config);
+        services.AddHostedService<YtDlpDiagnosticoBoot>();
         return services;
     }
 }

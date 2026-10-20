@@ -25,7 +25,9 @@ namespace Giom.VideoManager.Infrastructure.Sqs;
 /// RateLimitDelaySeconds — retry rápido contra cota estourada só queimaria tentativa. Na última
 /// tentativa (ApproximateReceiveCount == MaxReceiveCount), loga Error (vira alerta no Sentry
 /// via sink — US #45) e zera a visibilidade: o próximo receive dispara a RedrivePolicy e o SQS
-/// move a mensagem pra DLQ agora, não na run do dia seguinte.
+/// move a mensagem pra DLQ agora, não na run do dia seguinte. Falha não transitória
+/// (<see cref="FalhaNaoTransitoriaException"/>, ex.: bloqueio anti-bot do YouTube) vai pra DLQ já
+/// na primeira tentativa.
 /// </summary>
 public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, IOptions<SqsOptions> options, ILogger<SqsFilaConsumer<TMensagem>> logger, TimeProvider? timeProvider = null) : IFilaConsumer<TMensagem>
 {
@@ -93,6 +95,10 @@ public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, 
 
     private async Task TratarFalhaAsync(string queueUrl, Message mensagemSqs, Exception ex, CancellationToken ct)
     {
+        if (ProcurarNaCadeia<FalhaNaoTransitoriaException>(ex) is { } naoTransitoria
+            && await MoverParaDlqAsync(queueUrl, mensagemSqs, ex, naoTransitoria, ct))
+            return;
+
         var tentativa = LerTentativa(mensagemSqs);
         var ultimaTentativa = tentativa >= _options.MaxReceiveCount;
         var delay = CalcularDelayRetry(ex);
@@ -138,6 +144,44 @@ public class SqsFilaConsumer<TMensagem>(IAmazonSQS cliente, SqsFilaCanal canal, 
         }
 
         return _options.RetryDelaySeconds;
+    }
+
+    /// <summary>
+    /// Falha não transitória (ex.: BloqueioBot do yt-dlp): reprocessar até o MaxReceiveCount só
+    /// repetiria a cadeia inteira com o mesmo resultado. Copia a mensagem pra DLQ e apaga da fila
+    /// agora — a RedrivePolicy não serve aqui porque só dispara depois de N receives. Se a cópia
+    /// falhar, devolve false e o chamador segue o retry normal (nunca perde a mensagem).
+    /// </summary>
+    private async Task<bool> MoverParaDlqAsync(string queueUrl, Message mensagemSqs, Exception ex, FalhaNaoTransitoriaException naoTransitoria, CancellationToken ct)
+    {
+        try
+        {
+            var dlqUrl = await canal.ResolverDlqUrlAsync(ct);
+            await cliente.SendMessageAsync(new SendMessageRequest
+            {
+                QueueUrl = dlqUrl,
+                MessageBody = mensagemSqs.Body,
+                MessageAttributes = mensagemSqs.MessageAttributes
+            }, ct);
+            await cliente.DeleteMessageAsync(queueUrl, mensagemSqs.ReceiptHandle, ct);
+        }
+        catch (Exception exDlq)
+        {
+            logger.LogWarning(exDlq, "Falha ao mover a mensagem {MessageId} (falha não transitória) pra DLQ {Dlq} — seguindo o retry normal",
+                mensagemSqs.MessageId, canal.NomeDlq);
+            return false;
+        }
+
+        logger.LogError(ex, "Falha não transitória ({Origem}, {Reason}) na mensagem {MessageId} da fila {Fila} — movida direto pra DLQ {Dlq}, sem retry",
+            naoTransitoria.Origem, naoTransitoria.Reason, mensagemSqs.MessageId, _options.QueueName, canal.NomeDlq);
+        return true;
+    }
+
+    private static T? ProcurarNaCadeia<T>(Exception ex) where T : Exception
+    {
+        for (var atual = ex; atual is not null; atual = atual.InnerException)
+            if (atual is T t) return t;
+        return null;
     }
 
     private static int LerTentativa(Message mensagemSqs) =>

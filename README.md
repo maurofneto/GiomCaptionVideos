@@ -55,11 +55,12 @@ tests/
 | Projeto | Resolve |
 |---|---|
 | `Infrastructure.YouTube` | Descoberta de vídeo/playlist, legenda (`YouTubeCaption`/`YtDlpCaption`/`YouTubeTranscript`), OAuth Google |
-| `Infrastructure.Whisper` | Transcrição via Whisper local (fallback quando não há legenda) |
+| `Infrastructure.Whisper` | Transcrição de áudio via API da OpenAI (Whisper) — último elo da cadeia |
+| `Infrastructure.GrokVoice` | Transcrição de áudio via Grok Voice (xAI) — elo antes do Whisper (US #148) |
 | `Infrastructure.Anthropic` | Cliente Claude (resumo, categorização, bot) |
 | `Infrastructure.OpenAI` | Embeddings diretos (`OpenAiEmbedding`) |
 | `Infrastructure.SummarizeTech` | Alternativa de resumo (provider plugável) |
-| `Infrastructure.Supabase` | Persistência (Postgres + pgvector), busca híbrida |
+| `Infrastructure.Supabase` | Persistência (Postgres + pgvector), busca híbrida. Banco por ambiente: prod = projeto Supabase, dev = branch `dev` do mesmo projeto — ver [`docs/runbook-ambientes-banco.md`](docs/runbook-ambientes-banco.md) |
 | `Infrastructure.Mongo` | Memória de conversa do bot (alternativa) |
 | `Infrastructure.Sql` | Acesso SQL genérico |
 | `Infrastructure.Telegram` | Canal de chat do bot |
@@ -116,10 +117,27 @@ dotnet test GiomCaptionVideos.sln
   para o estado disso). O bot (`AgenteInstituto`) roda como ECS Service de longa duração,
   um por ambiente (`giom-agenteinstituto-dev-service` / `giom-agenteinstituto-service`).
 
+### yt-dlp (Transcricao.Worker)
+
+A imagem do `Transcricao.Worker` fixa as versões de yt-dlp, deno (runtime JS do EJS) e do plugin
+de PO token `bgutil-ytdlp-pot-provider` via `ARG` no Dockerfile; o boot loga as versões. Opções
+(todas desligadas por padrão, valores no SSM `/giom/{env}/pipeline/`):
+
+| Chave | SSM | Efeito |
+|---|---|---|
+| `YtDlp:PoToken:Habilitado` | `/giom/{env}/pipeline/YtDlp/PoToken/Habilitado` | Liga o PO token (exige `ProviderUrl`) |
+| `YtDlp:PoToken:ProviderUrl` | `/giom/{env}/pipeline/YtDlp/PoToken/ProviderUrl` | `--extractor-args youtubepot-bgutilhttp:base_url=...` |
+| `YtDlp:Proxy` | `/giom/{env}/pipeline/YtDlp/Proxy` (SecureString) | `--proxy` — nunca logado, só on/off |
+
+"Sign in to confirm you're not a bot" é classificado como `BloqueioBot` (não transitório): a
+mensagem vai direto pra DLQ, sem as 6 tentativas. Detalhes e procedimento:
+[`docs/runbook-ytdlp-cookies.md`](docs/runbook-ytdlp-cookies.md).
+
 ## Documentação
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — camadas DDD/Hexagonal, padrão de provider
-  plugável, decorators, fila de ingestão, observabilidade unificada.
+  plugável, decorators, fila de ingestão, observabilidade unificada, tamanho da resposta do
+  bot (`*Agent:MaxTokens` + `agente_config` no banco); premissa [`docs/CONFIG_FIRST.md`](docs/CONFIG_FIRST.md).
 - [`docs/ENGINEERING_STANDARDS.md`](docs/ENGINEERING_STANDARDS.md) — convenções de código,
   testes, tratamento de secrets, nomenclatura.
 - [`docs/GIT_WORKFLOW.md`](docs/GIT_WORKFLOW.md) — branches, worktrees, PRs, commits.

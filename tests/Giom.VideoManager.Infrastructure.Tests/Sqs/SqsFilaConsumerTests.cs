@@ -94,6 +94,39 @@ public class SqsFilaConsumerTests
     }
 
     [Fact]
+    public async Task Consumir_FalhaNaoTransitoriaNaPrimeiraTentativa_MoveDiretoPraDlqSemRetry()
+    {
+        ConfigurarFilaCom(NovaMensagem("a", "r1", tentativa: 1));
+        _sqs.Setup(s => s.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SendMessageResponse());
+
+        // Embrulhada como chega de verdade: CaptionFalhaException(BloqueioBot)/decorator de telemetria por fora.
+        await _consumer.ConsumirAsync((_, _) => throw new InvalidOperationException("decorator relançou",
+            new FalhaNaoTransitoriaException("Whisper", "yt-dlp bloqueado", "sign_in_to_confirm_not_a_bot")));
+
+        _sqs.Verify(s => s.SendMessageAsync(It.Is<SendMessageRequest>(r =>
+            r.QueueUrl == "https://sqs/fila-teste-dlq" && r.MessageBody.Contains("\"a\"")), It.IsAny<CancellationToken>()), Times.Once);
+        _sqs.Verify(s => s.DeleteMessageAsync("https://sqs/fila-teste", "r1", It.IsAny<CancellationToken>()), Times.Once);
+        _sqs.Verify(s => s.ChangeMessageVisibilityAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains(_logger.Entradas, e => e.Nivel == LogLevel.Error
+            && e.Mensagem.Contains("não transitória") && e.Mensagem.Contains("sign_in_to_confirm_not_a_bot") && e.Mensagem.Contains("fila-teste-dlq"));
+    }
+
+    [Fact]
+    public async Task Consumir_FalhaNaoTransitoriaMasDlqIndisponivel_CaiNoRetryNormal()
+    {
+        ConfigurarFilaCom(NovaMensagem("a", "r1", tentativa: 1));
+        _sqs.Setup(s => s.SendMessageAsync(It.IsAny<SendMessageRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AmazonSQSException("indisponível"));
+
+        await _consumer.ConsumirAsync((_, _) => throw new FalhaNaoTransitoriaException("Whisper", "yt-dlp bloqueado", "sign_in_to_confirm_not_a_bot"));
+
+        // Nunca perde a mensagem: sem cópia na DLQ, não apaga e segue o retry comum.
+        _sqs.Verify(s => s.DeleteMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _sqs.Verify(s => s.ChangeMessageVisibilityAsync("https://sqs/fila-teste", "r1", 10, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Consumir_FalhaDeUmaMensagem_NaoImpedeAsDemais()
     {
         ConfigurarFilaCom(NovaMensagem("a", "r1"), NovaMensagem("b", "r2"));

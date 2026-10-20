@@ -13,7 +13,9 @@ public class KimiAgentOptions
 {
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "kimi-k3";
+    /// <summary>Teto de tokens da resposta (KimiAgent:MaxTokens). Precisa ser &gt; 0 — validado no startup.</summary>
     public int MaxTokens { get; init; } = 4096;
+
 }
 
 /// <summary>
@@ -35,7 +37,8 @@ public class KimiAgentService : IAgentService
     private readonly IContextoTelemetria _contextoTelemetria;
     private readonly IIncertezaDetectorService _incertezaDetector;
     private readonly ISessionContext _sessionContext;
-    private readonly string _systemPrompt;
+    private readonly string _promptBase;
+    private readonly IAgenteConfigService _agenteConfig;
     private readonly IPricingService _pricingService;
 
     public KimiAgentService(
@@ -46,7 +49,8 @@ public class KimiAgentService : IAgentService
         IContextoTelemetria contextoTelemetria,
         IIncertezaDetectorService incertezaDetector,
         ISessionContext sessionContext,
-        IPricingService pricingService)
+        IPricingService pricingService,
+        IAgenteConfigService agenteConfig)
     {
         _options = options.Value;
         _logger = logger;
@@ -56,12 +60,17 @@ public class KimiAgentService : IAgentService
         _pricingService = pricingService;
         _http = httpClientFactory.CreateClient("kimi");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        _systemPrompt = prompts.Load("agent.md");
+        _promptBase = prompts.Load("agent.md");
+        _agenteConfig = agenteConfig;
     }
 
     public async Task<RespostaAgente> ResponderAsync(string chatId, TurnoConversa turnoAtual, string contexto, IReadOnlyList<TurnoConversa> historico, CancellationToken ct = default)
     {
         var requestId = Guid.NewGuid().ToString();
+
+        // Config First: a instrução de concisão vem de agente_config (banco, cache de 1 min), não do appsettings.
+        var instrucaoConcisao = await _agenteConfig.ObterInstrucaoConcisaoAsync("Kimi", ct);
+        var systemPrompt = PromptAgente.Montar(_promptBase, instrucaoConcisao);
 
         _sessionContext.Definir(new SessaoObservabilidade(
             SessionId: chatId,
@@ -71,7 +80,7 @@ public class KimiAgentService : IAgentService
             Propriedades: new Dictionary<string, string> { ["Tipo"] = "bot_resposta" },
             RequestId: requestId));
 
-        var mensagens = new List<object> { new { role = "system", content = _systemPrompt } };
+        var mensagens = new List<object> { new { role = "system", content = systemPrompt } };
 
         foreach (var turno in historico)
         {
@@ -125,7 +134,14 @@ public class KimiAgentService : IAgentService
             tokensEntrada: result?.usage?.prompt_tokens,
             tokensSaida: result?.usage?.completion_tokens,
             custoEstimadoUsd: await _pricingService.CalcularAsync("Kimi", _options.Model, result?.usage?.prompt_tokens, result?.usage?.completion_tokens, ct),
-            detalhes: new { finishReason = result?.choices?.FirstOrDefault()?.finish_reason, incerteza = texto != null && _incertezaDetector.ContemIncerteza(texto), temRaciocinio = raciocinioResposta != null },
+            detalhes: new
+            {
+                finishReason = result?.choices?.FirstOrDefault()?.finish_reason,
+                incerteza = texto != null && _incertezaDetector.ContemIncerteza(texto),
+                temRaciocinio = raciocinioResposta != null,
+                maxTokens = _options.MaxTokens,
+                concisao = !string.IsNullOrWhiteSpace(instrucaoConcisao)
+            },
             requestIdExterno: requestId);
 
         if (string.IsNullOrWhiteSpace(texto))
