@@ -32,7 +32,12 @@ $ambientes = @{
 }
 
 function Invoke-Step([string]$descricao, [scriptblock]$acao) {
-    if ($Apply) { Write-Host "-> $descricao"; & $acao } else { Write-Host "[dry-run] $descricao" }
+    if ($Apply) {
+        Write-Host "-> $descricao"
+        & $acao
+        # `aws` é um executável nativo: ErrorActionPreference não o intercepta.
+        if ($LASTEXITCODE -ne 0) { throw "Falhou: $descricao (aws exit $LASTEXITCODE)" }
+    } else { Write-Host "[dry-run] $descricao" }
 }
 
 # 1) OIDC provider (a thumbprint não é mais exigida pela AWS para este issuer)
