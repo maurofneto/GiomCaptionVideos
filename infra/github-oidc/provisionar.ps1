@@ -14,6 +14,9 @@ Uso:  pwsh infra/github-oidc/provisionar.ps1            # dry-run
 param(
     [switch]$Apply,
     [string]$Repo    = 'maurofneto/GiomCaptionVideos',
+    # Este repo usa o subject IMUTÁVEL do OIDC (ids numéricos de dono e repo). Confirme com:
+    #   gh api repos/<repo>/actions/oidc/customization/sub  -> sub_claim_prefix
+    [string]$SubPrefix = 'repo:maurofneto@1536870/GiomCaptionVideos@1426143006',
     [string]$Region  = 'us-east-1',
     [string]$Cluster = 'giom-cluster'
 )
@@ -62,7 +65,7 @@ foreach ($amb in 'dev', 'prod') {
                 StringEquals = @{
                     "${oidcUrl}:aud" = 'sts.amazonaws.com'
                     # sub do job com `environment: <amb>` (o environment, por sua vez, só aceita a branch certa)
-                    "${oidcUrl}:sub" = "repo:${Repo}:environment:$amb"
+                    "${oidcUrl}:sub" = "${SubPrefix}:environment:$amb"
                 }
             }
         })

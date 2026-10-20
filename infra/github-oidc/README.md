@@ -6,7 +6,9 @@ via OIDC — **sem access key guardada no GitHub**. Substitui o usuário IAM `gi
 ## Como funciona
 
 - O job com `environment: dev|prod` recebe do GitHub um token cujo `sub` é
-  `repo:maurofneto/GiomCaptionVideos:environment:<ambiente>`.
+  `repo:maurofneto@1536870/GiomCaptionVideos@1426143006:environment:<ambiente>` — o repo usa o
+  **subject imutável** (ids numéricos de dono e repo, imune a rename/transfer). O prefixo certo
+  vem de `gh api repos/maurofneto/GiomCaptionVideos/actions/oidc/customization/sub`.
 - Cada role (`giom-github-deploy-dev` / `-prod`) só confia nesse `sub` exato. O environment, por
   sua vez, só aceita deploy da branch certa (dev → `dev`, prod → `master`) — assim um PR ou outra
   branch nunca assume a role de prod.
