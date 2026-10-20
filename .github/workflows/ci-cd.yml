@@ -1,6 +1,6 @@
 name: CI/CD
 
-# PR (dev/master): só build + testes. Push em dev/master: build + testes + migrations + deploy.
+# PR (dev/master): só build + testes. Push em dev/master (ou execução manual na branch): build + testes + migrations + deploy.
 # dev publica recursos -dev (imagem :dev); master publica prod (imagem :latest).
 # Variáveis por ambiente (Settings > Environments > dev|prod) substituem os variable groups do
 # Azure: AWS_ROLE_ARN, IMAGE_TAG, SUPABASE_PROJECT_REF e os *_SERVICE. AWS_REGION e ECR_REGISTRY
@@ -52,7 +52,7 @@ jobs:
   migrations:
     name: Migrations + Edge Functions
     needs: build-test
-    if: github.event_name == 'push' && vars.DEPLOY_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'master' && 'prod' || 'dev' }}
     steps:
@@ -77,7 +77,7 @@ jobs:
   deploy:
     name: Deploy — ${{ matrix.name }}
     needs: migrations
-    if: github.event_name == 'push' && vars.DEPLOY_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'master' && 'prod' || 'dev' }}
     permissions:
@@ -133,7 +133,7 @@ jobs:
   deploy-bot:
     name: Deploy — bot (reinício)
     needs: deploy
-    if: github.event_name == 'push' && vars.DEPLOY_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'master' && 'prod' || 'dev' }}
     permissions:
