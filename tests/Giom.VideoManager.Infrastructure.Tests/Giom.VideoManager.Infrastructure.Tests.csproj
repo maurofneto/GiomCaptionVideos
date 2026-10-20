@@ -3,11 +3,14 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Giom.VideoManager.Infrastructure\Giom.VideoManager.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Infrastructure.Sqs\Giom.VideoManager.Infrastructure.Sqs.csproj" />
+    <ProjectReference Include="..\..\src\Giom.VideoManager.Infrastructure.Whisper\Giom.VideoManager.Infrastructure.Whisper.csproj" />
     <ProjectReference Include="..\..\src\Giom.VideoManager.Infrastructure.YouTube\Giom.VideoManager.Infrastructure.YouTube.csproj" />
     <ProjectReference Include="..\Giom.VideoManager.Testes.Comuns\Giom.VideoManager.Testes.Comuns.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.9" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />

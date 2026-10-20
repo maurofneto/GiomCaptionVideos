@@ -1,0 +1,16 @@
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; padding: 2rem 1rem; }
+main { max-width: 64rem; margin: 0 auto; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.card { border: 1px solid #8884; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+.card h2 { margin: 0 0 .25rem; }
+.meta { font-size: .85rem; opacity: .75; word-break: break-all; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; margin-top: .75rem; }
+.banner { border-radius: 6px; padding: .6rem .9rem; margin: .75rem 0; }
+.ok { background: #1a7f3733; }
+.erro { background: #cf222e33; }
+.aviso { background: #bf870033; }
+.destaque { outline: 2px solid #bf8700; }
+button { cursor: pointer; padding: .45rem .9rem; border-radius: 6px; border: 1px solid #8886; }
+textarea { width: 100%; min-height: 5rem; font-family: monospace; box-sizing: border-box; }
+details { margin-top: .5rem; }

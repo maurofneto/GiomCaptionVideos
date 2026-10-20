@@ -3,6 +3,7 @@ using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Sentry;
@@ -36,7 +37,7 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddIncertezaDetectorService(config); // Heuristica (padrão) — usado pelo agente pra marcar telemetria
         services.AddGuardRails(config);            // GuardRails:Habilitados — segurança/confiabilidade sobre pergunta e resposta
         services.AddAgentService(config);          // Claude
-        services.AddChatChannel(config);           // Telegram
+        services.AddChatChannels(config);          // Chat:Canais — Telegram, WhatsApp...
         services.AddConversaHistorico(config);     // InMemory (padrão) | Supabase | MongoDB
         services.AddBotComandos(config);           // ajuda/sobre/limpar — cada canal decide como invocar
         services.AddTelemetriaService(config);     // Supabase + Sentry — auditoria de operações de IA
@@ -56,7 +57,13 @@ Log.Information("Diagnóstico Sentry — DsnLength={DsnLength} SentrySdk.IsEnabl
 await host.StartAsync();
 
 var lifetime  = host.Services.GetRequiredService<IHostApplicationLifetime>();
-var processor = host.Services.GetRequiredService<ChatBotProcessor>();
-await processor.RunAsync(lifetime.ApplicationStopping);
+
+// Os laços que o bot mantém rodando (um ChatBotProcessor por canal de chat, mais o consumidor
+// da fila do webhook do WhatsApp) são decididos pela composição a partir da config. Aqui só
+// rodamos todos em paralelo — este arquivo não sabe quais canais existem nem quantos são.
+var canaisAtivos = host.Services.GetServices<CanalDeChatAtivo>().ToList();
+Log.Information("Canais ativos: {Canais}", string.Join(", ", canaisAtivos.Select(c => c.Chave)));
+
+await Task.WhenAll(canaisAtivos.Select(canal => canal.Executar(lifetime.ApplicationStopping)));
 
 await host.StopAsync();

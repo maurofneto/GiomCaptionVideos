@@ -53,7 +53,10 @@ public static class ServiceCollectionExtensions
         services.AddAnthropicHttpClient(config);
         services.AddContextoTelemetria();
         services.AddSessionContext();
-        services.Configure<ClaudeAgentOptions>(config.GetSection("ClaudeAgent"));
+        services.AddOptions<ClaudeAgentOptions>()
+            .Bind(config.GetSection("ClaudeAgent"))
+            .Validate(o => o.MaxTokens > 0, "ClaudeAgent:MaxTokens deve ser maior que zero (padrão 4096 — remova a chave pra usar o padrão).")
+            .ValidateOnStart();
         services.AddSingleton<ClaudeAgentService>();
         return services;
     }

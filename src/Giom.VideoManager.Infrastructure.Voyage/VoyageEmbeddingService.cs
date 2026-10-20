@@ -29,7 +29,7 @@ public class VoyageEmbeddingService : IEmbeddingService
 {
     private const string Origem = "VoyageAI";
 
-    // voyage-3 emite vetores de 1024 dim, mas video_chunk.embedding é vector(1536) fixo (Bug
+    // voyage-3 emite vetores de 1024 dim, mas video_chunk.embedding é halfvec(1536) fixo (Bug
     // #121 — pgvector recusa HNSW sobre coluna sem dimensão, então a coluna tem que ter
     // tamanho fixo). Preencher com zeros não distorce a similaridade de cosseno (não muda
     // produto escalar nem magnitude) e as RPCs match_chunks_hibrido* só comparam dentro da

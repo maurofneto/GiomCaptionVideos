@@ -9,7 +9,7 @@ namespace Giom.VideoManager.SmokeTests;
 /// Gera chunks com vetores sintéticos (determinísticos, sem chamar OpenAI) e persiste de
 /// verdade no Supabase de dev via IVideoChunkRepository — é essa escrita real que valida
 /// span/telemetria/Helicone ponta a ponta (propósito do Board #96). Dimensão fixa em 1536 pra
-/// bater com a coluna vector(1536) do banco. Injeta falha determinística por vídeo (ver
+/// bater com a coluna halfvec(1536) do banco. Injeta falha determinística por vídeo (ver
 /// InjecaoDeFalha) pra exercitar o retry dinâmico da Feature #34.
 /// </summary>
 public class FakeEmbeddingService(IVideoChunkRepository chunkRepository, ILogger<FakeEmbeddingService> logger) : IVideoIndexingService

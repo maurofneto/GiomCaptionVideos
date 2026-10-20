@@ -10,9 +10,6 @@ namespace Giom.VideoManager.Infrastructure.Whisper;
 
 public class WhisperOptions
 {
-    /// <summary>Caminho para o executável yt-dlp — ainda necessário só pra baixar o áudio do YouTube.</summary>
-    public string YtDlpPath { get; init; } = "yt-dlp";
-
     public string ApiKey { get; init; } = string.Empty;
 
     /// <summary>Modelo de transcrição da OpenAI: whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe.</summary>
@@ -44,28 +41,31 @@ public class WhisperTranscricaoService : ITranscricaoService
     private readonly HttpClient _http;
     private readonly ILogger<WhisperTranscricaoService> _logger;
     private readonly IContextoTelemetria _contextoTelemetria;
+    private readonly IAudioDownloader _audioDownloader;
 
     public WhisperTranscricaoService(
         IOptions<WhisperOptions> options,
         IHttpClientFactory httpClientFactory,
         ILogger<WhisperTranscricaoService> logger,
-        IContextoTelemetria contextoTelemetria)
+        IContextoTelemetria contextoTelemetria,
+        IAudioDownloader audioDownloader)
     {
         _options = options.Value;
         _logger = logger;
         _contextoTelemetria = contextoTelemetria;
+        _audioDownloader = audioDownloader;
         _http = httpClientFactory.CreateClient("whisper");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
     }
 
-    public async Task<Transcricao?> TranscreverAsync(string videoId, CancellationToken ct = default)
+    public async Task<Transcricao?> TranscreverAsync(string videoId, string? channelId = null, CancellationToken ct = default)
     {
         var workDir = Path.Combine(_options.TempDirectory, "giom_whisper", videoId);
         Directory.CreateDirectory(workDir);
 
         try
         {
-            var audioPath = await DownloadAudioAsync(videoId, workDir, ct);
+            var audioPath = await _audioDownloader.BaixarAudioAsync(videoId, channelId, workDir, ct);
             var texto = await TranscreverViaApiAsync(audioPath, videoId, ct);
 
             return new Transcricao
@@ -82,24 +82,6 @@ public class WhisperTranscricaoService : ITranscricaoService
         {
             TryCleanup(workDir);
         }
-    }
-
-    private async Task<string> DownloadAudioAsync(string videoId, string workDir, CancellationToken ct)
-    {
-        var outputTemplate = Path.Combine(workDir, "%(id)s.%(ext)s");
-        var args = $"-x --audio-format mp3 -o \"{outputTemplate}\" https://www.youtube.com/watch?v={videoId}";
-
-        _logger.LogInformation("Baixando áudio do vídeo {VideoId} com yt-dlp", videoId);
-        var exitCode = await RunProcessAsync(_options.YtDlpPath, args, ct);
-
-        if (exitCode != 0)
-            throw new NenhumResultadoEncontradoException("Whisper", $"yt-dlp falhou (código {exitCode}) ao baixar áudio do vídeo {videoId}");
-
-        var audioPath = Directory.GetFiles(workDir, "*.mp3").FirstOrDefault();
-        if (audioPath == null)
-            throw new NenhumResultadoEncontradoException("Whisper", $"yt-dlp não gerou arquivo de áudio pro vídeo {videoId}");
-
-        return audioPath;
     }
 
     private async Task<string> TranscreverViaApiAsync(string audioPath, string videoId, CancellationToken ct)
@@ -137,25 +119,6 @@ public class WhisperTranscricaoService : ITranscricaoService
             throw new NenhumResultadoEncontradoException("Whisper", $"API devolveu transcrição vazia pro vídeo {videoId}");
 
         return texto;
-    }
-
-    private static async Task<int> RunProcessAsync(string executable, string arguments, CancellationToken ct)
-    {
-        using var process = new System.Diagnostics.Process
-        {
-            StartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = executable,
-                Arguments = arguments,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-                UseShellExecute = false
-            }
-        };
-
-        process.Start();
-        await process.WaitForExitAsync(ct);
-        return process.ExitCode;
     }
 
     private void TryCleanup(string workDir)

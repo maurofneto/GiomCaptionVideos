@@ -53,13 +53,12 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Registra o orquestrador central do pipeline (Feature #104) — PipelineHandler +
-    /// EtapaConcluidaQueueConsumer, lendo a topologia por canal de Topologia:Canais/
-    /// Topologia:Topologia. Único lugar que decide "o que vem depois de cada etapa" — nenhum
-    /// worker de etapa sabe disso.
+    /// EtapaConcluidaQueueConsumer, lendo a topologia por canal do banco (ITopologiaRepository,
+    /// tabela etapa_topologia — Config First). Único lugar que decide "o que vem depois de cada
+    /// etapa" — nenhum worker de etapa sabe disso. Exige AddTopologia (Composition) no worker.
     /// </summary>
     public static IServiceCollection AddPipelineOrquestrador(this IServiceCollection services, IConfiguration config)
     {
-        services.Configure<Options.TopologiaOptions>(config.GetSection("Topologia"));
         services.AddSingleton<PipelineHandler>();
         // Sem factory: EtapaConcluidaQueueConsumer resolve a fila keyed via [FromKeyedServices]
         // no próprio construtor e depende do PipelineHandler diretamente (não de um Func) — o
@@ -78,7 +77,28 @@ public static class ServiceCollectionExtensions
         services.Configure<RagOptions>(config.GetSection("Rag"));
         services.Configure<DebugMetricasOptions>(config.GetSection("DebugMetricas"));
         services.Configure<HistoricoOptions>(config.GetSection("ConversaHistorico"));
-        services.AddSingleton<ChatBotProcessor>();
+        return services;
+    }
+
+    /// <summary>
+    /// Sobe um ChatBotProcessor DEDICADO a um canal (US #24). Cada processor escuta o seu canal e
+    /// mantém o próprio controle de "perguntas em andamento", então Telegram e WhatsApp rodam
+    /// lado a lado sem um interferir no outro.
+    ///
+    /// ActivatorUtilities.CreateInstance resolve as outras dependências do construtor pelo
+    /// container normalmente e só substitui o IChatChannel pelo canal desta chave. Sem isso
+    /// seria preciso repetir a lista inteira de dependências aqui — e ela quebraria toda vez que
+    /// o ChatBotProcessor ganhasse um parâmetro novo.
+    /// </summary>
+    public static IServiceCollection AddChatBotProcessorDoCanal(this IServiceCollection services, string chaveDoCanal)
+    {
+        services.AddKeyedSingleton(chaveDoCanal, (IServiceProvider sp, object? chave) =>
+            ActivatorUtilities.CreateInstance<ChatBotProcessor>(sp, sp.GetRequiredKeyedService<IChatChannel>(chave)));
+
+        services.AddSingleton(sp => new CanalDeChatAtivo(
+            chaveDoCanal,
+            ct => sp.GetRequiredKeyedService<ChatBotProcessor>(chaveDoCanal).RunAsync(ct)));
+
         return services;
     }
 

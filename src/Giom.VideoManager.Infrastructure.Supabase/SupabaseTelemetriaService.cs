@@ -17,6 +17,7 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 public class SupabaseTelemetriaService : ITelemetriaSink
 {
     private readonly HttpClient _http;
+    private readonly SupabaseOptions _options;
     private readonly ILogger<SupabaseTelemetriaService> _logger;
 
     private static readonly JsonSerializerSettings JsonSettings = new()
@@ -27,12 +28,9 @@ public class SupabaseTelemetriaService : ITelemetriaSink
 
     public SupabaseTelemetriaService(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory, ILogger<SupabaseTelemetriaService> logger)
     {
-        var sb = options.Value;
+        this._options = options.Value;
         _logger = logger;
         _http = httpClientFactory.CreateClient("supabase");
-        _http.BaseAddress = new Uri(sb.Url);
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sb.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", sb.SecretKey);
     }
 
     public async Task RegistrarAsync(RegistroTelemetria registro, CancellationToken ct = default)
@@ -54,7 +52,7 @@ public class SupabaseTelemetriaService : ITelemetriaSink
             };
 
             var content = new StringContent(JsonConvert.SerializeObject(dto, JsonSettings), Encoding.UTF8, "application/json");
-            await _http.PostAsync("/rest/v1/interacao_log", content, ct);
+            await _http.PostAsync(_options.Rest("/interacao_log"), content, ct);
         }
         catch (Exception ex)
         {

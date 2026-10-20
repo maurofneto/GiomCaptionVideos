@@ -10,6 +10,7 @@ using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Infrastructure.Telemetria;
+using Giom.VideoManager.Infrastructure.YouTube;
 using Giom.VideoManager.SmokeTests;
 using Giom.VideoManager.Resumo.Worker;
 using Giom.VideoManager.Transcricao.Worker;
@@ -17,7 +18,7 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 
 // Mesma composição do Giom.VideoManager.Instituto.Worker (Program.cs) — só troca
-// AddVideoSourceService (YouTube real) pelo FakeVideoSource, e roda uma vez só.
+// a descoberta de vídeo real do YouTube pelo FakeVideoSource, e roda uma vez só.
 // Objetivo: exercitar o pipeline real (resumo/categorização/embedding, Sentry, Helicone,
 // CorrelationId) sem depender do YouTube nem de nenhuma chamada de IA — todo o CONTEÚDO de
 // entrada (legenda/resumo/categoria/embedding) é 100% sintético (Fake*Service), sem nenhuma
@@ -78,7 +79,10 @@ using var host = Host.CreateDefaultBuilder(args)
         // senão a etapa "transcricao" nunca abre span/métrica nesta ferramenta).
         if (config.GetSection("Transcricao:FallbackChain").Exists())
         {
+            // Credencial OAuth só por canal ({secrets_key}:Google:*), igual aos workers — lê
+            // canal_ingestao do Supabase dev; canal sem credencial é pulado (cadeia segue).
             services.AddTranscriptionService(config);
+            services.AddTranscricaoMultiCanal(config);
         }
         else
         {
@@ -167,6 +171,7 @@ using var host = Host.CreateDefaultBuilder(args)
         services.AddEtapaConsumer<IEtapaEmbeddingHandler>("embedding", "video.embedding", (h, v, ct) => h.ProcessarAsync(v, ct));
 
         services.AddFilaVideoEtapa<EtapaConcluidaMensagem>("etapa-concluida", config, "FilaEtapaConcluida");
+        services.AddTopologia(config);   // Config First: etapa_topologia (banco)
         services.AddPipelineOrquestrador(config);
     })
     .Build();

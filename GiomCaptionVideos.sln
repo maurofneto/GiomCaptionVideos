@@ -91,13 +91,23 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastru
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Cohere", "src\Giom.VideoManager.Infrastructure.Cohere\Giom.VideoManager.Infrastructure.Cohere.csproj", "{9FCD39B5-2519-4E42-A78C-E1B035BAA35F}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.Kimi", "src\Giom.VideoManager.Infrastructure.Kimi\Giom.VideoManager.Infrastructure.Kimi.csproj", "{04586682-66C8-425E-B6E3-4EC7E22A3D23}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.BackfillEmbeddings", "tools\Giom.VideoManager.BackfillEmbeddings\Giom.VideoManager.BackfillEmbeddings.csproj", "{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.WhatsApp", "src\Giom.VideoManager.Infrastructure.WhatsApp\Giom.VideoManager.Infrastructure.WhatsApp.csproj", "{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.WhatsApp.Tests", "tests\Giom.VideoManager.Infrastructure.WhatsApp.Tests\Giom.VideoManager.Infrastructure.WhatsApp.Tests.csproj", "{14558048-4AD6-4D96-95DC-4FF2B843C2D4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.GrokVoice", "src\Giom.VideoManager.Infrastructure.GrokVoice\Giom.VideoManager.Infrastructure.GrokVoice.csproj", "{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Giom.VideoManager.Infrastructure.GrokVoice.Tests", "tests\Giom.VideoManager.Infrastructure.GrokVoice.Tests\Giom.VideoManager.Infrastructure.GrokVoice.Tests.csproj", "{15EFCB16-84B4-478D-B562-19235A90704F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -613,6 +623,54 @@ Global
 		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|x64.Build.0 = Release|Any CPU
 		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|x86.ActiveCfg = Release|Any CPU
 		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0}.Release|x86.Build.0 = Release|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Debug|x64.Build.0 = Debug|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Debug|x86.Build.0 = Debug|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Release|x64.ActiveCfg = Release|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Release|x64.Build.0 = Release|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Release|x86.ActiveCfg = Release|Any CPU
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372}.Release|x86.Build.0 = Release|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Debug|x64.Build.0 = Debug|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Debug|x86.Build.0 = Debug|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Release|x64.ActiveCfg = Release|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Release|x64.Build.0 = Release|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Release|x86.ActiveCfg = Release|Any CPU
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4}.Release|x86.Build.0 = Release|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Debug|x64.Build.0 = Debug|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Debug|x86.Build.0 = Debug|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Release|x64.ActiveCfg = Release|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Release|x64.Build.0 = Release|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Release|x86.ActiveCfg = Release|Any CPU
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0}.Release|x86.Build.0 = Release|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Debug|x64.Build.0 = Debug|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Debug|x86.Build.0 = Debug|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Release|x64.ActiveCfg = Release|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Release|x64.Build.0 = Release|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Release|x86.ActiveCfg = Release|Any CPU
+		{15EFCB16-84B4-478D-B562-19235A90704F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -658,8 +716,12 @@ Global
 		{26396025-8F32-4AD8-8B3B-824D789B8969} = {8B445307-26AA-4784-A14B-E507FD5DEFD6}
 		{A31CECB2-55F7-4F05-AEFE-875D0CB8BBE0} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{9FCD39B5-2519-4E42-A78C-E1B035BAA35F} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
-		{04586682-66C8-425E-B6E3-4EC7E22A3D23} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{04586682-66C8-425E-B6E3-4EC7E22A3D23} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
 		{1A53DA31-BFD3-4C8A-8712-1E10F1BD9DA0} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{5AFF4D29-A8C1-46D5-9AE9-3A989CBF7372} = {B325FDF6-5963-4F08-8812-B58E9F3AD027}
+		{14558048-4AD6-4D96-95DC-4FF2B843C2D4} = {97605A51-797B-B55B-2CE8-7FAAABFE393E}
+		{A60F3236-45F9-4106-AAD5-FAACE77ED1A0} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{15EFCB16-84B4-478D-B562-19235A90704F} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C7A72C10-8571-4565-BE89-8679CD2F3695}

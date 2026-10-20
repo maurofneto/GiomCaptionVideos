@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Interfaces;
+using Giom.VideoManager.Infrastructure.Canais;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Runtime.CompilerServices;
@@ -21,6 +22,9 @@ public class TelegramChatChannelOptions
 /// </summary>
 public class TelegramChatChannel : IChatChannel
 {
+    /// <summary>Chave deste canal no container (US #24) — o bot sobe um ChatBotProcessor por canal ligado.</summary>
+    public const string ChaveCanal = "telegram";
+
     private static readonly Regex TagHtml = new(@"<[^>]+>", RegexOptions.Compiled);
 
     // Telegram rejeita mensagens de texto acima de 4096 caracteres — margem de segurança
@@ -171,7 +175,7 @@ public class TelegramChatChannel : IChatChannel
     public async Task ResponderAsync(string chatId, string texto, string? avaliacaoId = null, CancellationToken ct = default)
     {
         var id = long.Parse(chatId);
-        var partes = DividirEmPartes(texto, LimiteSeguroPorMensagem);
+        var partes = DivisorDeMensagem.DividirEmPartes(texto, LimiteSeguroPorMensagem);
 
         // Divide ANTES de converter pra HTML — cada parte vira uma mensagem própria, então
         // dividir por parágrafo aqui evita cortar uma tag <b>/<i> ao meio entre duas mensagens.
@@ -253,44 +257,5 @@ public class TelegramChatChannel : IChatChannel
         {
             _logger.LogWarning(ex, "Falha ao registrar feedback do callback {Data}", data);
         }
-    }
-
-    /// <summary>
-    /// Corta o texto em pedaços que cabem numa mensagem do Telegram, preferindo cortar
-    /// em quebra de parágrafo (linha em branco) — só corta no meio de um parágrafo se ele
-    /// sozinho já for maior que o limite.
-    /// </summary>
-    internal static List<string> DividirEmPartes(string texto, int limite)
-    {
-        if (texto.Length <= limite) return [texto];
-
-        var partes = new List<string>();
-        var atual = new StringBuilder();
-
-        foreach (var paragrafo in texto.Split("\n\n"))
-        {
-            var candidato = atual.Length == 0 ? paragrafo : $"{atual}\n\n{paragrafo}";
-
-            if (candidato.Length > limite && atual.Length > 0)
-            {
-                partes.Add(atual.ToString());
-                atual.Clear();
-                atual.Append(paragrafo);
-            }
-            else
-            {
-                atual.Clear();
-                atual.Append(candidato);
-            }
-
-            while (atual.Length > limite)
-            {
-                partes.Add(atual.ToString(0, limite));
-                atual.Remove(0, limite);
-            }
-        }
-
-        if (atual.Length > 0) partes.Add(atual.ToString());
-        return partes;
     }
 }

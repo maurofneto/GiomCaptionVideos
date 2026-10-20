@@ -10,25 +10,28 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
 {
     private readonly HttpClient _http;
+    private readonly SupabaseOptions _options;
 
-    public SupabaseCanalIngestaoRepository(IOptions<SupabaseOptions> options)
+    public SupabaseCanalIngestaoRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory)
     {
-        var opt = options.Value;
-        _http = new HttpClient { BaseAddress = new Uri(opt.Url) };
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", opt.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", opt.SecretKey);
+        this._options = options.Value;
+        _http = httpClientFactory.CreateClient("supabase");
     }
 
     public async Task<IReadOnlyList<CanalIngestaoConfig>> GetCanaisAtivosAsync(CancellationToken ct = default)
     {
-        var json = await _http.GetStringAsync("/rest/v1/canal_ingestao?ativo=eq.true", ct);
+        var response = await _http.SendAsync(new HttpRequestMessage(HttpMethod.Get, _options.Rest("/canal_ingestao?ativo=eq.true")), ct);
+        var json = await response.Content.ReadAsStringAsync();
+
+        response.EnsureSuccessStatusCode();
+
         var rows = JsonConvert.DeserializeObject<List<CanalIngestaoRow>>(json) ?? [];
 
         return rows.Select(r => new CanalIngestaoConfig(
             r.channel_id, r.playlist_id, r.nome, r.mine, r.ativo,
             ParseRelevanciaTipo(r.relevancia_tipo), r.relevancia_valores,
             r.max_videos_per_run, r.delay_between_videos_ms, r.delay_between_pages_ms,
-            r.secrets_key)).ToList();
+            r.secrets_key, r.privacy_status_filtro)).ToList();
     }
 
     private static RelevanciaTipo ParseRelevanciaTipo(string valor) => valor switch
@@ -42,5 +45,5 @@ public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
         string channel_id, string? playlist_id, string nome, bool mine, bool ativo,
         string relevancia_tipo, List<string> relevancia_valores,
         int max_videos_per_run, int delay_between_videos_ms, int delay_between_pages_ms,
-        string secrets_key);
+        string secrets_key, string? privacy_status_filtro = null);
 }

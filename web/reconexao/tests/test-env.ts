@@ -1,0 +1,21 @@
+// Valores FICTÍCIOS, só para teste. Nada aqui é credencial real.
+export const TEST_ENV: Record<string, string> = {
+  SESSION_SECRET: "test-session-secret-0123456789abcdef0123456789",
+  ALLOWED_EMAILS: "mauro@example.test, outro@example.test",
+  AUTH_GOOGLE_CLIENT_ID: "auth-client-id.test",
+  AUTH_GOOGLE_CLIENT_SECRET: "AUTH-CLIENT-SECRET-TEST",
+  AUTH_REDIRECT_URI: "https://reconexao.example.test/api/auth/callback",
+  YOUTUBE_GOOGLE_CLIENT_ID: "yt-client-id.test",
+  YOUTUBE_GOOGLE_CLIENT_SECRET: "YT-CLIENT-SECRET-TEST",
+  YOUTUBE_REDIRECT_URI: "https://reconexao.example.test/api/youtube/callback",
+  OAUTH_APP_MODE: "testing",
+  OAUTH_TESTING_EXPIRY_DAYS: "7",
+  RECONEXAO_AWS_REGION: "us-east-1",
+  RECONEXAO_AWS_ACCESS_KEY_ID: "AKIA_REDACTED",
+  RECONEXAO_AWS_SECRET_ACCESS_KEY: "aws-secret-access-key-test-value",
+  SSM_PREFIX: "/giom/dev",
+  SSM_KMS_KEY_ID: "alias/giom-dev-test",
+  SSM_COOKIES_TIER: "Standard",
+  CANAIS_API_URL: "https://canais.example.test",
+  CANAIS_API_TOKEN: "canais-api-token-test-value",
+};

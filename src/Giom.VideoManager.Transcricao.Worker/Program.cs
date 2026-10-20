@@ -4,6 +4,7 @@ using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Composition;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Giom.VideoManager.Infrastructure;
 using Giom.VideoManager.Infrastructure.Logging;
 using Giom.VideoManager.Infrastructure.Sentry;
 using Giom.VideoManager.Transcricao.Worker;
@@ -16,7 +17,7 @@ using var host = Host.CreateDefaultBuilder(args)
         config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
         config.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production"}.json", optional: true);
         config.AddEnvironmentVariables();
-        // Pluggable secrets — troque "Configuration" por "AwsParameterStore" ou "AzureAppConfiguration" em produção
+        // Pluggable secrets — Paths carrega pipeline/ + canais/ (US #146)
         config.AddSecretsProvider(config.Build());
     })
     .UseSerilog((context, _, configuration) =>
@@ -35,7 +36,12 @@ using var host = Host.CreateDefaultBuilder(args)
         var config = ctx.Configuration;
 
         services.AddPersistence(config);          // Supabase — compartilhado entre canais, não é por-canal
-        services.AddTranscriptionService(config);  // Fallback YouTubeCaption→YtDlpCaption→Whisper (Feature #101), mesmo pros 2 canais
+        services.AddTranscriptionService(config);  // Fallback YouTubeCaption→YtDlpCaption→Whisper (Feature #101)
+        // US #146 — OAuth Google + cookies yt-dlp keyed por ChannelId (mesmo padrão da Ingestão #105).
+        // Substitui o cookie único escrito em disco no boot (Bug #144 / pipeline/YtDlp/CookiesContent).
+        services.AddTranscricaoMultiCanal(config);
+        // Versões de yt-dlp/deno + PoToken/Proxy on/off no boot — correlaciona "not a bot" com a imagem.
+        services.AddYtDlpDiagnosticoNoBoot(config);
         services.AddTelemetriaService(config);
         services.AddTracingService(config);
         services.AddObservabilidadeExterna(config);

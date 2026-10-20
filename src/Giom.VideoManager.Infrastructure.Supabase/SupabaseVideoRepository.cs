@@ -13,18 +13,20 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 public class SupabaseOptions
 {
     public string Url { get; init; } = string.Empty;
-
-    /// <summary>
-    /// Chave pública (antiga anon). Prefixo: sb_publishable_...
-    /// Segura para expor no bot/frontend. Sujeita a RLS.
-    /// </summary>
     public string PublishableKey { get; init; } = string.Empty;
+    public string SecretKey { get; init; } = string.Empty;
 
     /// <summary>
-    /// Chave secreta (antiga service_role). Prefixo: sb_secret_...
-    /// Somente backend. Bypassa RLS. Nunca expor.
+    /// Cloud: "/rest/v1". PostgREST no Railway: "".
     /// </summary>
-    public string SecretKey { get; init; } = string.Empty;
+    public string RestPrefix { get; init; } = "/rest/v1";
+
+    public string Rest(string pathAndQuery)
+    {
+        var prefix = string.IsNullOrWhiteSpace(RestPrefix) ? "" : RestPrefix.TrimEnd('/');
+        var path = pathAndQuery.StartsWith('/') ? pathAndQuery : "/" + pathAndQuery;
+        return prefix + path;
+    }
 }
 
 /// <summary>
@@ -47,16 +49,11 @@ public class SupabaseVideoRepository : IVideoRepository
         _options = options.Value;
         _logger = logger;
         _http = httpClientFactory.CreateClient("supabase");
-        _http.BaseAddress = new Uri(_options.Url);
-        // Worker usa SecretKey para contornar RLS e escrever
-        // Ambos os headers devem usar SecretKey — o PostgREST determina o role pelo apikey
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _options.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", _options.SecretKey);
     }
 
     public async Task<Video?> GetByIdAsync(string videoId, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/rest/v1/video?id=eq.{videoId}&select=*,transcricao(*),resumo(*,capitulo(*)),categoria_teologica(video_id,area,subcategoria,peso),video_chunk(chunk_index,origem)", ct);
+        var response = await _http.GetAsync(_options.Rest($"/video?id=eq.{videoId}&select=*,transcricao(*),resumo(*,capitulo(*)),categoria_teologica(video_id,area,subcategoria,peso),video_chunk(chunk_index,origem)"), ct);
         if (!response.IsSuccessStatusCode) return null;
 
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -66,9 +63,9 @@ public class SupabaseVideoRepository : IVideoRepository
 
     public async Task UpsertAsync(Video video, CancellationToken ct = default)
     {
-        await PostgRestUpsertAsync("/rest/v1/video?on_conflict=id", VideoDto.From(video), ct);
-        if (video.Transcricao != null) await PostgRestUpsertAsync("/rest/v1/transcricao?on_conflict=video_id", TranscricaoDto.From(video.Transcricao), ct);
-        if (video.Resumo != null) await PostgRestUpsertAsync("/rest/v1/resumo?on_conflict=video_id", ResumoDto.From(video.Resumo), ct);
+        await PostgRestUpsertAsync(_options.Rest("/video?on_conflict=id"), VideoDto.From(video), ct);
+        if (video.Transcricao != null) await PostgRestUpsertAsync(_options.Rest("/transcricao?on_conflict=video_id"), TranscricaoDto.From(video.Transcricao), ct);
+        if (video.Resumo != null) await PostgRestUpsertAsync(_options.Rest("/resumo?on_conflict=video_id"), ResumoDto.From(video.Resumo), ct);
         if (video.Categorias.Count > 0) await UpsertCategoriasAsync(video.Categorias, ct);
     }
 
@@ -76,7 +73,7 @@ public class SupabaseVideoRepository : IVideoRepository
     {
         // Apaga as categorias antigas do vídeo e insere as novas em batch
         var videoId = categorias[0].VideoId;
-        var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/rest/v1/categoria_teologica?video_id=eq.{videoId}");
+        var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, _options.Rest($"/categoria_teologica?video_id=eq.{videoId}"));
         var deleteResponse = await _http.SendAsync(deleteRequest, ct);
         if (!deleteResponse.IsSuccessStatusCode)
         {
@@ -86,7 +83,7 @@ public class SupabaseVideoRepository : IVideoRepository
 
         var dtos = categorias.Select(CategoriaDto.From).ToList();
         var content = new StringContent(JsonConvert.SerializeObject(dtos, JsonSettings), Encoding.UTF8, "application/json");
-        var request = new HttpRequestMessage(HttpMethod.Post, "/rest/v1/categoria_teologica") { Content = content };
+        var request = new HttpRequestMessage(HttpMethod.Post, _options.Rest("/categoria_teologica")) { Content = content };
         request.Headers.Add("Prefer", "resolution=merge-duplicates");
         var response = await _http.SendAsync(request, ct);
 

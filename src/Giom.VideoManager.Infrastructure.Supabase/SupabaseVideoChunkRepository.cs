@@ -11,25 +11,23 @@ namespace Giom.VideoManager.Infrastructure.Supabase;
 public class SupabaseVideoChunkRepository : IVideoChunkRepository
 {
     private readonly HttpClient _http;
+    private readonly SupabaseOptions _options;
     private readonly ILogger<SupabaseVideoChunkRepository> _logger;
 
     private const int BatchSize = 20;
 
     public SupabaseVideoChunkRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory, ILogger<SupabaseVideoChunkRepository> logger)
     {
+        this._options = options.Value;
         _logger = logger;
 
-        var sb = options.Value;
         _http = httpClientFactory.CreateClient("supabase");
-        _http.BaseAddress = new Uri(sb.Url);
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sb.SecretKey);
-        _http.DefaultRequestHeaders.Add("apikey", sb.SecretKey);
         _http.Timeout = TimeSpan.FromMinutes(5);
     }
 
     public async Task DeletarPorVideoAsync(string videoId, string origem, CancellationToken ct = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"/rest/v1/video_chunk?video_id=eq.{videoId}&origem=eq.{origem}");
+        var request = new HttpRequestMessage(HttpMethod.Delete, _options.Rest($"/video_chunk?video_id=eq.{videoId}&origem=eq.{origem}"));
         request.Headers.Add("Prefer", "return=minimal");
 
         var response = await _http.SendAsync(request, ct);
@@ -54,7 +52,7 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
             });
 
             var content = new StringContent(JsonConvert.SerializeObject(batch), Encoding.UTF8, "application/json");
-            var request = new HttpRequestMessage(HttpMethod.Post, "/rest/v1/video_chunk") { Content = content };
+            var request = new HttpRequestMessage(HttpMethod.Post, _options.Rest("/video_chunk")) { Content = content };
             request.Headers.Add("Prefer", "resolution=merge-duplicates,return=minimal");
 
             var response = await _http.SendAsync(request, ct);
@@ -70,7 +68,7 @@ public class SupabaseVideoChunkRepository : IVideoChunkRepository
 
     public async Task<IReadOnlyList<string>> ListarVideoIdsPorOrigemAsync(string origem, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/rest/v1/video_chunk?select=video_id&origem=eq.{origem}", ct);
+        var response = await _http.GetAsync(_options.Rest($"/video_chunk?select=video_id&origem=eq.{origem}"), ct);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
