@@ -1,0 +1,155 @@
+name: Reconexão (Vercel)
+
+# App web/reconexao (Next.js). Build/testes em PR e push; deploy só em push:
+#   dev    => Preview + alias fixo (o redirect URI do Google exige URL exata)
+#   master => Production, com aprovação manual (environment reconexao-prod)
+# Mesmo interruptor do ci-cd.yml: sem a variável de repositório DEPLOY_ENABLED='true' só roda o gate.
+#
+# Environments (Settings > Environments): reconexao-dev (branch dev) e reconexao-prod (branch
+# master + required reviewers). Variáveis: VERCEL_ORG_ID, VERCEL_PROJECT_ID, VERCEL_SCOPE (opcional)
+# e, no dev, RECONEXAO_PREVIEW_ALIAS. Secret: VERCEL_TOKEN (por environment).
+#
+# ARMADILHA DO PRIMEIRO DEPLOY: a Vercel trata o PRIMEIRO deployment de um projeto novo como
+# PRODUÇÃO mesmo sem `--prod`. Por isso o Preview usa `pull --environment=preview` + `build` +
+# `deploy --prebuilt --target=preview` (target EXPLÍCITO, nunca --prod) e, ANTES do alias, o
+# script .github/scripts/vercel-preview-alias.mjs confirma via REST API que o deployment é Preview.
+
+on:
+  push:
+    branches: [dev, master]
+    paths:
+      - 'web/reconexao/**'
+      - '.github/workflows/reconexao.yml'
+      - '.github/scripts/vercel-preview-alias.mjs'
+  pull_request:
+    branches: [dev, master]
+    paths:
+      - 'web/reconexao/**'
+      - '.github/workflows/reconexao.yml'
+      - '.github/scripts/vercel-preview-alias.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reconexao-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: 24.x
+  VERCEL_CLI_VERSION: 63.1.0
+
+defaults:
+  run:
+    working-directory: web/reconexao
+
+jobs:
+  build:
+    name: Reconexão — build e testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/reconexao/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+      # Sem nenhum segredo: valores FICTÍCIOS só para o `next build` compilar.
+      - name: next build
+        run: npm run build
+        env:
+          SESSION_SECRET: build-only-fake-session-secret-0123456789abcdef
+          ALLOWED_EMAILS: build@example.invalid
+          AUTH_GOOGLE_CLIENT_ID: build-fake
+          AUTH_GOOGLE_CLIENT_SECRET: build-fake
+          AUTH_REDIRECT_URI: https://build.example.invalid/api/auth/callback
+          YOUTUBE_GOOGLE_CLIENT_ID: build-fake
+          YOUTUBE_GOOGLE_CLIENT_SECRET: build-fake
+          YOUTUBE_REDIRECT_URI: https://build.example.invalid/api/youtube/callback
+          OAUTH_APP_MODE: testing
+          RECONEXAO_AWS_REGION: us-east-1
+          RECONEXAO_AWS_ACCESS_KEY_ID: build-fake
+          RECONEXAO_AWS_SECRET_ACCESS_KEY: build-fake
+          SSM_PREFIX: /giom/build
+          SSM_KMS_KEY_ID: build-fake
+          SSM_COOKIES_TIER: Standard
+          CANAIS_API_URL: https://build.example.invalid
+          CANAIS_API_REST_PREFIX: /rest/v1
+          CANAIS_API_TOKEN: build-fake
+          CANAIS_API_KEY: build-fake
+
+  deploy-preview:
+    name: Deploy Preview (dev)
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: reconexao-dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Vercel pull + build + deploy Preview, checa target, alias fixo
+        env:
+          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          PREVIEW_ALIAS: ${{ vars.RECONEXAO_PREVIEW_ALIAS }}
+        run: |
+          set -euo pipefail
+          SCOPE_ARGS=()
+          if [ -n "${VERCEL_SCOPE:-}" ]; then SCOPE_ARGS=(--scope "${VERCEL_SCOPE}"); fi
+          VERCEL=(npx --yes "vercel@${VERCEL_CLI_VERSION}")
+
+          # Grava .vercel/project.json e .vercel/.env.preview.local (gitignored; NUNCA imprimir).
+          "${VERCEL[@]}" pull --yes --environment=preview "${SCOPE_ARGS[@]}"
+          # Sem --prod: usa as env vars de Preview.
+          "${VERCEL[@]}" build --yes "${SCOPE_ARGS[@]}"
+          # stdout do `vercel deploy` é só a URL do deployment; progresso vai pro stderr.
+          DEPLOY_URL="$("${VERCEL[@]}" deploy --prebuilt --target=preview "${SCOPE_ARGS[@]}")"
+          echo "Deployment: ${DEPLOY_URL}"
+
+          # Guarda de target + alias via REST API (ver cabeçalho). Token só por env.
+          export DEPLOY_URL
+          node "$GITHUB_WORKSPACE/.github/scripts/vercel-preview-alias.mjs"
+
+  deploy-prod:
+    name: Deploy Production (master)
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    # Aprovação manual: required reviewers do environment.
+    environment: reconexao-prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Vercel pull + build + deploy Production
+        env:
+          VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          SCOPE_ARGS=()
+          if [ -n "${VERCEL_SCOPE:-}" ]; then SCOPE_ARGS=(--scope "${VERCEL_SCOPE}"); fi
+          VERCEL=(npx --yes "vercel@${VERCEL_CLI_VERSION}")
+          # Grava .vercel/.env.production.local (gitignored; NUNCA imprimir).
+          "${VERCEL[@]}" pull --yes --environment=production "${SCOPE_ARGS[@]}"
+          "${VERCEL[@]}" build --prod --yes "${SCOPE_ARGS[@]}"
+          "${VERCEL[@]}" deploy --prebuilt --prod "${SCOPE_ARGS[@]}"
