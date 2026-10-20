@@ -60,7 +60,6 @@ gh secret set SUPABASE_ACCESS_TOKEN --env prod -R maurofneto/GiomCaptionVideos
 1. Aplicar IAM + configurar variáveis/secrets/environments.
 2. Rodar o workflow manualmente (`workflow_dispatch`) em `dev` com `DEPLOY_ENABLED=true` e
    conferir imagens no ECR e services reiniciados.
-3. Desligar o trigger do Azure Pipelines, remover `azure-pipelines.yml` e
-   `pipelines/templates/`.
+3. ~~Desligar o trigger do Azure Pipelines e remover `azure-pipelines.yml` e `pipelines/templates/`~~ — feito (#169).
 4. Desativar e depois apagar as access keys do usuário `giom-ci-deploy`.
 5. Exigir o check `Build e testes` nos rulesets de `dev` e `master`.
