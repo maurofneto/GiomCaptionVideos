@@ -17,9 +17,12 @@ Giom) e alimenta um bot RAG no Telegram. Visão geral completa: [`README.md`](RE
 
 ## Regras que sempre valem (sem precisar ler os docs)
 
-- `dev` = integração (auto-deploy); `master` só via PR aprovado, nunca push direto.
-- Branch/worktree nova: `GiomCaptionVideo-[XXXX]/[XXXX]-descrição`, a partir de `dev`
-  atualizado.
+- Código e board vivem no GitHub (`maurofneto/GiomCaptionVideos`, repo **público**); usar o
+  `gh` CLI. Issues = work items; Project "Giom — Board" (nº 8).
+- `dev` = integração (auto-deploy, branch padrão); `master` só via PR, nunca push direto.
+- Branch/worktree nova: `[XXXX]-descrição` (XXXX = número da issue), a partir de `dev`
+  atualizado. PR com `Closes #XXXX`.
+- Repo público: nunca colocar secret/token/dado pessoal em código, issue, PR ou comentário.
 - Nunca commitar secret real — placeholder em branco + comentário do path SSM
   (`/giom/{dev,prod}/{instituto,ministerio}/...`).
 - Decorator sobre a interface do Domain do meio pra integrar dois adapters — nunca referência
@@ -32,6 +35,6 @@ Giom) e alimenta um bot RAG no Telegram. Visão geral completa: [`README.md`](RE
 - **Nunca despejar JSON/log cru grande na saída.** Ao consultar AWS CLI (logs, boards, describe-*), filtrar no servidor com `--query` em vez de trazer tudo e filtrar depois. Se o output for grande mesmo assim, redirecionar pra arquivo e ler só o trecho relevante (`Read` com `offset`/`limit`, ou `Grep` com `head_limit`), nunca colar o arquivo inteiro na resposta.
 - **Evitar `/fast` sem pedido explícito do usuário.** Fast mode usa Opus com pricing mais alto por velocidade — não é um modo econômico. Sonnet é o padrão; só escalar pra Opus em problemas de raciocínio genuinamente difíceis.
 - **Rebuilds/testes escopados.** Pra mudanças isoladas, rodar só o projeto de teste afetado (`dotnet test tests/X.Tests`) em vez da solução inteira. Rodar a solução completa só quando a mudança tocar múltiplos projetos ou antes de um PR.
-- **Delegar leitura de artefatos grandes pra subagent com `model: haiku`** quando a tarefa for só puxar/filtrar informação (logs da ECS, board do Azure DevOps, dumps de API) sem precisar de raciocínio pesado — mantém esse volume fora do contexto principal.
+- **Delegar leitura de artefatos grandes pra subagent com `model: haiku`** quando a tarefa for só puxar/filtrar informação (logs da ECS, listas grandes de issues, dumps de API) sem precisar de raciocínio pesado — mantém esse volume fora do contexto principal.
 - **`/compact` em pontos de corte naturais entre tarefas**, não no meio de uma tarefa em andamento (invalida o cache da conversa).
 - **Preferir sessão nova pra tarefas não relacionadas** em vez de continuar uma sessão longa e heterogênea — a memória automática (`memory/`) já preserva o contexto relevante entre sessões, então trocar de sessão não perde informação importante.
