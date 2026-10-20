@@ -24,7 +24,7 @@ public class SentryTransactionRulesTests
     {
         var scrubber = new RegexSentryDataScrubber(@"/bot\d+:[A-Za-z0-9_-]+", "/bot***");
 
-        var resultado = scrubber.Redigir("https://api.telegram.org/botTELEGRAM_BOT_TOKEN_REDACTED/getUpdates");
+        var resultado = scrubber.Redigir("https://api.telegram.org/bot123456789:AAFakeTestToken_abc/getUpdates");
 
         Assert.Equal("https://api.telegram.org/bot***/getUpdates", resultado);
     }
