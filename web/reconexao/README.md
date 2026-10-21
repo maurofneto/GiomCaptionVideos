@@ -40,7 +40,7 @@ Todas validadas no boot (`src/instrumentation.ts`); falta/valor inválido → er
 | `AUTH_REDIRECT_URI` | `https://<alias-preview>/api/auth/callback` | `https://<dominio-prod>/api/auth/callback` |
 | `YOUTUBE_GOOGLE_CLIENT_ID` / `YOUTUBE_GOOGLE_CLIENT_SECRET` | **iguais** aos do pipeline dev | **iguais** aos do pipeline prod |
 | `YOUTUBE_REDIRECT_URI` | `https://<alias-preview>/api/youtube/callback` | `https://<dominio-prod>/api/youtube/callback` |
-| `OAUTH_APP_MODE` (`testing`\|`production`) | conforme o app no Google Cloud | idem |
+| `OAUTH_APP_MODE` (`testing`\|`production`) | conforme o app no Google Cloud | `production` depois que o app OAuth for publicado (em `testing` a página avisa expiração de 7 dias) |
 | `OAUTH_TESTING_EXPIRY_DAYS` (opcional, padrão 7) | 7 | 7 |
 | `OAUTH_REVOKE_ON_MISMATCH` (opcional, padrão `false`) | `false` | `false` (ver trade-off em "Segurança") |
 | `RECONEXAO_AWS_REGION` | `us-east-1` | `us-east-1` |
@@ -51,6 +51,7 @@ Todas validadas no boot (`src/instrumentation.ts`); falta/valor inválido → er
 | `CANAIS_API_URL` (origem https; http só em localhost) | branch `dev` do Supabase: `https://lusfwbiiuxyzduniptes.supabase.co` | origem do projeto Supabase: `https://<ref>.supabase.co` |
 | `CANAIS_API_REST_PREFIX` (opcional, padrão vazio) | `/rest/v1` | `/rest/v1` |
 | `CANAIS_API_TOKEN` (**obrigatório**) | JWT da role `reconexao_leitura` na fonte de dev | JWT da role `reconexao_leitura` no Supabase de prod |
+| `CONTATO_EMAIL` (opcional) | e-mail público exibido em `/sobre`, `/privacidade` e `/termos` | idem; sem ele as páginas mostram "contato indisponível" |
 | `CANAIS_API_KEY` (opcional) | publishable key da branch dev | publishable/anon key do projeto (o gateway do Supabase exige o header `apikey`) |
 
 `AUTH_REDIRECT_URI` e `YOUTUBE_REDIRECT_URI` precisam ter a mesma origem. O prefixo
@@ -213,13 +214,28 @@ O tier Advanced é irreversível no parâmetro (não volta para Standard) e tem 
 parâmetro; só vale usar se o `cookies.txt` filtrado passar de 4 KB. Sem `kms:GenerateDataKey`, o
 `PutParameter` dos cookies em Advanced falha com `AccessDenied`.
 
+## Páginas legais (publicação do app OAuth Google)
+
+`/sobre` (página inicial), `/privacidade` e `/termos` são públicas e estáticas (sem dado
+sensível), exigidas pelo Google para publicar/verificar o app OAuth — ver
+[`docs/google-oauth-publicacao.md`](../../docs/google-oauth-publicacao.md). Código em
+`src/app/{sobre,privacidade,termos}` e `src/lib/legal.tsx`; liberadas em `PUBLIC_PATHS`
+(`src/proxy.ts`).
+
+- `CONTATO_EMAIL` é lida **em tempo de build** (páginas pré-renderizadas). Mudar a variável na
+  Vercel **não basta**, e "Redeploy" da Vercel reaproveita o build antigo: é preciso rodar de novo
+  a pipeline `GiomReconexao-Web` (que faz `vercel pull` + `vercel build`) e aprovar o
+  `reconexao-prod`.
+- As páginas herdam `robots: noindex` do layout (o Google não precisa indexá-las para publicar).
+
 ## Segurança
 
 - Acesso: sign-in Google separado (`openid email`), sessão em cookie `__Host-` httpOnly/Secure/
   Lax assinado (8 h), allowlist re-checada a cada requisição. Fora da allowlist → 403 em todas as
   rotas, inclusive `/api/youtube/callback`; checado no proxy (`src/proxy.ts`, antigo middleware) **e** em cada handler. Únicas
   rotas sem sessão: `/api/auth/login` e `/api/auth/callback` (este responde 403 a quem não está
-  na allowlist). Navegação (HTML) sem sessão é redirecionada ao sign-in; chamadas de API sem
+  na allowlist), `/api/auth/logout` e as páginas legais estáticas `/sobre`, `/privacidade` e
+  `/termos` (ver "Páginas legais"). Navegação (HTML) sem sessão é redirecionada ao sign-in; chamadas de API sem
   sessão recebem 403. POSTs exigem `Origin` igual à origem pública.
 - OAuth do YouTube: `access_type=offline`, `prompt=consent`, sem `include_granted_scopes`, escopo
   `youtube.force-ssl`, `state` + PKCE S256 num cookie AES-GCM de uso único (10 min) amarrado à
