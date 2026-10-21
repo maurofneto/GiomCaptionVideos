@@ -71,7 +71,7 @@ depois de qualquer recriação da branch: com a service_role, `GET /rest/v1/cana
 
 ## Pendências conhecidas (15/10/2026)
 
-- **Pipeline (`azure-pipelines.yml`, stage `Migrations`)**: o variable group `giom-dev` já aponta `SUPABASE_PROJECT_REF` para `lusfwbiiuxyzduniptes` (antes: `fajrstyqgogmqzceujjt`, projeto antigo de dev). O `supabase link` + `db push` do pipeline contra a branch ainda **não foi exercitado**: confira o primeiro run após o merge do PR 107.
+- **Pipeline (`.github/workflows/ci-cd.yml`, job `Migrations`)**: a variável `SUPABASE_PROJECT_REF` do environment `dev` aponta `SUPABASE_PROJECT_REF` para `lusfwbiiuxyzduniptes` (antes: `fajrstyqgogmqzceujjt`, projeto antigo de dev). O `supabase link` + `db push` do pipeline contra a branch ainda **não foi exercitado**: confira o primeiro run após o merge do PR 107.
 - **Imagens de dev já publicadas** ainda têm a URL do Railway no `appsettings.Development.json`;
   só passam a usar a branch depois do merge do PR 107 e do deploy. Para testar antes, use
   override de ambiente na task: `Supabase__Url`, `Supabase__RestPrefix=/rest/v1`.
@@ -82,4 +82,4 @@ depois de qualquer recriação da branch: com a service_role, `GET /rest/v1/cana
 
 ## Histórico fora de ordem (`--include-all`)
 
-O `supabase db push` recusa aplicar uma migration cuja versão é anterior à última registrada no remoto ("Found local migration files to be inserted before the last migration"). Isso acontece depois de um `migration repair --status applied` de uma versão nova ou de uma migration aplicada à mão. O estágio `Migrations` do `azure-pipelines.yml` usa `--include-all` para não travar; **o estágio falho não impede os Deploys seguintes**, então um histórico fora de ordem deixava código novo com schema antigo (promoção de 16/10/2026, US #152). Ao registrar uma migration como aplicada, confira antes com `supabase db push --include-all --dry-run` o que ainda está pendente.
+O `supabase db push` recusa aplicar uma migration cuja versão é anterior à última registrada no remoto ("Found local migration files to be inserted before the last migration"). Isso acontece depois de um `migration repair --status applied` de uma versão nova ou de uma migration aplicada à mão. O job `Migrations` do `ci-cd.yml` usa `--include-all` para não travar; **o estágio falho não impede os Deploys seguintes**, então um histórico fora de ordem deixava código novo com schema antigo (promoção de 16/10/2026, US #152). Ao registrar uma migration como aplicada, confira antes com `supabase db push --include-all --dry-run` o que ainda está pendente.

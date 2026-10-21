@@ -7,12 +7,16 @@ name: CI/CD
 # são variáveis do repositório. O secret SUPABASE_ACCESS_TOKEN também vive no environment.
 # AWS por OIDC (sem access key) — ver infra/github-oidc/README.md.
 #
-# Interruptor: enquanto a variável de repositório DEPLOY_ENABLED não for 'true', só roda o gate
-# de build/testes. Evita deploy duplicado enquanto o Azure Pipelines ainda está ativo.
+# Interruptor: se a variável de repositório DEPLOY_ENABLED não for 'true', só roda o gate de
+# build/testes (útil para pausar deploys). A página web/reconexao tem workflow próprio
+# (reconexao.yml): mudança só em web/** não builda o .NET nem aplica migration por aqui. Mudança em
+# supabase/** continua disparando este workflow, que é quem aplica as migrations.
 
 on:
   push:
     branches: [dev, master]
+    paths-ignore:
+      - 'web/**'
   pull_request:
     branches: [dev, master]
   workflow_dispatch:
@@ -71,7 +75,11 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           supabase link --project-ref "${{ vars.SUPABASE_PROJECT_REF }}"
-          supabase db push
+          # --include-all: aplica também migrations com versão anterior à última do remoto. Sem a
+          # flag, um `migration repair` (ou migration aplicada à mão) que deixe o histórico com versão
+          # mais nova que arquivos pendentes derruba o job com "Found local migration files to be
+          # inserted before the last migration". As migrations são idempotentes (promoção de 16/10, #152).
+          supabase db push --include-all
           supabase functions deploy buscar-similar --project-ref "${{ vars.SUPABASE_PROJECT_REF }}"
 
   deploy:

@@ -159,12 +159,14 @@ pipeline faz. O `GoogleAuthorizationCodeFlow` do .NET lista também `youtube`, `
    `web/reconexao`), env vars por ambiente, domínio fixo de Preview (alias) e domínio de prod.
    Deployment Protection da Vercel no Preview deve permitir o retorno do Google (o app tem auth
    própria).
-5. **ADO**: registrar `web/reconexao/azure-pipelines.yml` (Pipelines > New > Existing YAML);
-   criar o variable group `giom-reconexao` (`VERCEL_TOKEN` secreto, `VERCEL_ORG_ID`,
-   `VERCEL_PROJECT_ID`, `RECONEXAO_PREVIEW_ALIAS` e, opcional, `VERCEL_SCOPE` — slug do time,
-   passado como `--scope` só quando definido; **não definir com token de time/projeto**, pois
-   `--scope` faz o CLI chamar `/v2/user`; o `VERCEL_ORG_ID` já seleciona o time) e o environment `reconexao-prod` com aprovação
-   manual.
+5. **GitHub Actions** (`.github/workflows/reconexao.yml`): criar os environments `reconexao-dev`
+   (branch `dev`) e `reconexao-prod` (branch `master` + required reviewers = aprovação manual).
+   Variáveis por environment: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `RECONEXAO_PREVIEW_ALIAS` (só
+   no dev) e, opcional, `VERCEL_SCOPE` — slug do time, passado como `--scope` só quando definido;
+   **não definir com token de time/projeto**, pois `--scope` faz o CLI chamar `/v2/user`; o
+   `VERCEL_ORG_ID` já seleciona o time. Secret por environment: `VERCEL_TOKEN`
+   (`gh secret set VERCEL_TOKEN --env reconexao-dev`). O interruptor `DEPLOY_ENABLED` (variável do
+   repositório) liga os deploys.
 
 ### Policy IAM mínima
 
@@ -253,13 +255,13 @@ O `code` do OAuth chega na URL do callback, então sem esse filtro ele vazaria c
 
 ## Pipeline
 
-`azure-pipelines.yml` (neste diretório): trigger em `dev`/`master` só com
-`paths.include: web/reconexao/**`. O pipeline raiz (.NET) exclui `web/**` (PR-03b), então mexer
+`.github/workflows/reconexao.yml`: trigger em `dev`/`master` só com
+`paths: web/reconexao/**`. O workflow raiz (`ci-cd.yml`, .NET) ignora `web/**` no push, então mexer
 na página nunca builda o .NET e mexer no .NET nunca builda a página. Build (npm ci, lint, typecheck, test, next build) →
 `dev`: `vercel pull --environment=preview` → `vercel build` → `vercel deploy --prebuilt --target=preview`
 → espera READY e confere o target via REST API (`GET /v13/deployments`; falha o job se não for Preview) → alias via REST (`POST /v2/deployments/{id}/aliases`). `inspect`/`alias` não usam o CLI porque ele chama `GET /v2/user`, que dá "User not found" com token de time/projeto;
 `master`: `vercel pull --environment=production` → `vercel build --prod` →
-`vercel deploy --prebuilt --prod` num deployment job do environment `reconexao-prod`. O build do
+`vercel deploy --prebuilt --prod` num job do environment `reconexao-prod` (aprovação manual). O build do
 deploy roda no agente (Node 24, `UseNode@1`); `.vercel/` (env pulada) é gitignored e nunca é impressa.
 Outras branches só buildam/testam.
 
