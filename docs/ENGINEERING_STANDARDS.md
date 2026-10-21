@@ -63,6 +63,14 @@
   com `MSYS_NO_PATHCONV=1`.
 - Preferir `--query` do AWS CLI pra filtrar no servidor em vez de trazer o JSON inteiro e
   filtrar depois (ver `CLAUDE.md`, seção de economia de tokens).
+- Credenciais locais (perfil `giom-login` + `[default]` via `credential_process`):
+  - Login: `aws login --profile giom-login` (ou
+    `powershell -File %USERPROFILE%\.aws\scripts\aws-login.ps1`).
+    Bare `aws login` falha — o perfil `default` já tem `credential_process`.
+  - Setup/task (scripts **fora** do git):
+    `powershell -File %USERPROFILE%\.aws\scripts\aws-sync-credentials.ps1 -InstallSchedule`
+    (task `Giom-AWS-SyncCredentials`).
+  - Não recriar `~/.aws/credentials` estático — tokens mortos bloqueiam o refresh.
 
 ## Migrations (Supabase)
 
