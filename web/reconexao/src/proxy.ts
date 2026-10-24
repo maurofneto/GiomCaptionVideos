@@ -4,8 +4,9 @@ import { loadAuthEnv } from "@/lib/env";
 import { authorize } from "@/lib/session";
 
 // Únicas rotas sem sessão: o início do sign-in e o retorno dele (o callback aplica a allowlist e
-// responde 403 a qualquer outro e-mail) e o logout, público de propósito (idempotente: só limpa
-// cookies; o CSRF é checado pela Origin no handler). Todo o resto exige sessão + allowlist —
+// responde 403 a qualquer outro e-mail), o logout, público de propósito (idempotente: só limpa
+// cookies; o CSRF é checado pela Origin no handler) e as páginas legais estáticas que o Google
+// exige para publicar o app OAuth (/sobre, /privacidade, /termos). Todo o resto exige sessão + allowlist —
 // inclusive /api/youtube/callback e as APIs. Os handlers repetem a checagem (defesa em profundidade).
 const PUBLIC_PATHS = new Set([
   "/api/auth/login",
@@ -15,6 +16,8 @@ const PUBLIC_PATHS = new Set([
   "/sobre",
   "/privacidade",
   "/termos",
+  // Arquivo de verificação de propriedade do Google Search Console (conteúdo fixo, sem dado sensível).
+  "/google538c20e4d5c5d8f9.html",
 ]);
 
 export function buildCsp(nonce: string): string {

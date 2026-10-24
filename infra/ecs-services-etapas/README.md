@@ -94,7 +94,7 @@ Service novo sozinho processa tudo sem erro). Ordem executada:
 2. Funções (`giom-fila-watchman`, `giom-fila-watchman-dev`) e a role
    `giom-lambda-watchman-role` deletadas.
 3. `infra/lambda-fila-watchman/` removido do repo e o stage `Lambda` removido do
-   `azure-pipelines.yml`.
+   pipeline (`azure-pipelines.yml`, hoje substituído por `.github/workflows/ci-cd.yml`).
 
 Os EventBridge Schedules do modelo monolítico antigo (`giom-instituto-daily`,
 `giom-ministerio-daily`) também foram desabilitados (não deletados) no mesmo momento, pra evitar

@@ -374,5 +374,5 @@ FodyWeavers.xsd
 supabase/.temp/
 
 # Artefato de build da Lambda watchman — gerado a partir de lambda_function.py (fonte versionada),
-# nunca precisa ir pro repo; o pipeline gera o zip na hora do deploy (ver azure-pipelines.yml).
+# nunca precisa ir pro repo; o pipeline gera o zip na hora do deploy (ver .github/workflows/ci-cd.yml).
 infra/lambda-fila-watchman/function.zip

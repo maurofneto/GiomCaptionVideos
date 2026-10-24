@@ -40,7 +40,7 @@ Todas validadas no boot (`src/instrumentation.ts`); falta/valor inválido → er
 | `AUTH_REDIRECT_URI` | `https://<alias-preview>/api/auth/callback` | `https://<dominio-prod>/api/auth/callback` |
 | `YOUTUBE_GOOGLE_CLIENT_ID` / `YOUTUBE_GOOGLE_CLIENT_SECRET` | **iguais** aos do pipeline dev | **iguais** aos do pipeline prod |
 | `YOUTUBE_REDIRECT_URI` | `https://<alias-preview>/api/youtube/callback` | `https://<dominio-prod>/api/youtube/callback` |
-| `OAUTH_APP_MODE` (`testing`\|`production`) | conforme o app no Google Cloud | idem |
+| `OAUTH_APP_MODE` (`testing`\|`production`) | conforme o app no Google Cloud | `production` depois que o app OAuth for publicado (em `testing` a página avisa expiração de 7 dias) |
 | `OAUTH_TESTING_EXPIRY_DAYS` (opcional, padrão 7) | 7 | 7 |
 | `OAUTH_REVOKE_ON_MISMATCH` (opcional, padrão `false`) | `false` | `false` (ver trade-off em "Segurança") |
 | `RECONEXAO_AWS_REGION` | `us-east-1` | `us-east-1` |
@@ -51,6 +51,7 @@ Todas validadas no boot (`src/instrumentation.ts`); falta/valor inválido → er
 | `CANAIS_API_URL` (origem https; http só em localhost) | branch `dev` do Supabase: `https://lusfwbiiuxyzduniptes.supabase.co` | origem do projeto Supabase: `https://<ref>.supabase.co` |
 | `CANAIS_API_REST_PREFIX` (opcional, padrão vazio) | `/rest/v1` | `/rest/v1` |
 | `CANAIS_API_TOKEN` (**obrigatório**) | JWT da role `reconexao_leitura` na fonte de dev | JWT da role `reconexao_leitura` no Supabase de prod |
+| `CONTATO_EMAIL` (opcional) | e-mail público exibido em `/sobre`, `/privacidade` e `/termos` | idem; sem ele as páginas mostram "contato indisponível" |
 | `CANAIS_API_KEY` (opcional) | publishable key da branch dev | publishable/anon key do projeto (o gateway do Supabase exige o header `apikey`) |
 
 `AUTH_REDIRECT_URI` e `YOUTUBE_REDIRECT_URI` precisam ter a mesma origem. O prefixo
@@ -159,12 +160,14 @@ pipeline faz. O `GoogleAuthorizationCodeFlow` do .NET lista também `youtube`, `
    `web/reconexao`), env vars por ambiente, domínio fixo de Preview (alias) e domínio de prod.
    Deployment Protection da Vercel no Preview deve permitir o retorno do Google (o app tem auth
    própria).
-5. **ADO**: registrar `web/reconexao/azure-pipelines.yml` (Pipelines > New > Existing YAML);
-   criar o variable group `giom-reconexao` (`VERCEL_TOKEN` secreto, `VERCEL_ORG_ID`,
-   `VERCEL_PROJECT_ID`, `RECONEXAO_PREVIEW_ALIAS` e, opcional, `VERCEL_SCOPE` — slug do time,
-   passado como `--scope` só quando definido; **não definir com token de time/projeto**, pois
-   `--scope` faz o CLI chamar `/v2/user`; o `VERCEL_ORG_ID` já seleciona o time) e o environment `reconexao-prod` com aprovação
-   manual.
+5. **GitHub Actions** (`.github/workflows/reconexao.yml`): criar os environments `reconexao-dev`
+   (branch `dev`) e `reconexao-prod` (branch `master` + required reviewers = aprovação manual).
+   Variáveis por environment: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `RECONEXAO_PREVIEW_ALIAS` (só
+   no dev) e, opcional, `VERCEL_SCOPE` — slug do time, passado como `--scope` só quando definido;
+   **não definir com token de time/projeto**, pois `--scope` faz o CLI chamar `/v2/user`; o
+   `VERCEL_ORG_ID` já seleciona o time. Secret por environment: `VERCEL_TOKEN`
+   (`gh secret set VERCEL_TOKEN --env reconexao-dev`). O interruptor `DEPLOY_ENABLED` (variável do
+   repositório) liga os deploys.
 
 ### Policy IAM mínima
 
@@ -211,13 +214,28 @@ O tier Advanced é irreversível no parâmetro (não volta para Standard) e tem 
 parâmetro; só vale usar se o `cookies.txt` filtrado passar de 4 KB. Sem `kms:GenerateDataKey`, o
 `PutParameter` dos cookies em Advanced falha com `AccessDenied`.
 
+## Páginas legais (publicação do app OAuth Google)
+
+`/sobre` (página inicial), `/privacidade` e `/termos` são públicas e estáticas (sem dado
+sensível), exigidas pelo Google para publicar/verificar o app OAuth — ver
+[`docs/google-oauth-publicacao.md`](../../docs/google-oauth-publicacao.md). Código em
+`src/app/{sobre,privacidade,termos}` e `src/lib/legal.tsx`; liberadas em `PUBLIC_PATHS`
+(`src/proxy.ts`).
+
+- `CONTATO_EMAIL` é lida **em tempo de build** (páginas pré-renderizadas). Mudar a variável na
+  Vercel **não basta**, e "Redeploy" da Vercel reaproveita o build antigo: é preciso rodar de novo
+  a pipeline `GiomReconexao-Web` (que faz `vercel pull` + `vercel build`) e aprovar o
+  `reconexao-prod`.
+- As páginas herdam `robots: noindex` do layout (o Google não precisa indexá-las para publicar).
+
 ## Segurança
 
 - Acesso: sign-in Google separado (`openid email`), sessão em cookie `__Host-` httpOnly/Secure/
   Lax assinado (8 h), allowlist re-checada a cada requisição. Fora da allowlist → 403 em todas as
   rotas, inclusive `/api/youtube/callback`; checado no proxy (`src/proxy.ts`, antigo middleware) **e** em cada handler. Únicas
   rotas sem sessão: `/api/auth/login` e `/api/auth/callback` (este responde 403 a quem não está
-  na allowlist). Navegação (HTML) sem sessão é redirecionada ao sign-in; chamadas de API sem
+  na allowlist), `/api/auth/logout` e as páginas legais estáticas `/sobre`, `/privacidade` e
+  `/termos` (ver "Páginas legais"). Navegação (HTML) sem sessão é redirecionada ao sign-in; chamadas de API sem
   sessão recebem 403. POSTs exigem `Origin` igual à origem pública.
 - OAuth do YouTube: `access_type=offline`, `prompt=consent`, sem `include_granted_scopes`, escopo
   `youtube.force-ssl`, `state` + PKCE S256 num cookie AES-GCM de uso único (10 min) amarrado à
@@ -253,13 +271,13 @@ O `code` do OAuth chega na URL do callback, então sem esse filtro ele vazaria c
 
 ## Pipeline
 
-`azure-pipelines.yml` (neste diretório): trigger em `dev`/`master` só com
-`paths.include: web/reconexao/**`. O pipeline raiz (.NET) exclui `web/**` (PR-03b), então mexer
+`.github/workflows/reconexao.yml`: trigger em `dev`/`master` só com
+`paths: web/reconexao/**`. O workflow raiz (`ci-cd.yml`, .NET) ignora `web/**` no push, então mexer
 na página nunca builda o .NET e mexer no .NET nunca builda a página. Build (npm ci, lint, typecheck, test, next build) →
 `dev`: `vercel pull --environment=preview` → `vercel build` → `vercel deploy --prebuilt --target=preview`
 → espera READY e confere o target via REST API (`GET /v13/deployments`; falha o job se não for Preview) → alias via REST (`POST /v2/deployments/{id}/aliases`). `inspect`/`alias` não usam o CLI porque ele chama `GET /v2/user`, que dá "User not found" com token de time/projeto;
 `master`: `vercel pull --environment=production` → `vercel build --prod` →
-`vercel deploy --prebuilt --prod` num deployment job do environment `reconexao-prod`. O build do
+`vercel deploy --prebuilt --prod` num job do environment `reconexao-prod` (aprovação manual). O build do
 deploy roda no agente (Node 24, `UseNode@1`); `.vercel/` (env pulada) é gitignored e nunca é impressa.
 Outras branches só buildam/testam.
 
