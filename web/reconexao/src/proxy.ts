@@ -16,6 +16,8 @@ const PUBLIC_PATHS = new Set([
   "/sobre",
   "/privacidade",
   "/termos",
+  // Arquivo de verificação de propriedade do Google Search Console (conteúdo fixo, sem dado sensível).
+  "/google538c20e4d5c5d8f9.html",
 ]);
 
 export function buildCsp(nonce: string): string {
