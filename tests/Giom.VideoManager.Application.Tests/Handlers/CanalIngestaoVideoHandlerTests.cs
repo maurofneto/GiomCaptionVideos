@@ -98,6 +98,37 @@ public class CanalIngestaoVideoHandlerTests
     }
 
     [Fact]
+    public void IsRelevant_ComRegraDinamica_UsaARegraEIgnoraOEnum()
+    {
+        // Enum diz "só live unlisted", mas a regra dinâmica (#180) manda: título começa com GIOM e não é live agendada.
+        var regra = RegraRelevancia.Parse("""
+            {"todas":[{"campo":"titulo","op":"comeca_com","valor":"GIOM"},
+                      {"nao":{"campo":"transmissao","op":"igual","valor":"agendada"}}]}
+            """);
+        var handler = new Ambiente().CriarHandler(CriarCanal(RelevanciaTipo.LiveUnlisted) with { Regra = regra });
+
+        var culto = CriarVideo();
+        culto.Title = "GIOM | Culto";
+        Assert.True(handler.IsRelevant(culto));
+
+        var liveAgendada = CriarVideo();
+        liveAgendada.Title = "GIOM | Ceia do Senhor";
+        liveAgendada.Transmissao = Transmissao.Agendada;
+        Assert.False(handler.IsRelevant(liveAgendada));
+    }
+
+    [Fact]
+    public void IsRelevant_SemRegraDinamica_ContinuaPeloEnum()
+    {
+        var handler = new Ambiente().CriarHandler(CriarCanal(RelevanciaTipo.LiveUnlisted));
+        var video = CriarVideo();
+        video.Type = VideoType.Live;
+        video.PrivacyStatus = "unlisted";
+
+        Assert.True(handler.IsRelevant(video));
+    }
+
+    [Fact]
     public async Task HandleAsync_PublicaNaEtapaDeTranscricaoComSessaoETraceparent()
     {
         var ambiente = new Ambiente();
