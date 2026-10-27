@@ -21,24 +21,13 @@ public class CanalIngestaoVideoHandler(
     ITracingService tracingService)
     : IVideoHandler
 {
-    // Config First: PrivacyStatusFiltro (canal_ingestao.privacy_status_filtro) restringe a privacidade do
-    // vídeo (ex.: Ministério só indexa "public"); null = sem restrição extra.
-    public bool IsRelevant(Video video) =>
-        (canal.PrivacyStatusFiltro is null || video.PrivacyStatus == canal.PrivacyStatusFiltro)
-        && AvaliarRelevancia(video);
+    // Config First (#180): a relevância é uma regra dinâmica por canal (canal_ingestao.regra_relevancia),
+    // já interpretada pelo repositório. Canal sem regra cai no modelo antigo (enum + valores + filtro de
+    // privacidade), convertido pra mesma árvore — o comportamento anterior é preservado.
+    private readonly RegraRelevancia _regra = canal.Regra
+        ?? RegraRelevancia.DeLegado(canal.RelevanciaTipo, canal.RelevanciaValores, canal.PrivacyStatusFiltro);
 
-    private bool AvaliarRelevancia(Video video) => canal.RelevanciaTipo switch
-    {
-        RelevanciaTipo.LiveUnlisted => video.Type == VideoType.Live && video.PrivacyStatus == "unlisted",
-        RelevanciaTipo.TituloContem => AvaliarTitulo(video.Title.ToUpperInvariant(), canal.RelevanciaValores),
-        _ => throw new InvalidOperationException($"RelevanciaTipo não suportado: {canal.RelevanciaTipo}")
-    };
-
-    /// <summary>Valor terminando em "*" = prefixo (StartsWith), sem "*" = substring (Contains) — ver comentário em RelevanciaTipo.</summary>
-    private static bool AvaliarTitulo(string tituloEmMaiusculas, IReadOnlyList<string> valores) => valores.Any(valor =>
-        valor.EndsWith('*')
-            ? tituloEmMaiusculas.StartsWith(valor[..^1].ToUpperInvariant())
-            : tituloEmMaiusculas.Contains(valor.ToUpperInvariant()));
+    public bool IsRelevant(Video video) => _regra.Avalia(video);
 
     // Bug #120: sem isso, todo vídeo relevante era republicado em TODA execução, mesmo já
     // tendo concluído o pipeline inteiro antes — o Ingestao.Worker reprocessava

@@ -100,7 +100,24 @@ public class YouTubeVideoSourceService(
                 : "",
             PrivacyStatus = item.Status?.PrivacyStatus ?? "",
             UploadedAt = item.Snippet?.PublishedAtDateTimeOffset?.LocalDateTime,
-            Type = DetectType(detail)
+            Type = DetectType(detail),
+            Transmissao = DetectTransmissao(detail)
+        };
+    }
+
+    /// <summary>
+    /// Situação da transmissão ao vivo: "upcoming" = agendada (ainda não começou — sem legenda nem áudio
+    /// pra baixar), "live" = em andamento; sem live ativa, uma transmissão com fim registrado é encerrada.
+    /// </summary>
+    private static Transmissao DetectTransmissao(Google.Apis.YouTube.v3.Data.Video? detail)
+    {
+        if (detail == null) return Transmissao.Nenhuma;
+
+        return detail.Snippet?.LiveBroadcastContent switch
+        {
+            "upcoming" => Transmissao.Agendada,
+            "live" => Transmissao.AoVivo,
+            _ => detail.LiveStreamingDetails?.ActualEndTimeDateTimeOffset != null ? Transmissao.Encerrada : Transmissao.Nenhuma
         };
     }
 
