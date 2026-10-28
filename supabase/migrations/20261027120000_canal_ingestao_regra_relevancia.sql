@@ -4,9 +4,8 @@
 -- condições em JSON (campo / operador / valor, combinadas com todas = E, alguma = OU, nao = NÃO),
 -- editável por UPDATE, sem deploy. Formato e campos em docs/regra-relevancia.md.
 --
--- Compatível nos dois sentidos: a coluna é opcional. Canal sem regra (NULL) continua pela regra
--- antiga (enum), então código novo + banco antigo e vice-versa funcionam. Os campos antigos ficam
--- como reserva até a regra nova ser a única fonte.
+-- A coluna nasce opcional e é convertida abaixo; a migration seguinte (20261027130000) a torna obrigatória e
+-- aposenta o enum antigo.
 -- =========================================================
 ALTER TABLE canal_ingestao ADD COLUMN IF NOT EXISTS regra_relevancia JSONB;
 

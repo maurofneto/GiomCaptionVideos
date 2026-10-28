@@ -16,7 +16,7 @@ namespace Giom.VideoManager.Infrastructure.Tests.YouTube;
 public class ReporteFalhasCredencialCanaisTests
 {
     private static CanalIngestaoConfig Canal(string id, string nome) =>
-        new(id, null, nome, true, true, default, [], 10, 0, 0, nome.ToLowerInvariant());
+        new(id, null, nome, true, true, RegraRelevancia.Nenhuma, 10, 0, 0, nome.ToLowerInvariant());
 
     private sealed class LoggerCapturador<T> : ILogger<T>
     {

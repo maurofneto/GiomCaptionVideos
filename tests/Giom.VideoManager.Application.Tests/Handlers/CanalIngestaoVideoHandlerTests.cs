@@ -10,21 +10,24 @@ using Xunit;
 namespace Giom.VideoManager.Application.Tests.Handlers;
 
 /// <summary>
-/// CanalIngestaoVideoHandler (US #105) — único IVideoHandler pra qualquer canal, substituindo
-/// InstitutoPipelineHandler/MinisterioPipelineHandler (que ficam por enquanto, retirados só no
-/// cutover final). A regra de relevância vira dado (RelevanciaTipo + RelevanciaValores), não
-/// mais uma classe por canal — estes testes cobrem os mesmos 2 comportamentos reais de hoje
-/// (Instituto: Live+unlisted; Ministério: título contém/começa com termos), agora orientados a
-/// dado em vez de hardcoded em código.
+/// CanalIngestaoVideoHandler (US #105) — único IVideoHandler pra qualquer canal. A regra de relevância é
+/// dado (#180: CanalIngestaoConfig.Regra, vinda de canal_ingestao.regra_relevancia), não uma classe por
+/// canal — estes testes cobrem os comportamentos reais de hoje (Instituto: live não listada; Ministério:
+/// título começa com GIOM e vídeo público) escritos como regra, e o que o handler faz com ela.
 /// </summary>
 public class CanalIngestaoVideoHandlerTests
 {
+    private const string RegraInstituto = """{"todas":[{"campo":"tipo","op":"igual","valor":"live"},{"campo":"privacidade","op":"igual","valor":"unlisted"}]}""";
+    private const string RegraMinisterio = """{"todas":[{"alguma":[{"campo":"titulo","op":"comeca_com","valor":"GIOM"}]},{"campo":"privacidade","op":"igual","valor":"public"}]}""";
+
     private static Video CriarVideo(string id = "v1") => new() { Id = id, Title = "Vídeo", ChannelTitle = "Canal de Teste" };
 
-    private static CanalIngestaoConfig CriarCanal(RelevanciaTipo tipo, params string[] valores) => new(
+    private static CanalIngestaoConfig CriarCanal(RegraRelevancia regra) => new(
         ChannelId: "UCteste", PlaylistId: null, Nome: "Canal de Teste", Mine: true, Ativo: true,
-        RelevanciaTipo: tipo, RelevanciaValores: valores, MaxVideosPerRun: 20,
+        Regra: regra, MaxVideosPerRun: 20,
         DelayBetweenVideosMs: 3000, DelayBetweenPagesMs: 1200, SecretsKey: "teste");
+
+    private static CanalIngestaoConfig CriarCanal(string regraJson) => CriarCanal(RegraRelevancia.Parse(regraJson));
 
     private sealed class Ambiente
     {
@@ -46,66 +49,38 @@ public class CanalIngestaoVideoHandlerTests
     [InlineData(VideoType.Live, "unlisted", true)]
     [InlineData(VideoType.Upload, "unlisted", false)]
     [InlineData(VideoType.Live, "public", false)]
-    public void IsRelevant_LiveUnlisted_SoAoVivoENaoListado(VideoType type, string privacyStatus, bool esperado)
+    public void IsRelevant_Instituto_SoLiveNaoListada(VideoType type, string privacyStatus, bool esperado)
     {
-        var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
         var video = CriarVideo();
         video.Type = type;
         video.PrivacyStatus = privacyStatus;
 
-        Assert.Equal(esperado, new Ambiente().CriarHandler(canal).IsRelevant(video));
+        Assert.Equal(esperado, new Ambiente().CriarHandler(CriarCanal(RegraInstituto)).IsRelevant(video));
     }
 
     [Theory]
-    [InlineData("Culto de domingo", true)]
-    [InlineData("Ministério em foco", true)]
-    [InlineData("GIOM ao vivo", true)]
-    [InlineData("Um vídeo qualquer sobre GIOM", false)] // "GIOM*" é prefixo, não substring
-    [InlineData("Aula qualquer", false)]
-    public void IsRelevant_TituloContem_ContainsParaValorSemAsterisco_StartsWithParaValorComAsterisco(string titulo, bool esperado)
+    [InlineData("GIOM | Culto de domingo", "public", true)]
+    [InlineData("Giom ao vivo", "public", true)]                       // sem diferenciar maiúsculas
+    [InlineData("Um vídeo qualquer sobre GIOM", "public", false)]      // GIOM tem que ser o começo do título
+    [InlineData("Culto de domingo", "public", false)]
+    [InlineData("GIOM | Culto de domingo", "unlisted", false)]         // Ministério indexa só vídeo público
+    [InlineData("GIOM | Culto de domingo", "private", false)]
+    public void IsRelevant_Ministerio_TituloComecaComGiomESoPublico(string titulo, string privacyStatus, bool esperado)
     {
-        var canal = CriarCanal(RelevanciaTipo.TituloContem, "CULTO", "MINISTÉRIO", "GIOM*");
         var video = CriarVideo();
         video.Title = titulo;
-
-        Assert.Equal(esperado, new Ambiente().CriarHandler(canal).IsRelevant(video));
-    }
-
-    [Theory]
-    [InlineData("public", true)]
-    [InlineData("unlisted", false)]
-    [InlineData("private", false)]
-    public void IsRelevant_PrivacyStatusFiltroPublic_SoVideoPublico(string privacyStatus, bool esperado)
-    {
-        // Ministério (cultos): só vídeo público é indexado (canal_ingestao.privacy_status_filtro).
-        var canal = CriarCanal(RelevanciaTipo.TituloContem, "GIOM*") with { PrivacyStatusFiltro = "public" };
-        var video = CriarVideo();
-        video.Title = "GIOM | Culto de domingo";
         video.PrivacyStatus = privacyStatus;
 
-        Assert.Equal(esperado, new Ambiente().CriarHandler(canal).IsRelevant(video));
+        Assert.Equal(esperado, new Ambiente().CriarHandler(CriarCanal(RegraMinisterio)).IsRelevant(video));
     }
 
     [Fact]
-    public void IsRelevant_SemPrivacyStatusFiltro_NaoRestringePrivacidade()
+    public void IsRelevant_RegraDinamica_IgnoraLiveAgendada()
     {
-        var canal = CriarCanal(RelevanciaTipo.TituloContem, "GIOM*");
-        var video = CriarVideo();
-        video.Title = "GIOM | Culto";
-        video.PrivacyStatus = "unlisted";
-
-        Assert.True(new Ambiente().CriarHandler(canal).IsRelevant(video));
-    }
-
-    [Fact]
-    public void IsRelevant_ComRegraDinamica_UsaARegraEIgnoraOEnum()
-    {
-        // Enum diz "só live unlisted", mas a regra dinâmica (#180) manda: título começa com GIOM e não é live agendada.
-        var regra = RegraRelevancia.Parse("""
+        var handler = new Ambiente().CriarHandler(CriarCanal("""
             {"todas":[{"campo":"titulo","op":"comeca_com","valor":"GIOM"},
                       {"nao":{"campo":"transmissao","op":"igual","valor":"agendada"}}]}
-            """);
-        var handler = new Ambiente().CriarHandler(CriarCanal(RelevanciaTipo.LiveUnlisted) with { Regra = regra });
+            """));
 
         var culto = CriarVideo();
         culto.Title = "GIOM | Culto";
@@ -118,21 +93,21 @@ public class CanalIngestaoVideoHandlerTests
     }
 
     [Fact]
-    public void IsRelevant_SemRegraDinamica_ContinuaPeloEnum()
+    public void IsRelevant_CanalSemRegraValida_NaoConsideraNenhumVideoRelevante()
     {
-        var handler = new Ambiente().CriarHandler(CriarCanal(RelevanciaTipo.LiveUnlisted));
+        var handler = new Ambiente().CriarHandler(CriarCanal(RegraRelevancia.Nenhuma));
         var video = CriarVideo();
         video.Type = VideoType.Live;
         video.PrivacyStatus = "unlisted";
 
-        Assert.True(handler.IsRelevant(video));
+        Assert.False(handler.IsRelevant(video));
     }
 
     [Fact]
     public async Task HandleAsync_PublicaNaEtapaDeTranscricaoComSessaoETraceparent()
     {
         var ambiente = new Ambiente();
-        var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
+        var canal = CriarCanal(RegraInstituto);
         var video = CriarVideo();
         var sessao = new SessaoObservabilidade("corr-1", "hora", "/caminho", "canal", new Dictionary<string, string> { ["Canal"] = "Canal X" });
         ambiente.SessionContext.Definir(sessao);
@@ -150,7 +125,7 @@ public class CanalIngestaoVideoHandlerTests
     public async Task JaProcessadoAsync_VideoComProcessedAt_RetornaTrue()
     {
         var ambiente = new Ambiente();
-        var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
+        var canal = CriarCanal(RegraInstituto);
         var video = CriarVideo();
         var handler = ambiente.CriarHandler(canal);
         // Setup específico depois de CriarHandler — o catch-all (It.IsAny) montado lá dentro
@@ -165,7 +140,7 @@ public class CanalIngestaoVideoHandlerTests
     public async Task JaProcessadoAsync_VideoSemProcessedAt_RetornaFalse()
     {
         var ambiente = new Ambiente();
-        var canal = CriarCanal(RelevanciaTipo.LiveUnlisted);
+        var canal = CriarCanal(RegraInstituto);
         var video = CriarVideo();
         var handler = ambiente.CriarHandler(canal);
         ambiente.VideoRepository.Setup(r => r.GetByIdAsync(video.Id, It.IsAny<CancellationToken>()))

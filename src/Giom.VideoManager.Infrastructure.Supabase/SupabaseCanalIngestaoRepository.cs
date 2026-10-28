@@ -35,20 +35,24 @@ public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
 
         return rows.Select(r => new CanalIngestaoConfig(
             r.channel_id, r.playlist_id, r.nome, r.mine, r.ativo,
-            ParseRelevanciaTipo(r.relevancia_tipo), r.relevancia_valores,
+            CarregarRegra(r.channel_id, r.regra_relevancia),
             r.max_videos_per_run, r.delay_between_videos_ms, r.delay_between_pages_ms,
-            r.secrets_key, r.privacy_status_filtro,
-            CarregarRegra(r.channel_id, r.regra_relevancia))).ToList();
+            r.secrets_key)).ToList();
     }
 
     /// <summary>
-    /// Interpreta canal_ingestao.regra_relevancia. Sem regra (coluna nula/ausente) devolve null e o
-    /// handler usa o modelo antigo. Regra inválida também devolve null — a ingestão do canal segue com a
-    /// regra anterior em vez de parar — e registra Error (vira alerta no Sentry).
+    /// Interpreta canal_ingestao.regra_relevancia. Regra ausente ou inválida devolve
+    /// <see cref="RegraRelevancia.Nenhuma"/> — nenhum vídeo do canal é considerado relevante naquela execução —
+    /// e registra Error (vira alerta no Sentry). Não há regra anterior pra cair: processar vídeo errado custa
+    /// tokens de IA, parar custa só esperar a correção.
     /// </summary>
-    private RegraRelevancia? CarregarRegra(string channelId, JToken? token)
+    private RegraRelevancia CarregarRegra(string channelId, JToken? token)
     {
-        if (token is null || token.Type == JTokenType.Null) return null;
+        if (token is null || token.Type == JTokenType.Null)
+        {
+            _logger.LogError("Canal {ChannelId} sem regra de relevância (regra_relevancia ausente); nenhum vídeo será processado nesta execução.", channelId);
+            return RegraRelevancia.Nenhuma;
+        }
 
         try
         {
@@ -56,21 +60,13 @@ public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
         }
         catch (RegraRelevanciaInvalidaException e)
         {
-            _logger.LogError("Regra de relevância inválida no canal {ChannelId}; usando a regra anterior (enum). Motivo: {Motivo}", channelId, e.Message);
-            return null;
+            _logger.LogError("Regra de relevância inválida no canal {ChannelId}; nenhum vídeo será processado nesta execução. Motivo: {Motivo}", channelId, e.Message);
+            return RegraRelevancia.Nenhuma;
         }
     }
 
-    private static RelevanciaTipo ParseRelevanciaTipo(string valor) => valor switch
-    {
-        "live_unlisted" => RelevanciaTipo.LiveUnlisted,
-        "titulo_contem" => RelevanciaTipo.TituloContem,
-        _ => throw new InvalidOperationException($"relevancia_tipo desconhecido: {valor}")
-    };
-
     private record CanalIngestaoRow(
         string channel_id, string? playlist_id, string nome, bool mine, bool ativo,
-        string relevancia_tipo, List<string> relevancia_valores,
         int max_videos_per_run, int delay_between_videos_ms, int delay_between_pages_ms,
-        string secrets_key, string? privacy_status_filtro = null, JToken? regra_relevancia = null);
+        string secrets_key, JToken? regra_relevancia = null);
 }

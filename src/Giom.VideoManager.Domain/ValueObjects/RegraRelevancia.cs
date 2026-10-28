@@ -37,8 +37,7 @@ public enum OperadorRelevancia
 /// Regra de relevância de um canal como árvore de condições (filtro dinâmico, vindo do banco). Um nó
 /// é um grupo E (<see cref="RegraTodas"/>), um grupo OU (<see cref="RegraAlguma"/>), uma negação
 /// (<see cref="RegraNao"/>) ou uma condição sobre um campo do vídeo. Vem de canal_ingestao.regra_relevancia
-/// (JSON, ver <see cref="Parse"/>); canais sem regra caem em <see cref="DeLegado"/>, que reproduz o
-/// comportamento do enum <see cref="RelevanciaTipo"/> + PrivacyStatusFiltro.
+/// (JSON, ver <see cref="Parse"/>) e é a única definição de relevância: não há mais enum nem regra antiga.
 /// </summary>
 public abstract record RegraRelevancia
 {
@@ -49,30 +48,10 @@ public abstract record RegraRelevancia
     public static RegraRelevancia Parse(string json) => RegraRelevanciaParser.Parse(json);
 
     /// <summary>
-    /// Regra equivalente ao modelo antigo (enum + valores + filtro de privacidade): LiveUnlisted =
-    /// tipo live E unlisted; TituloContem = algum valor casa o título (terminando em "*" é prefixo, sem
-    /// "*" é substring); e, se houver filtro de privacidade, E a privacidade igual a ele.
+    /// Regra que não considera nenhum vídeo relevante (grupo OU vazio). É o que vale quando o canal não tem
+    /// regra ou a regra gravada é inválida: falhar parado custa menos que processar o vídeo errado.
     /// </summary>
-    public static RegraRelevancia DeLegado(RelevanciaTipo tipo, IReadOnlyList<string> valores, string? privacyStatusFiltro)
-    {
-        RegraRelevancia baseRegra = tipo switch
-        {
-            RelevanciaTipo.LiveUnlisted => new RegraTodas([
-                new CondicaoTexto(CampoRelevancia.Tipo, OperadorRelevancia.Igual, ["live"]),
-                new CondicaoTexto(CampoRelevancia.Privacidade, OperadorRelevancia.Igual, ["unlisted"])]),
-            RelevanciaTipo.TituloContem => new RegraAlguma(valores
-                .Select(v => v.EndsWith('*')
-                    ? new CondicaoTexto(CampoRelevancia.Titulo, OperadorRelevancia.ComecaCom, [v[..^1]])
-                    : new CondicaoTexto(CampoRelevancia.Titulo, OperadorRelevancia.Contem, [v]))
-                .Cast<RegraRelevancia>()
-                .ToList()),
-            _ => throw new InvalidOperationException($"RelevanciaTipo não suportado: {tipo}")
-        };
-
-        return privacyStatusFiltro is null
-            ? baseRegra
-            : new RegraTodas([baseRegra, new CondicaoTexto(CampoRelevancia.Privacidade, OperadorRelevancia.Igual, [privacyStatusFiltro])]);
-    }
+    public static readonly RegraRelevancia Nenhuma = new RegraAlguma([]);
 }
 
 /// <summary>Grupo E: todas as regras filhas precisam valer (grupo vazio vale true).</summary>
