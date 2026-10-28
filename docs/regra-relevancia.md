@@ -86,8 +86,22 @@ Não há varredura extra: a playlist inteira é coberta aos poucos, no mesmo cam
 - Quando o YouTube devolve `Deleted video` no lugar do vídeo, grava-se só `status = removed` (o título e o resto ficam
   como estavam) e o vídeo não é processado. `Private video` não traz dados reais: não é gravado nem processado.
 - Se a gravação falhar, o canal processa os relevantes normalmente e o erro vai para o Sentry.
-- `video.relevante` é `NULL` até o vídeo ser visitado pela primeira vez depois do deploy. Policy, views, funções
-  `match_*` e painel ainda **não** leem a coluna; isso é a etapa seguinte (#184, PR B2), depois de conferir os dados.
+- `video.relevante` é `NULL` até o vídeo ser visitado pela primeira vez depois do deploy.
+
+### Quem lê a relevância
+
+Regra única de leitura: `relevante IS NOT FALSE AND status = 'active'`.
+
+- `NULL` ("ainda não avaliado") continua visível: os vídeos já processados só ganham valor quando a ingestão passa
+  por eles, e esconder o `NULL` tiraria do bot respostas que ele sempre deu. Só o que a regra reprovou (`false`) sai.
+- `status = 'removed'` (o YouTube devolveu `Deleted video`) some do bot e da leitura pública.
+- Onde vale: `v_saude_pipeline` (o denominador não conta os irrelevantes registrados pela ingestão), as seis funções
+  `match_*` do bot (que usa a chave de serviço e ignora RLS, então a policy sozinha não bastaria: um vídeo processado
+  que depois virou privado deixa de ser citado) e a policy `leitura_publica_video` (chave anon).
+- Resumo, categorias, chunks e embeddings mantêm a leitura pública que tinham; amarrá-los a `video` por policy
+  deixaria as consultas do bot mais lentas, e hoje ninguém usa a chave anon neles.
+- Preenchimento inicial dos vídeos existentes (uma vez, fora do repositório): `UPDATE` de `relevante` com a regra do
+  canal; depois disso a ingestão corrige qualquer diferença quando passa pelo vídeo.
 
 ## Ordem de deploy
 
