@@ -2,6 +2,7 @@ using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Application.Pipeline;
 using Giom.VideoManager.Domain.Entities;
+using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Giom.VideoManager.Testes.Comuns;
@@ -35,6 +36,7 @@ public class ChannelProcessorTests
         public Mock<IVideoSourceService> VideoSource { get; } = new();
         public Mock<IProgressoRepository> Progresso { get; } = new();
         public Mock<IVideoHandler> Handler { get; } = new();
+        public Mock<IVideoRepository> VideoRepo { get; } = new();
         public FakeTracingService Tracing { get; } = new();
         public FakeSessionContext SessionContext { get; } = new();
         public FakeActiveChannelContext ActiveChannel { get; } = new();
@@ -49,13 +51,14 @@ public class ChannelProcessorTests
             Progresso.Setup(p => p.GetLastProcessedDateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((DateTime?)null);
             Progresso.Setup(p => p.SaveProgressoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             Handler.Setup(h => h.IsRelevant(It.IsAny<Video>())).Returns(true);
+            VideoRepo.Setup(r => r.UpsertAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             Handler.Setup(h => h.JaProcessadoAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
             Handler.Setup(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             HostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
         }
 
         public ChannelProcessor CriarProcessor() => new(
-            VideoSource.Object, Progresso.Object, _ => Handler.Object, Tracing, SessionContext, ActiveChannel, HostEnvironment.Object, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
+            VideoSource.Object, Progresso.Object, _ => Handler.Object, VideoRepo.Object, Tracing, SessionContext, ActiveChannel, HostEnvironment.Object, Logger, Microsoft.Extensions.Options.Options.Create(Opcoes));
     }
 
     [Fact]
@@ -284,7 +287,7 @@ public class ChannelProcessorTests
         var processor = new ChannelProcessor(
             ambiente.VideoSource.Object, ambiente.Progresso.Object,
             channelId => channelId switch { "UCa" => handlerA.Object, "UCb" => handlerB.Object, _ => throw new InvalidOperationException(channelId) },
-            ambiente.Tracing, ambiente.SessionContext, ambiente.ActiveChannel, ambiente.HostEnvironment.Object, ambiente.Logger,
+            ambiente.VideoRepo.Object, ambiente.Tracing, ambiente.SessionContext, ambiente.ActiveChannel, ambiente.HostEnvironment.Object, ambiente.Logger,
             Microsoft.Extensions.Options.Options.Create(ambiente.Opcoes));
 
         await processor.RunAsync([canalA, canalB], CancellationToken.None);
@@ -422,5 +425,72 @@ public class ChannelProcessorTests
 
         ambiente.Progresso.Verify(p => p.SaveProgressoAsync(
             It.IsAny<string>(), "playlist-1", null, maisRecente, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunAsync_GravaTodoVideoVisitadoComORelevante_ESoProcessaOsRelevantes()
+    {
+        var ambiente = new Ambiente();
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync("playlist-1", It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaylistPage([CriarVideo("relevante", DateTime.UtcNow), CriarVideo("aviso", DateTime.UtcNow)], NextPageToken: null));
+        ambiente.Handler.Setup(h => h.IsRelevant(It.Is<Video>(v => v.Id == "aviso"))).Returns(false);
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        ambiente.VideoRepo.Verify(r => r.UpsertAsync(It.Is<Video>(v => v.Id == "relevante" && v.Relevante == true && v.Status == VideoStatus.Active), It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.VideoRepo.Verify(r => r.UpsertAsync(It.Is<Video>(v => v.Id == "aviso" && v.Relevante == false && v.Status == VideoStatus.Active), It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "relevante"), It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "aviso"), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_VideoRemovidoNoYouTube_GravaSoOStatusENaoProcessa()
+    {
+        var ambiente = new Ambiente();
+        var removido = CriarVideo("v2", DateTime.UtcNow);
+        removido.Title = "Deleted video";
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync("playlist-1", It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaylistPage([removido], NextPageToken: null));
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        ambiente.VideoRepo.Verify(r => r.UpsertAsync(
+            It.Is<Video>(v => v.Id == "v2" && v.Status == VideoStatus.Removed && v.Title == "" && v.Relevante == null), It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.VideoRepo.Verify(r => r.UpsertAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Once);
+        ambiente.Handler.Verify(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_TituloPrivateVideo_NaoGravaNemProcessa()
+    {
+        var ambiente = new Ambiente();
+        var privado = CriarVideo("v2", DateTime.UtcNow);
+        privado.Title = "Private video";
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync("playlist-1", It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaylistPage([privado], NextPageToken: null));
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        ambiente.VideoRepo.Verify(r => r.UpsertAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Never);
+        ambiente.Handler.Verify(h => h.HandleAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_QuandoAGravacaoFalha_ProcessaOsVideosRelevantesMesmoAssim()
+    {
+        var ambiente = new Ambiente();
+        ambiente.VideoSource
+            .Setup(v => v.GetPlaylistPageAsync("playlist-1", It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaylistPage([CriarVideo("v1", DateTime.UtcNow)], NextPageToken: null));
+        ambiente.VideoRepo
+            .Setup(r => r.UpsertAsync(It.IsAny<Video>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("supabase fora do ar"));
+
+        await ambiente.CriarProcessor().RunAsync([Canal], CancellationToken.None);
+
+        ambiente.Handler.Verify(h => h.HandleAsync(It.Is<Video>(v => v.Id == "v1"), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

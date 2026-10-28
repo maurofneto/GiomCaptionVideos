@@ -1,6 +1,7 @@
 using Giom.VideoManager.Application.Handlers;
 using Giom.VideoManager.Application.Options;
 using Giom.VideoManager.Domain.Entities;
+using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 using Microsoft.Extensions.Hosting;
@@ -33,6 +34,7 @@ public class ChannelProcessor(
     IVideoSourceService videoSource,
     IProgressoRepository progressoRepository,
     Func<string, IVideoHandler> resolverHandler,
+    IVideoRepository videoRepository,
     ITracingService tracingService,
     ISessionContext sessionContext,
     IActiveChannelContext activeChannelContext,
@@ -136,9 +138,23 @@ public class ChannelProcessor(
             {
                 if (ct.IsCancellationRequested) { paginaEsgotada = false; break; }
 
+                // YouTube devolve estes títulos no lugar de um vídeo que o dono da conta não enxerga mais (#184).
+                if (video.Title == DeletedVideoTitle)
+                {
+                    await TryUpsertAsync(new Video { Id = video.Id, Status = VideoStatus.Removed }, config, ct);
+                    continue;
+                }
+
+                if (video.Title == PrivateVideoTitle) continue;
+
+                // Todo vídeo visitado é gravado com o veredito da regra, relevante ou não (#184).
+                video.Relevante = videoHandler.IsRelevant(video);
+                video.Status = VideoStatus.Active;
+                await TryUpsertAsync(video, config, ct);
+
                 if (processedIds.Count >= maxVideosPerRun) { paginaEsgotada = false; break; }
 
-                if (!videoHandler.IsRelevant(video))
+                if (video.Relevante != true)
                 {
                     logger.LogDebug("Canal {Name} — vídeo irrelevante, ignorando: {Id} — {Title}", config.Name, video.Id, video.Title);
                     continue;
@@ -198,6 +214,29 @@ public class ChannelProcessor(
             }
 
             await Task.Delay(delayEntrePaginasMs, ct);
+        }
+    }
+
+    private const string DeletedVideoTitle = "Deleted video";
+    private const string PrivateVideoTitle = "Private video";
+
+    /// <summary>
+    /// Grava o vídeo sem deixar a falha travar o canal: se o banco não responder, os relevantes ainda são
+    /// processados e o erro vai para o Sentry.
+    /// </summary>
+    private async Task TryUpsertAsync(Video video, ChannelConfig config, CancellationToken ct)
+    {
+        try
+        {
+            await videoRepository.UpsertAsync(video, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Erro ao gravar o vídeo {Id} do canal {Name}; o processamento segue", video.Id, config.Name);
         }
     }
 

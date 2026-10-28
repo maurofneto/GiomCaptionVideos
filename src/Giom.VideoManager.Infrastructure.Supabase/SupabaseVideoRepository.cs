@@ -1,4 +1,5 @@
 using Giom.VideoManager.Domain.Entities;
+using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Infrastructure;
 using Microsoft.Extensions.Logging;
@@ -117,12 +118,19 @@ public class SupabaseVideoRepository : IVideoRepository
     private record VideoDto(string id, string? title, string? description, string? channel_id,
         string? channel_title, string? playlist_id, string? length, string? privacy_status,
         DateTime? uploaded_at, DateTime? processed_at,
+        bool? relevante = null, string? status = null,
         TranscricaoDto? transcricao = null, ResumoDto? resumo = null,
         List<CategoriaDto>? categoria_teologica = null,
         List<VideoChunkIndexDto>? video_chunk = null)
     {
-        public static VideoDto From(Video v) => new(v.Id, v.Title, v.Description, v.ChannelId, v.ChannelTitle,
-            v.PlaylistId, v.Length, v.PrivacyStatus, v.UploadedAt, v.ProcessedAt);
+        // Texto vazio vira null (e o JSON omite): um Video só com Id e Status não apaga o título já gravado.
+        public static VideoDto From(Video v) => new(v.Id, NullIfEmpty(v.Title), NullIfEmpty(v.Description),
+            NullIfEmpty(v.ChannelId), NullIfEmpty(v.ChannelTitle), NullIfEmpty(v.PlaylistId), NullIfEmpty(v.Length),
+            NullIfEmpty(v.PrivacyStatus), v.UploadedAt, v.ProcessedAt,
+            v.Relevante,
+            v.Status?.ToString().ToLowerInvariant());
+
+        private static string? NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
 
         public Video ToDomain() => new()
         {
@@ -130,6 +138,8 @@ public class SupabaseVideoRepository : IVideoRepository
             ChannelId = channel_id ?? "", ChannelTitle = channel_title ?? "",
             PlaylistId = playlist_id ?? "", Length = length ?? "",
             PrivacyStatus = privacy_status ?? "", UploadedAt = uploaded_at, ProcessedAt = processed_at,
+            Relevante = relevante,
+            Status = Enum.TryParse<VideoStatus>(status, ignoreCase: true, out var st) ? st : null,
             Transcricao = transcricao?.ToDomain(),
             Resumo = resumo?.ToDomain(),
             Categorias = categoria_teologica?
