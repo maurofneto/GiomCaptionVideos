@@ -64,6 +64,31 @@ Falhar parado custa só esperar a correção; processar vídeo errado custa toke
 A migration `20261027120000` converte as regras que existiam (enum) a partir dos valores da própria
 linha, e a `20261027130000` torna a coluna obrigatória.
 
+## Relevância gravada em cada vídeo (#184)
+
+No processamento diário, para cada vídeo das páginas da playlist que a ingestão já percorre, ela grava em `video`
+os dados que o YouTube devolveu (título, descrição, privacidade, duração, data de envio) e o veredito da regra em
+`video.relevante`, seja relevante ou não, com o mesmo `UpsertAsync` do pipeline. Depois processa só os relevantes.
+Não há varredura extra: a playlist inteira é coberta aos poucos, no mesmo caminhar por páginas (com o
+`last_page_token` salvo) que o canal já faz.
+
+- Cada vídeo é atualizado quando a execução passa por ele. Sem fila de processamento, a playlist inteira é percorrida
+  numa execução; com fila grande, o ciclo pode levar alguns dias.
+- `relevante` é recalculado a cada passagem com os dados do momento: título ou privacidade que mudam, ou uma regra
+  editada, mudam a relevância na próxima vez que o vídeo for visitado.
+- Para atualizar tudo agora, por script: zerar o ponto salvo da playlist (`processamento_progresso.last_page_token`
+  do canal) e rodar a ingestão; ela percorre do topo ao fim.
+- Colunas: `relevante`, `status` (`active` | `removed`), `created_at` (inserido em) e `updated_at` (última alteração
+  da linha, por gatilho).
+- O upsert do vídeo vindo do YouTube não leva `processed_at` nem dados do pipeline, e o PostgREST só altera as colunas
+  presentes no corpo: transcrição, resumo, categorias e chunks nunca são tocados. Um vídeo que deixa de ser relevante
+  depois de processado mantém seus dados, só passa a `relevante = false`.
+- Quando o YouTube devolve `Deleted video` no lugar do vídeo, grava-se só `status = removed` (o título e o resto ficam
+  como estavam) e o vídeo não é processado. `Private video` não traz dados reais: não é gravado nem processado.
+- Se a gravação falhar, o canal processa os relevantes normalmente e o erro vai para o Sentry.
+- `video.relevante` é `NULL` até o vídeo ser visitado pela primeira vez depois do deploy. Policy, views, funções
+  `match_*` e painel ainda **não** leem a coluna; isso é a etapa seguinte (#184, PR B2), depois de conferir os dados.
+
 ## Ordem de deploy
 
 Aplicar as migrations **antes** do código novo: com o código novo e sem a coluna, a ingestão não
