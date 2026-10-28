@@ -13,6 +13,7 @@ public class Video
     public string Length { get; set; } = string.Empty;
     public string PrivacyStatus { get; set; } = string.Empty;
     public VideoType Type { get; set; } = VideoType.Upload;
+    public Transmissao Transmissao { get; set; } = Transmissao.Nenhuma;
     public DateTime? UploadedAt { get; set; }
     public DateTime? ProcessedAt { get; set; }
 

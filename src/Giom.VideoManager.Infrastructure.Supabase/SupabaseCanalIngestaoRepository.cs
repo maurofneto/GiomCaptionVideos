@@ -1,7 +1,10 @@
+using Giom.VideoManager.Domain.Exceptions;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System.Net.Http.Headers;
 
 namespace Giom.VideoManager.Infrastructure.Supabase;
@@ -12,9 +15,12 @@ public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
     private readonly HttpClient _http;
     private readonly SupabaseOptions _options;
 
-    public SupabaseCanalIngestaoRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory)
+    private readonly ILogger<SupabaseCanalIngestaoRepository> _logger;
+
+    public SupabaseCanalIngestaoRepository(IOptions<SupabaseOptions> options, IHttpClientFactory httpClientFactory, ILogger<SupabaseCanalIngestaoRepository> logger)
     {
         this._options = options.Value;
+        _logger = logger;
         _http = httpClientFactory.CreateClient("supabase");
     }
 
@@ -29,21 +35,38 @@ public class SupabaseCanalIngestaoRepository : ICanalIngestaoRepository
 
         return rows.Select(r => new CanalIngestaoConfig(
             r.channel_id, r.playlist_id, r.nome, r.mine, r.ativo,
-            ParseRelevanciaTipo(r.relevancia_tipo), r.relevancia_valores,
+            CarregarRegra(r.channel_id, r.regra_relevancia),
             r.max_videos_per_run, r.delay_between_videos_ms, r.delay_between_pages_ms,
-            r.secrets_key, r.privacy_status_filtro)).ToList();
+            r.secrets_key)).ToList();
     }
 
-    private static RelevanciaTipo ParseRelevanciaTipo(string valor) => valor switch
+    /// <summary>
+    /// Interpreta canal_ingestao.regra_relevancia. Regra ausente ou inválida devolve
+    /// <see cref="RegraRelevancia.Nenhuma"/> — nenhum vídeo do canal é considerado relevante naquela execução —
+    /// e registra Error (vira alerta no Sentry). Não há regra anterior pra cair: processar vídeo errado custa
+    /// tokens de IA, parar custa só esperar a correção.
+    /// </summary>
+    private RegraRelevancia CarregarRegra(string channelId, JToken? token)
     {
-        "live_unlisted" => RelevanciaTipo.LiveUnlisted,
-        "titulo_contem" => RelevanciaTipo.TituloContem,
-        _ => throw new InvalidOperationException($"relevancia_tipo desconhecido: {valor}")
-    };
+        if (token is null || token.Type == JTokenType.Null)
+        {
+            _logger.LogError("Canal {ChannelId} sem regra de relevância (regra_relevancia ausente); nenhum vídeo será processado nesta execução.", channelId);
+            return RegraRelevancia.Nenhuma;
+        }
+
+        try
+        {
+            return RegraRelevancia.Parse(token.ToString(Formatting.None));
+        }
+        catch (RegraRelevanciaInvalidaException e)
+        {
+            _logger.LogError("Regra de relevância inválida no canal {ChannelId}; nenhum vídeo será processado nesta execução. Motivo: {Motivo}", channelId, e.Message);
+            return RegraRelevancia.Nenhuma;
+        }
+    }
 
     private record CanalIngestaoRow(
         string channel_id, string? playlist_id, string nome, bool mine, bool ativo,
-        string relevancia_tipo, List<string> relevancia_valores,
         int max_videos_per_run, int delay_between_videos_ms, int delay_between_pages_ms,
-        string secrets_key, string? privacy_status_filtro = null);
+        string secrets_key, JToken? regra_relevancia = null);
 }

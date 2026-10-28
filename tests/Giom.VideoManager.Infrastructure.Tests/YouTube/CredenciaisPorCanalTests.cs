@@ -30,7 +30,7 @@ public class CredenciaisPorCanalTests
     }
 
     private static CanalIngestaoConfig Canal(string channelId, string secretsKey) =>
-        new(channelId, null, secretsKey, true, true, RelevanciaTipo.LiveUnlisted, [], 10, 0, 0, secretsKey);
+        new(channelId, null, secretsKey, true, true, RegraRelevancia.Nenhuma, 10, 0, 0, secretsKey);
 
     private static IConfiguration Config(Dictionary<string, string?> valores) =>
         new ConfigurationBuilder().AddInMemoryCollection(valores).Build();

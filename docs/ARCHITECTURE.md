@@ -93,8 +93,9 @@ total, não 1 por canal × etapa) sem misturar secrets/billing entre canais nos 
 unificada; as demais já eram o mesmo valor ou nem existiam pro Ministério).
 
 **Ingestão** — desde a US #105, um único `Ingestao.Worker` cobre todos os canais via
-`CanalIngestaoVideoHandler` (dado-orientado: `IsRelevant` resolvido por `CanalIngestaoConfig.
-RelevanciaTipo` lido do Supabase, não por código por canal). Os projetos antigos
+`CanalIngestaoVideoHandler` (dado-orientado: `IsRelevant` avalia a regra de relevância do canal,
+`canal_ingestao.regra_relevancia` lida do Supabase — ver [`regra-relevancia.md`](regra-relevancia.md) —,
+não código por canal). Os projetos antigos
 `Instituto.Worker`/`Ministerio.Worker` (com `InstitutoPipelineHandler`/`MinisterioPipelineHandler`,
 que faziam a mesma coisa só que hard-coded por canal) e o processamento monolítico ainda mais
 antigo (`InstitutoVideoHandler`/`MinisterioVideoHandler`/`IVideoProcessador`, legenda→resumo→
