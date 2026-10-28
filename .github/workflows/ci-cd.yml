@@ -38,9 +38,9 @@ jobs:
     name: Build e testes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 9.0.x
 
@@ -60,9 +60,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'master' && 'prod' || 'dev' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 
@@ -105,19 +105,19 @@ jobs:
           - { name: giom-embedding, dockerfile: src/Giom.VideoManager.Embedding.Worker/Dockerfile, service_var: EMBEDDING_SERVICE }
           - { name: giom-orquestracao, dockerfile: src/Giom.VideoManager.Orquestracao.Worker/Dockerfile, service_var: ORQUESTRACAO_SERVICE }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build e push — ${{ matrix.name }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -148,7 +148,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
