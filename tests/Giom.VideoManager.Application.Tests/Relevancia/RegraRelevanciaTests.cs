@@ -8,7 +8,7 @@ namespace Giom.VideoManager.Application.Tests.Relevancia;
 
 /// <summary>
 /// Regra de relevância dinâmica (#180): interpretação do JSON de canal_ingestao.regra_relevancia,
-/// avaliação por campo/operador, grupos E/OU/NÃO e equivalência com o modelo antigo (enum).
+/// avaliação por campo/operador, grupos E/OU/NÃO, as regras reais de produção e o catálogo.
 /// </summary>
 public class RegraRelevanciaTests
 {
@@ -253,46 +253,18 @@ public class RegraRelevanciaTests
         Assert.Throws<RegraRelevanciaInvalidaException>(() => RegraRelevancia.Parse($$"""{"alguma":[{{filhos}}]}"""));
     }
 
-    // ---------- equivalência com o modelo antigo (enum) ----------
-
-    [Theory]
-    [InlineData(VideoType.Live, "unlisted", true)]
-    [InlineData(VideoType.Upload, "unlisted", false)]
-    [InlineData(VideoType.Live, "public", false)]
-    public void DeLegado_LiveUnlisted(VideoType tipo, string privacidade, bool esperado)
-    {
-        var video = CriarVideo();
-        video.Type = tipo;
-        video.PrivacyStatus = privacidade;
-
-        Assert.Equal(esperado, RegraRelevancia.DeLegado(RelevanciaTipo.LiveUnlisted, [], null).Avalia(video));
-    }
-
-    [Theory]
-    [InlineData("Culto de domingo", "public", true)]
-    [InlineData("GIOM ao vivo", "public", true)]
-    [InlineData("Um vídeo qualquer sobre GIOM", "public", false)] // "GIOM*" é prefixo
-    [InlineData("GIOM | Culto", "unlisted", false)]               // filtro de privacidade
-    public void DeLegado_TituloContemComPrefixoEFiltroDePrivacidade(string titulo, string privacidade, bool esperado)
-    {
-        var video = CriarVideo(titulo);
-        video.PrivacyStatus = privacidade;
-
-        var regra = RegraRelevancia.DeLegado(RelevanciaTipo.TituloContem, ["CULTO", "GIOM*"], "public");
-
-        Assert.Equal(esperado, regra.Avalia(video));
-    }
+    // ---------- regras reais de produção ----------
 
     /// <summary>
     /// JSONs gerados pela migration 20261027120000 a partir das linhas reais de canal_ingestao (Instituto:
-    /// live_unlisted; Ministério: titulo_contem ["GIOM*"] + filtro public). Têm que se comportar como a
-    /// regra antiga correspondente.
+    /// live_unlisted; Ministério: título começa com GIOM + público). Note a ordem das chaves ("op" antes de
+    /// "campo"): o jsonb do Postgres não preserva a ordem de inserção.
     /// </summary>
     [Theory]
     [InlineData("Culto", VideoType.Live, "unlisted", true)]
     [InlineData("Culto", VideoType.Upload, "unlisted", false)]
     [InlineData("Culto", VideoType.Live, "public", false)]
-    public void RegraGeradaPelaMigration_Instituto_EquivaleAoLiveUnlisted(string titulo, VideoType tipo, string privacidade, bool esperado)
+    public void RegraGeradaPelaMigration_Instituto_SoLiveNaoListada(string titulo, VideoType tipo, string privacidade, bool esperado)
     {
         const string json = """{"todas": [{"op": "igual", "campo": "tipo", "valor": "live"}, {"op": "igual", "campo": "privacidade", "valor": "unlisted"}]}""";
         var video = CriarVideo(titulo);
@@ -300,20 +272,56 @@ public class RegraRelevanciaTests
         video.PrivacyStatus = privacidade;
 
         Assert.Equal(esperado, Avalia(json, video));
-        Assert.Equal(RegraRelevancia.DeLegado(RelevanciaTipo.LiveUnlisted, [], null).Avalia(video), Avalia(json, video));
     }
 
     [Theory]
     [InlineData("GIOM | Culto de domingo", "public", true)]
     [InlineData("Um vídeo qualquer sobre GIOM", "public", false)]
     [InlineData("GIOM | Culto de domingo", "unlisted", false)]
-    public void RegraGeradaPelaMigration_Ministerio_EquivaleAoTituloContemComFiltro(string titulo, string privacidade, bool esperado)
+    public void RegraGeradaPelaMigration_Ministerio_TituloComecaComGiomESoPublico(string titulo, string privacidade, bool esperado)
     {
         const string json = """{"todas": [{"alguma": [{"op": "comeca_com", "campo": "titulo", "valor": "GIOM"}]}, {"op": "igual", "campo": "privacidade", "valor": "public"}]}""";
         var video = CriarVideo(titulo);
         video.PrivacyStatus = privacidade;
 
         Assert.Equal(esperado, Avalia(json, video));
-        Assert.Equal(RegraRelevancia.DeLegado(RelevanciaTipo.TituloContem, ["GIOM*"], "public").Avalia(video), Avalia(json, video));
+    }
+
+    [Fact]
+    public void Nenhuma_NaoConsideraNenhumVideoRelevante() =>
+        Assert.False(RegraRelevancia.Nenhuma.Avalia(CriarVideo()));
+
+    // ---------- catálogo ----------
+
+    [Fact]
+    public void Catalogo_ExpoeOsSeteCamposComRotuloEOperadores()
+    {
+        var nomes = CatalogoRelevancia.Campos.Select(c => c.Nome).ToList();
+
+        Assert.Equal(["titulo", "descricao", "privacidade", "tipo", "transmissao", "duracao_segundos", "enviado_em"], nomes);
+        Assert.All(CatalogoRelevancia.Campos, c =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(c.Rotulo));
+            Assert.NotEmpty(c.Operadores);
+            Assert.All(c.Operadores, o => Assert.False(string.IsNullOrWhiteSpace(o.Rotulo)));
+        });
+    }
+
+    [Fact]
+    public void Catalogo_ListasFechadasTemValoresPermitidos_OutrosTiposNao()
+    {
+        Assert.All(CatalogoRelevancia.Campos, c =>
+        {
+            if (c.Tipo == TipoValorRelevancia.Lista) Assert.NotEmpty(c.ValoresPermitidos);
+            else Assert.Empty(c.ValoresPermitidos);
+        });
+    }
+
+    [Fact]
+    public void Catalogo_TodoValorPermitidoDeListaFechadaEAceitoPeloParser()
+    {
+        foreach (var campo in CatalogoRelevancia.Campos.Where(c => c.Tipo == TipoValorRelevancia.Lista))
+            foreach (var valor in campo.ValoresPermitidos)
+                Assert.NotNull(RegraRelevancia.Parse($$"""{"campo":"{{campo.Nome}}","op":"igual","valor":"{{valor}}"}"""));
     }
 }

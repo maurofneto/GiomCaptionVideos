@@ -12,58 +12,15 @@ namespace Giom.VideoManager.Domain.ValueObjects;
 /// { "nao":    nó }                                // negação
 /// { "campo": "titulo", "op": "comeca_com", "valor": "GIOM" }   // condição
 /// </code>
-/// Campos: titulo, descricao, privacidade, tipo, transmissao, duracao_segundos, enviado_em.
-/// Operadores por campo — texto (titulo, descricao): contem, comeca_com, termina_com, igual, em;
-/// listas fechadas (privacidade, tipo, transmissao): igual, em; duracao_segundos: igual, maior,
-/// maior_igual, menor, menor_igual, entre; enviado_em: antes, depois, entre. Valor: texto, número
-/// ou data "yyyy-MM-dd"; "em" recebe lista; "entre" recebe [de, até]. Valida tudo ao carregar, pra
-/// uma regra errada falhar aqui (e cair na regra anterior) em vez de errar vídeo a vídeo.
+/// Campos, operadores e valores permitidos vêm de <see cref="CatalogoRelevancia"/>. Valor: texto, número
+/// ou data "yyyy-MM-dd"; "em" recebe lista; "entre" recebe [de, até]. Valida tudo ao carregar, pra uma
+/// regra errada falhar aqui em vez de errar vídeo a vídeo. As chaves podem vir em qualquer ordem (o jsonb
+/// do Postgres não preserva a ordem).
 /// </summary>
 public static class RegraRelevanciaParser
 {
     private const int ProfundidadeMaxima = 8;
     private const int NosMaximos = 100;
-
-    private static readonly Dictionary<string, CampoRelevancia> Campos = new()
-    {
-        ["titulo"] = CampoRelevancia.Titulo,
-        ["descricao"] = CampoRelevancia.Descricao,
-        ["privacidade"] = CampoRelevancia.Privacidade,
-        ["tipo"] = CampoRelevancia.Tipo,
-        ["transmissao"] = CampoRelevancia.Transmissao,
-        ["duracao_segundos"] = CampoRelevancia.DuracaoSegundos,
-        ["enviado_em"] = CampoRelevancia.EnviadoEm
-    };
-
-    private static readonly Dictionary<string, OperadorRelevancia> Operadores = new()
-    {
-        ["contem"] = OperadorRelevancia.Contem,
-        ["comeca_com"] = OperadorRelevancia.ComecaCom,
-        ["termina_com"] = OperadorRelevancia.TerminaCom,
-        ["igual"] = OperadorRelevancia.Igual,
-        ["em"] = OperadorRelevancia.Em,
-        ["maior"] = OperadorRelevancia.Maior,
-        ["maior_igual"] = OperadorRelevancia.MaiorIgual,
-        ["menor"] = OperadorRelevancia.Menor,
-        ["menor_igual"] = OperadorRelevancia.MenorIgual,
-        ["entre"] = OperadorRelevancia.Entre,
-        ["antes"] = OperadorRelevancia.Antes,
-        ["depois"] = OperadorRelevancia.Depois
-    };
-
-    private static readonly OperadorRelevancia[] OperadoresTexto =
-        [OperadorRelevancia.Contem, OperadorRelevancia.ComecaCom, OperadorRelevancia.TerminaCom, OperadorRelevancia.Igual, OperadorRelevancia.Em];
-    private static readonly OperadorRelevancia[] OperadoresLista = [OperadorRelevancia.Igual, OperadorRelevancia.Em];
-    private static readonly OperadorRelevancia[] OperadoresNumero =
-        [OperadorRelevancia.Igual, OperadorRelevancia.Maior, OperadorRelevancia.MaiorIgual, OperadorRelevancia.Menor, OperadorRelevancia.MenorIgual, OperadorRelevancia.Entre];
-    private static readonly OperadorRelevancia[] OperadoresData = [OperadorRelevancia.Antes, OperadorRelevancia.Depois, OperadorRelevancia.Entre];
-
-    private static readonly Dictionary<CampoRelevancia, string[]> ValoresPermitidos = new()
-    {
-        [CampoRelevancia.Privacidade] = ["public", "unlisted", "private"],
-        [CampoRelevancia.Tipo] = ["upload", "live", "short", "premiere"],
-        [CampoRelevancia.Transmissao] = ["nenhuma", "agendada", "ao_vivo", "encerrada"]
-    };
 
     public static RegraRelevancia Parse(string json)
     {
@@ -140,41 +97,36 @@ public static class RegraRelevanciaParser
         var nomeCampo = LerTexto(el.GetProperty("campo"), caminho + ".campo");
         var nomeOp = LerTexto(el.GetProperty("op"), caminho + ".op");
 
-        if (!Campos.TryGetValue(nomeCampo, out var campo))
-            throw new RegraRelevanciaInvalidaException($"{caminho}: campo desconhecido \"{nomeCampo}\" (use {string.Join(", ", Campos.Keys)}).");
-        if (!Operadores.TryGetValue(nomeOp, out var op))
-            throw new RegraRelevanciaInvalidaException($"{caminho}: operador desconhecido \"{nomeOp}\".");
+        var campo = CatalogoRelevancia.ObterCampo(nomeCampo)
+            ?? throw new RegraRelevanciaInvalidaException(
+                $"{caminho}: campo desconhecido \"{nomeCampo}\" (use {string.Join(", ", CatalogoRelevancia.Campos.Select(c => c.Nome))}).");
 
-        var permitidos = campo switch
-        {
-            CampoRelevancia.Titulo or CampoRelevancia.Descricao => OperadoresTexto,
-            CampoRelevancia.DuracaoSegundos => OperadoresNumero,
-            CampoRelevancia.EnviadoEm => OperadoresData,
-            _ => OperadoresLista
-        };
-        if (!permitidos.Contains(op))
+        var operador = CatalogoRelevancia.ObterOperador(nomeOp)
+            ?? throw new RegraRelevanciaInvalidaException($"{caminho}: operador desconhecido \"{nomeOp}\".");
+        if (campo.Operadores.All(o => o.Operador != operador.Operador))
             throw new RegraRelevanciaInvalidaException($"{caminho}: o campo \"{nomeCampo}\" não aceita o operador \"{nomeOp}\".");
 
         var valor = el.GetProperty("valor");
         var pathValor = caminho + ".valor";
+        var op = operador.Operador;
 
-        switch (campo)
+        return campo.Tipo switch
         {
-            case CampoRelevancia.DuracaoSegundos:
-                return new CondicaoNumero(campo, op, LerNumeros(valor, op, pathValor));
-            case CampoRelevancia.EnviadoEm:
-                return new CondicaoData(campo, op, LerDatas(valor, op, pathValor));
-            default:
-                var textos = LerTextos(valor, op, pathValor);
-                if (ValoresPermitidos.TryGetValue(campo, out var validos))
-                {
-                    textos = textos.Select(t => t.ToLowerInvariant()).ToList();
-                    var invalido = textos.FirstOrDefault(t => !validos.Contains(t));
-                    if (invalido is not null)
-                        throw new RegraRelevanciaInvalidaException($"{pathValor}: \"{invalido}\" não é valor de \"{nomeCampo}\" (use {string.Join(", ", validos)}).");
-                }
-                return new CondicaoTexto(campo, op, textos);
-        }
+            TipoValorRelevancia.Numero => new CondicaoNumero(campo.Campo, op, LerNumeros(valor, op, pathValor)),
+            TipoValorRelevancia.Data => new CondicaoData(campo.Campo, op, LerDatas(valor, op, pathValor)),
+            TipoValorRelevancia.Lista => new CondicaoTexto(campo.Campo, op, LerValoresDaLista(campo, LerTextos(valor, op, pathValor), pathValor)),
+            _ => new CondicaoTexto(campo.Campo, op, LerTextos(valor, op, pathValor))
+        };
+    }
+
+    private static List<string> LerValoresDaLista(CampoCatalogo campo, List<string> textos, string caminho)
+    {
+        var normalizados = textos.Select(t => t.ToLowerInvariant()).ToList();
+        var invalido = normalizados.FirstOrDefault(t => !campo.ValoresPermitidos.Contains(t));
+        if (invalido is not null)
+            throw new RegraRelevanciaInvalidaException(
+                $"{caminho}: \"{invalido}\" não é valor de \"{campo.Nome}\" (use {string.Join(", ", campo.ValoresPermitidos)}).");
+        return normalizados;
     }
 
     private static string LerTexto(JsonElement el, string caminho) =>

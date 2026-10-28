@@ -39,10 +39,12 @@ using Serilog;
 var canaisDeTeste = new[]
 {
     new CanalIngestaoConfig(FakeVideoSource.ChannelIdInstituto, null, "Instituto Giom (Teste E2E)", Mine: true, Ativo: true,
-        RelevanciaTipo: RelevanciaTipo.LiveUnlisted, RelevanciaValores: [], MaxVideosPerRun: 5,
+        Regra: RegraRelevancia.Parse("""{"todas":[{"campo":"tipo","op":"igual","valor":"live"},{"campo":"privacidade","op":"igual","valor":"unlisted"}]}"""),
+        MaxVideosPerRun: 5,
         DelayBetweenVideosMs: 0, DelayBetweenPagesMs: 0, SecretsKey: "teste-instituto"),
     new CanalIngestaoConfig(FakeVideoSource.ChannelIdMinisterio, null, "Ministério Giom (Teste E2E)", Mine: false, Ativo: true,
-        RelevanciaTipo: RelevanciaTipo.TituloContem, RelevanciaValores: ["CULTO", "GIOM*", "MINISTÉRIO"], MaxVideosPerRun: 5,
+        Regra: RegraRelevancia.Parse("""{"alguma":[{"campo":"titulo","op":"contem","valor":"CULTO"},{"campo":"titulo","op":"comeca_com","valor":"GIOM"},{"campo":"titulo","op":"contem","valor":"MINISTÉRIO"}]}"""),
+        MaxVideosPerRun: 5,
         DelayBetweenVideosMs: 0, DelayBetweenPagesMs: 0, SecretsKey: "teste-ministerio"),
 };
 

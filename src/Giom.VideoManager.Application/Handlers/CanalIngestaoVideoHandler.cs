@@ -1,5 +1,4 @@
 using Giom.VideoManager.Domain.Entities;
-using Giom.VideoManager.Domain.Enums;
 using Giom.VideoManager.Domain.Interfaces;
 using Giom.VideoManager.Domain.ValueObjects;
 
@@ -8,7 +7,7 @@ namespace Giom.VideoManager.Application.Handlers;
 /// <summary>
 /// Único IVideoHandler pra qualquer canal (US #105) — substitui InstitutoPipelineHandler/
 /// MinisterioPipelineHandler, que já eram idênticos em HandleAsync, só IsRelevant divergia. A
-/// regra de relevância agora é dado (<see cref="CanalIngestaoConfig.RelevanciaTipo"/>), não
+/// regra de relevância agora é dado (<see cref="CanalIngestaoConfig.Regra"/>), não
 /// código — zero conhecimento de "Instituto" ou "Ministério" aqui. Construído manualmente (não
 /// resolvido via DI) uma vez por canal lido do banco, ver AddIngestaoMultiCanal na Composition —
 /// não dá pra ser um singleton comum, a quantidade de instâncias só se sabe em runtime.
@@ -21,13 +20,9 @@ public class CanalIngestaoVideoHandler(
     ITracingService tracingService)
     : IVideoHandler
 {
-    // Config First (#180): a relevância é uma regra dinâmica por canal (canal_ingestao.regra_relevancia),
-    // já interpretada pelo repositório. Canal sem regra cai no modelo antigo (enum + valores + filtro de
-    // privacidade), convertido pra mesma árvore — o comportamento anterior é preservado.
-    private readonly RegraRelevancia _regra = canal.Regra
-        ?? RegraRelevancia.DeLegado(canal.RelevanciaTipo, canal.RelevanciaValores, canal.PrivacyStatusFiltro);
-
-    public bool IsRelevant(Video video) => _regra.Avalia(video);
+    // Config First (#180): a relevância é a regra dinâmica do canal (canal_ingestao.regra_relevancia), já
+    // interpretada pelo repositório. Canal sem regra válida chega aqui com RegraRelevancia.Nenhuma.
+    public bool IsRelevant(Video video) => canal.Regra.Avalia(video);
 
     // Bug #120: sem isso, todo vídeo relevante era republicado em TODA execução, mesmo já
     // tendo concluído o pipeline inteiro antes — o Ingestao.Worker reprocessava
